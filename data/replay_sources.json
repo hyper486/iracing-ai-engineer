@@ -1,0 +1,65 @@
+{
+  "manifest_version": "replay-source-v1",
+  "observed_at_utc": "2026-08-07T13:23:29Z",
+  "sources": [
+    {
+      "asset_id": "endurance-rpy-a",
+      "source_kind": "iracing_rpy",
+      "private_locator_reference": "data/private/replay_sources.local.json",
+      "collection_method": "remote_read_only_metadata",
+      "copied_to_workspace": false,
+      "integrity": {
+        "byte_size": 11782056972,
+        "sha256": "d5d6ac61fcb04f51ab45e62e89f1f4fd81405eb5e051445a4be6b4044f3d421b",
+        "creation_time_local": "2025-10-19T12:50:54.0275701+08:00",
+        "last_write_time_local": "2025-10-19T12:51:00.7846560+08:00"
+      },
+      "verification": {
+        "verified_at_utc": "2026-08-07T13:23:29Z",
+        "method": "PowerShell Get-Item, Get-FileHash SHA256, and read-only FileStream prefix",
+        "hash_algorithm": "SHA-256",
+        "byte_count_verified": true,
+        "sha256_verified": true,
+        "header_bytes_read": 128
+      },
+      "signature": {
+        "extension": ".rpy",
+        "prefix_hex": "59 4c 50 52",
+        "prefix_ascii": "YLPR",
+        "claimed_format": "iRacing replay",
+        "container_version": null,
+        "structural_validation": "NOT_PERFORMED",
+        "native_load_validation": "NOT_PERFORMED"
+      },
+      "compatibility": {
+        "direct_ibt_compatible": false,
+        "direct_file_adapter_route": "NONE",
+        "replay_sdk_fields_verified": false,
+        "telemetry_equivalent_to_live_ibt": false
+      },
+      "privacy_security": {
+        "trust_level": "untrusted_binary",
+        "personal_metadata_possible": true,
+        "direct_identifiers_present_in_public_manifest": false,
+        "publication_status": "PSEUDONYMIZED_METADATA",
+        "linkability_risk": "the content SHA-256 can correlate copies of the same private replay",
+        "redaction_policy": "keep filename, subsession id, user name, and absolute path in the gitignored private locator only",
+        "share_requires_redaction_review": true
+      },
+      "decision": {
+        "disposition": "REFERENCE_ONLY",
+        "status": "REPLAY_SDK_PROBE_REQUIRED",
+        "allowed_uses": [
+          "integrity-preserved reference",
+          "native iRacing playback for validation only"
+        ],
+        "blocked_uses": [
+          "direct IBT parsing",
+          "driving-coach ground truth",
+          "strategy-model ground truth"
+        ],
+        "next_gate": "REPLAY_UI_SDK_PROBE"
+      }
+    }
+  ]
+}

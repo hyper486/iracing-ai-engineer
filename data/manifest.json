@@ -1,0 +1,68 @@
+{
+  "common_ibt_contract": {
+    "field_names_sha256": "a2de17fce02ea745541d1dbe91b8d61c631e4b6efc813f9c983a5d4ef66eb7f2",
+    "format_version": 2,
+    "record_size_bytes": 1067,
+    "schema_sha256": "6085fd35487871a1553c3edcc24c4818943d076afcf17968fe8d00ba6351fe8d",
+    "tick_rate_hz": 60,
+    "variable_count": 277
+  },
+  "files": [
+    {
+      "byte_size": 18968740,
+      "file_name": "mclaren570sgt4_nurburgring combined 2025-05-24 23-28-09.ibt",
+      "record_count": 17663,
+      "sha256": "3538410ebefe0c907969f104b132e759d362a75b2ef9a205f9187e2a50c1d724",
+      "source_mtime_utc": "2025-05-25T06:33:04.268674Z"
+    },
+    {
+      "byte_size": 14401135,
+      "file_name": "mclaren570sgt4_nurburgring combined 2025-05-24 23-34-13.ibt",
+      "record_count": 13410,
+      "sha256": "b1f8c621cd67b47a51d36de2c1d21052ed6be203fc81ac3aea096caeeffc24a7",
+      "source_mtime_utc": "2025-05-25T06:37:57.086524Z"
+    },
+    {
+      "byte_size": 30804368,
+      "file_name": "mclaren570sgt4_nurburgring combined 2025-05-24 23-38-15.ibt",
+      "record_count": 28776,
+      "sha256": "74e09319f05db81d077fdcc997e36bb503e974f2395be98597c11b0a1c40cde0",
+      "source_mtime_utc": "2025-05-25T06:46:15.323322Z"
+    },
+    {
+      "byte_size": 85473151,
+      "file_name": "mclaren570sgt4_nurburgring combined 2025-05-24 23-49-52.ibt",
+      "record_count": 80012,
+      "sha256": "f7c4925cd064ee1d364ddbf0d45dad3cf7cb13859aa36eb955d09bcaf528547e",
+      "source_mtime_utc": "2025-05-25T07:12:06.356666Z"
+    }
+  ],
+  "manifest_version": 1,
+  "primary_sample": "mclaren570sgt4_nurburgring combined 2025-05-24 23-49-52.ibt",
+  "privacy": {
+    "driver_info_exported": false,
+    "raw_files_gitignored": true
+  },
+  "provisional_replay_receipt": {
+    "canonical_schema_sha256": "9ad5e678a6f6aebd21df53073a29ecb1902bfb5636616f5e1f5af7531187fb1a",
+    "clean_driving_lap_count": 0,
+    "config_sha256": "f2e2048cc0a712ceceede0b3c3380d647c59122414f8fc981492d17bc86e2b9e",
+    "event_pipeline_mode": "batch-v1",
+    "events_sha256": "f0e5865e313fa13cffff10e38f9a03003c0e627a10766bc4e5fb6fa96de7c8ad",
+    "human_approved": false,
+    "lap_algorithm_version": "distance-wrap-v2",
+    "normalized_frames_sha256": "37d516678bc4c5eb4306c76ee06b7c47231f8db66092b789687445777d8e4a24",
+    "quality_profile_version": "stage0-quality-v2",
+    "reader_contract_version": "ibt-reader-v2",
+    "replay_contract_version": "telemetry-replay-v2",
+    "replay_sha256": "df1002d5f3fd4f850c5f80cc184446057daaf1aa7cebf6e57b01793cfd411431",
+    "results_sha256": "0416512a73659f8ac06aea5223ded9e7d5e53d9c9e20941c762c86d1fa179f11",
+    "status": "CANDIDATE_NOT_GOLDEN",
+    "structurally_complete_lap_count": 1
+  },
+  "source": {
+    "copy_mode": "read_only_over_ssh",
+    "description": "Configured iRacing Windows sidecar telemetry directory",
+    "frozen_on": "2026-08-07"
+  }
+}

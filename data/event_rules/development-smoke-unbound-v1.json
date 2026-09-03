@@ -1,0 +1,22 @@
+{
+  "contract_version": "endurance-event-rules-v1",
+  "official_event_rules": false,
+  "profile_id": "development-smoke-unbound-v1",
+  "profile_status": "DEVELOPMENT_SMOKE",
+  "provenance": "USER_RULE",
+  "scope": {
+    "car": "UNBOUND_DEVELOPMENT_SMOKE",
+    "event": "UNBOUND_DEVELOPMENT_SMOKE",
+    "track": "UNBOUND_DEVELOPMENT_SMOKE"
+  },
+  "selection_policy": "LATEST_FEASIBLE_FUEL_ONLY",
+  "service_rules": {
+    "fuel_tire_service_timing": "SEQUENTIAL",
+    "no_tire_service_allowed": true,
+    "pit_lane_loss_s": 25.0,
+    "refuel_rate_l_per_s": 2.0,
+    "tank_capacity_l": 120.0,
+    "tire_change_required": false,
+    "tire_change_time_s": 30.0
+  }
+}

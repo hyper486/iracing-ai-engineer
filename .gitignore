@@ -1,0 +1,45 @@
+.DS_Store
+.pytest_cache/
+.ruff_cache/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Credentials and machine-local configuration must never enter the public repo.
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+credentials/
+secrets/
+
+# Local telemetry and generated analytical artifacts.
+data/raw/
+data/derived/
+data/private/
+artifacts/
+deliverable/
+receipts/
+state/
+*.ibt
+*.jsonl
+*.parquet
+*.etl
+*.dmp
+*.dump
+*.pcap
+*.pcapng
+*.trace
+*.log
+
+# Generated packages and local build output.
+build/
+dist/
+*.whl
+*.zip
+
+# Jupyter transient files.
+.ipynb_checkpoints/

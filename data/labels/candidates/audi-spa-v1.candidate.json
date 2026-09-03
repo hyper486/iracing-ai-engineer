@@ -1,0 +1,176 @@
+{
+  "artifact_sha256": "7cbf488e74220df163b23c6e79544ac28654adf91158d035ee412faced14d8dc",
+  "candidate_basis": {
+    "driving_context_sha256": "0482b37b5968f1dbfe9978ec074482cb6177ca86fd45dd1640b1e1489ccf817b",
+    "grid_step_mm": 1000,
+    "input_kind": "ibt",
+    "input_provenance_sha256": "c60ffe00a464474f7b19ef6aac7c0a1a23b68a853143cfc9d216c890662603f9",
+    "labeled_lap_ordinal": 11,
+    "model_output_sha256": "f7a7165b19dfa08f1576b3f2e495cfbedb2011aa32317b91d3eb725967af3195",
+    "model_semantic_sha256": "74f6f52d5743260cbdcedaa59a0e0620afb1d8c8987195009e31f7cb86399df6",
+    "normalized_samples_sha256": "f38d336a4d647886c0a4b8fce32fc4d53ba688b26b7c46d70e780e85c012b07e",
+    "pipeline_sha256": "f499f2dbb34fafbe5a1428c3336f7370fbd29bbf0154e701c4301767bc93c90e",
+    "session_id": "public-fixture-2023-12-race",
+    "source_data_sha256": "754d14e6e2870eb00d42368e36c7a15495cb68bfd5f829ab08665d0f95fc7f36",
+    "source_id": "public-audi-r8-evo2-spa",
+    "status": "CANDIDATE_NOT_GOLDEN"
+  },
+  "candidate_payload_sha256": "f30ea24e0b52400b704e91c1ae385f8d903d9d2ff6ec67e6c2039baa1690cdfa",
+  "contract_version": "driving-labels-v1",
+  "human_labels": [],
+  "label_set_id": "audir8lmsevo2gt3-spa-gp-v1",
+  "labels_content_sha256": null,
+  "proposals": [
+    {
+      "detected_window": {
+        "end_mm": 571000,
+        "start_mm": 258000,
+        "wraps_start_finish": false
+      },
+      "events": {
+        "apex_mm": 391000,
+        "brake_onset_mm": 266000,
+        "throttle_pickup_mm": 396000
+      },
+      "model_corner_id": "C01",
+      "ordinal": 1,
+      "proposal_id": "candidate:c01"
+    },
+    {
+      "detected_window": {
+        "end_mm": 2596000,
+        "start_mm": 2252000,
+        "wraps_start_finish": false
+      },
+      "events": {
+        "apex_mm": 2410000,
+        "brake_onset_mm": 2253000,
+        "throttle_pickup_mm": 2413000
+      },
+      "model_corner_id": "C02",
+      "ordinal": 2,
+      "proposal_id": "candidate:c02"
+    },
+    {
+      "detected_window": {
+        "end_mm": 3191000,
+        "start_mm": 2879000,
+        "wraps_start_finish": false
+      },
+      "events": {
+        "apex_mm": 3059000,
+        "brake_onset_mm": 2888000,
+        "throttle_pickup_mm": 3062000
+      },
+      "model_corner_id": "C03",
+      "ordinal": 3,
+      "proposal_id": "candidate:c03"
+    },
+    {
+      "detected_window": {
+        "end_mm": 3330000,
+        "start_mm": 3191000,
+        "wraps_start_finish": false
+      },
+      "events": {
+        "apex_mm": 3262000,
+        "brake_onset_mm": 3190000,
+        "throttle_pickup_mm": 3263000
+      },
+      "model_corner_id": "C04",
+      "ordinal": 4,
+      "proposal_id": "candidate:c04"
+    },
+    {
+      "detected_window": {
+        "end_mm": 4010000,
+        "start_mm": 3672000,
+        "wraps_start_finish": false
+      },
+      "events": {
+        "apex_mm": 3852000,
+        "brake_onset_mm": 3678000,
+        "throttle_pickup_mm": 3855000
+      },
+      "model_corner_id": "C05",
+      "ordinal": 5,
+      "proposal_id": "candidate:c05"
+    },
+    {
+      "detected_window": {
+        "end_mm": 4670000,
+        "start_mm": 4323000,
+        "wraps_start_finish": false
+      },
+      "events": {
+        "apex_mm": 4474000,
+        "brake_onset_mm": 4322000,
+        "throttle_pickup_mm": 4475000
+      },
+      "model_corner_id": "C06",
+      "ordinal": 6,
+      "proposal_id": "candidate:c06"
+    },
+    {
+      "detected_window": {
+        "end_mm": 5088000,
+        "start_mm": 4796000,
+        "wraps_start_finish": false
+      },
+      "events": {
+        "apex_mm": 4908000,
+        "brake_onset_mm": 4796000,
+        "throttle_pickup_mm": 4922000
+      },
+      "model_corner_id": "C07",
+      "ordinal": 7,
+      "proposal_id": "candidate:c07"
+    },
+    {
+      "detected_window": {
+        "end_mm": 6925000,
+        "start_mm": 6525000,
+        "wraps_start_finish": false
+      },
+      "events": {
+        "apex_mm": 6745000,
+        "brake_onset_mm": 6525000,
+        "throttle_pickup_mm": 6703000
+      },
+      "model_corner_id": "C08",
+      "ordinal": 8,
+      "proposal_id": "candidate:c08"
+    }
+  ],
+  "review": {
+    "attestation": null,
+    "authenticity_status": null,
+    "candidate_hidden_during_first_pass": null,
+    "candidate_payload_sha256": null,
+    "decision_reason": null,
+    "evidence_artifact_sha256": null,
+    "labels_content_sha256": null,
+    "method": null,
+    "reviewed_at_utc": null,
+    "reviewer_id": null,
+    "status": "PENDING_HUMAN_REVIEW"
+  },
+  "review_sha256": null,
+  "revision": 1,
+  "subject": {
+    "car_key": "audir8lmsevo2gt3",
+    "condition_scope": "DRY_UNMATCHED_SMOKE_ONLY",
+    "coordinate_system": "lap-distance-from-start-finish-v1",
+    "layout_key": "grand-prix-pit",
+    "track_key": "spa",
+    "track_length_mm": 6930000
+  },
+  "tolerance_policy": {
+    "apex_max_mm": 15000,
+    "boundary_max_mm": 20000,
+    "brake_onset_max_mm": 10000,
+    "derivation": "REPEATED_OR_INDEPENDENT_BLIND_REVIEW",
+    "minimum_mm": 1000,
+    "throttle_pickup_max_mm": 15000
+  }
+}

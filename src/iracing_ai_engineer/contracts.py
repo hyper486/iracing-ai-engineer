@@ -1,0 +1,10 @@
+"""Versioned contracts shared by readers, quality checks, and replay receipts."""
+
+READER_CONTRACT_VERSION = "ibt-reader-v2"
+NORMALIZATION_PROFILE_VERSION = "normalized-sdk-adapter-v3"
+LAP_ALGORITHM_VERSION = "distance-wrap-v2"
+QUALITY_PROFILE_VERSION = "stage0-quality-v2"
+REPLAY_CONTRACT_VERSION = "telemetry-replay-v2"
+SDK_PROBE_CONTRACT_VERSION = "sdk-probe-v1"
+FUEL_MODEL_VERSION = "fuel-strategy-v1"
+SHADOW_REPORT_CONTRACT_VERSION = "shadow-report-v2"

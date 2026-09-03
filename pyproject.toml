@@ -1,0 +1,56 @@
+[project]
+name = "iracing-ai-engineer"
+version = "0.1.0"
+description = "Replay-first telemetry foundation for a local iRacing race engineer."
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "matplotlib>=3.9,<4",
+  "numpy>=2,<3",
+  "polars>=1,<2",
+  "pyirsdk==1.3.6",
+  "pyyaml>=6,<7",
+]
+
+[project.scripts]
+iracing-aie = "iracing_ai_engineer.cli:main"
+
+[dependency-groups]
+dev = [
+  "ipykernel>=6,<8",
+  "nbclient>=0.10,<1",
+  "nbformat>=5.10,<6",
+  "pytest>=8,<9",
+  "ruff>=0.12,<1",
+]
+
+[build-system]
+requires = ["hatchling==1.31.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/iracing_ai_engineer"]
+
+[tool.uv]
+link-mode = "copy"
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.ruff]
+extend-exclude = ["notebooks/*.ipynb"]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+# These are retained cross-host deployment/evidence programs. Their internal
+# structure is security-reviewed and exercised on macOS; broad style rewrites
+# are intentionally deferred until they can be rerun on that platform.
+[tool.ruff.lint.per-file-ignores]
+"scripts/macos/*.py" = ["B904", "E501", "E731", "SIM105", "UP022"]
+"tests/test_r8_macos_live_return.py" = ["E501", "SIM117", "UP022"]
+"tests/*.py" = ["SIM117"]
