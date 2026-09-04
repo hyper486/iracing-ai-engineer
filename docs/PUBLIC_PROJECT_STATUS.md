@@ -19,20 +19,36 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Corner diagnosis | Implemented for repeated comparable evidence | Curb/risk claims remain blocked without trusted labels. |
 | Deterministic reports | Implemented | JSON and script-free HTML outputs preserve provenance and limitations. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
-| Authentic local `SDK_LIVE` acceptance | Pending | No real live run is represented as accepted yet. |
+| Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
+| Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | The canary was out of car, so strategy and driving capabilities correctly remained blocked. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Current blocker
+## Current live boundary
 
-The maintainer's installed iRacing UI reaches Easy Anti-Cheat but the simulator
-process is not created. Repairs and several bounded conflict-isolation attempts
-have not yet changed that result. Host-specific logs and traces are retained
-privately because they can expose machine and remote-access details.
+Easy Anti-Cheat and the simulator now start normally. A privacy-safe summary of
+the first real shared-memory canary is:
 
-This blocker does not change the product goal and does not justify synthetic
-data being relabeled as live. Final acceptance still requires:
+- `SourceKind=SDK_LIVE`, full simulator mode and a 60 Hz SDK tick rate;
+- 294 persisted frames across a five-second default-cadence capture;
+- six accounted dropped ticks, with no conflicting duplicates, stale events,
+  schema changes or session resets;
+- explicit `OUT_OF_CAR_OR_REPLAY_VIEW` context, so no race-strategy or driving
+  readiness claim was admitted.
 
-1. An authentic `SourceKind=SDK_LIVE` capture.
+The collector cadence was also corrected so `poll_seconds` is a minimum
+read-start interval rather than extra sleep added after serialization. The
+default 10 ms setting now tracks the native 60 Hz source during the same
+full-field, durable-write path without requiring a 1 ms busy-poll setting.
+
+The next blocker is human-driven evidence: configure the physical driving
+inputs, enter the car, then record a sufficiently long clean run and pit
+sequence. Host-specific telemetry, logs and device details remain private.
+
+This boundary does not change the product goal and does not justify an
+out-of-car canary being relabeled as end-to-end acceptance. Final acceptance
+still requires:
+
+1. An authentic, human-driven on-track `SourceKind=SDK_LIVE` capture.
 2. Object-exact local admission with advisor-only safety intact.
 3. Supported stint/fuel/pit strategy rather than an unsupported guess.
 4. Repeated corner evidence supporting at least one driving diagnosis.

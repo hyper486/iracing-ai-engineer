@@ -23,9 +23,11 @@ practice opportunity.
 - Advisor timelines, shadow speech policy and deterministic session reports.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
 
-The first authentic end-to-end `SourceKind=SDK_LIVE` acceptance run is still
-pending. The maintainer's current blocker is simulator startup through EAC, not
-a passing live-data claim. See [the public project status](docs/PUBLIC_PROJECT_STATUS.md).
+An authentic `SourceKind=SDK_LIVE` transport canary now reaches the running
+simulator's shared memory and completes a sealed collection. End-to-end
+acceptance is still pending a human-driven, on-track run with enough laps and
+pit evidence for strategy and driving advice. See
+[the public project status](docs/PUBLIC_PROJECT_STATUS.md).
 
 ## Quick start
 

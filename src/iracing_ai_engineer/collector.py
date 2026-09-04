@@ -1257,6 +1257,7 @@ def _collect_transport_to_writer(
                     raise CollectorConsistencyError(
                         "SDK disconnected before the requested capture duration completed"
                     )
+                read_started_at = monotonic()
                 frame = transport.read_frozen(selected_fields)
                 frame, session_info, session_info_scope = _transport_session_info(
                     transport, frame
@@ -1273,9 +1274,11 @@ def _collect_transport_to_writer(
                 reads += 1
                 if max_reads is not None and reads >= max_reads:
                     break
-                remaining = deadline - monotonic()
-                if remaining > 0:
-                    sleep(min(poll_seconds, remaining))
+                now = monotonic()
+                remaining = deadline - now
+                until_next_poll = poll_seconds - (now - read_started_at)
+                if remaining > 0 and until_next_poll > 0:
+                    sleep(min(until_next_poll, remaining))
             return collector.finish()
     except BaseException as exc:
         primary_error = exc

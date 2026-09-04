@@ -477,6 +477,60 @@ def test_fake_transport_runs_on_non_windows_and_is_always_closed(tmp_path: Path)
     assert session_record["payload_status"] == "PRESENT"
 
 
+@pytest.mark.parametrize(
+    ("read_duration_s", "expected_sleep_s"),
+    [(0.004, 0.006), (0.015, None)],
+)
+def test_transport_poll_interval_is_measured_from_read_start(
+    tmp_path: Path,
+    read_duration_s: float,
+    expected_sleep_s: float | None,
+):
+    class Clock:
+        def __init__(self) -> None:
+            self.now = 0.0
+            self.sleeps: list[float] = []
+
+        def monotonic(self) -> float:
+            return self.now
+
+        def sleep(self, seconds: float) -> None:
+            self.sleeps.append(seconds)
+            self.now += seconds
+
+    class TimedTransport(FakeTransport):
+        def __init__(self, frames: list[RawSdkFrame], clock: Clock) -> None:
+            super().__init__(frames)
+            self.clock = clock
+
+        def read_frozen(self, fields: tuple[str, ...]) -> RawSdkFrame:
+            frame = super().read_frozen(fields)
+            self.clock.now += read_duration_s
+            return frame
+
+    clock = Clock()
+    observations = [sample(1, capture_s=0.0), sample(2, capture_s=0.01)]
+    transport = TimedTransport([item.frame for item in observations], clock)
+
+    receipt = collect_transport_to_jsonl(
+        transport,
+        tmp_path / f"transport-cadence-{read_duration_s}.jsonl",
+        **RUN_IDENTITY,
+        wait_seconds=0.0,
+        duration_s=10.0,
+        poll_seconds=0.01,
+        max_reads=2,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert receipt.frame_record_count == 2
+    if expected_sleep_s is None:
+        assert clock.sleeps == []
+    else:
+        assert clock.sleeps == [pytest.approx(expected_sleep_s)]
+
+
 def test_fake_transport_can_collect_to_same_caller_owned_handle(tmp_path: Path):
     observations = [sample(1, capture_s=0.0), sample(2, capture_s=0.01)]
     transport = FakeTransport([item.frame for item in observations])
