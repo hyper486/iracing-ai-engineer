@@ -21,6 +21,7 @@ practice opportunity.
 - Conservative tire-performance beliefs that do not invent physical wear.
 - Distance-aligned corner evidence and repeated-loss diagnosis.
 - Advisor timelines, shadow speech policy and deterministic session reports.
+- A privacy-safe JSONL live-state bridge for future overlays and speech consumers.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
 
 An authentic `SourceKind=SDK_LIVE` transport canary now reaches the running
@@ -67,6 +68,21 @@ uv run python scripts/run_local_cli.py offline-demo \
 If the raw fixture is absent or evidence is insufficient, the correct result
 is an explicit `WAIT_*` state—not fabricated strategy or coaching.
 
+With the simulator already running on the same Windows desktop, stream bounded
+read-only state for a future overlay or speech process:
+
+```bash
+uv run python scripts/run_local_cli.py monitor-live \
+  --source-id local-monitor \
+  --session-id practice-session \
+  --expected-source-kind live \
+  --require-in-car
+```
+
+This command emits privacy-safe JSONL and does not persist raw telemetry. It
+does not calculate or speak tactical advice. See
+[the live-monitor contract](docs/LIVE_MONITOR.md).
+
 ## Architecture
 
 The numerical pipeline owns all calculations and gates. A future language or
@@ -99,6 +115,7 @@ Useful design documents:
 - [Tire-performance boundary](docs/TIRE_PERFORMANCE_BELIEF.md)
 - [Driving diagnosis evidence](docs/OFFLINE_DRIVING_DIAGNOSIS_EVIDENCE.md)
 - [Post-session report](docs/OFFLINE_SESSION_REPORT.md)
+- [Privacy-safe live monitor](docs/LIVE_MONITOR.md)
 
 ## Public/private boundary
 

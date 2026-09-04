@@ -18,6 +18,11 @@ from .collector import (
     collect_transport_to_jsonl,
 )
 from .contracts import NORMALIZATION_PROFILE_VERSION, SDK_PROBE_CONTRACT_VERSION
+from .live_monitor import (
+    LIVE_MONITOR_CONTRACT_VERSION,
+    LiveMonitorError,
+    monitor_live_transport,
+)
 from .sdk_probe import (
     SdkProbeConsistencyError,
     SdkProbeUnavailable,
@@ -415,6 +420,44 @@ def _parser() -> argparse.ArgumentParser:
             "race_strategy_core",
             "opponent_tracking",
         ),
+    )
+
+    live_monitor_parser = subcommands.add_parser(
+        "monitor-live",
+        help="stream privacy-safe advisor state from the read-only live SDK",
+        description=(
+            "Normalize every distinct SDK tick, then emit bounded JSONL status "
+            "snapshots for a future overlay or speech process. No raw telemetry is "
+            "persisted and no simulator, vehicle, or pit control is available."
+        ),
+    )
+    live_monitor_parser.add_argument("--source-id", required=True, type=_run_identifier)
+    live_monitor_parser.add_argument("--session-id", required=True, type=_run_identifier)
+    live_monitor_parser.add_argument(
+        "--expected-source-kind",
+        choices=("auto", "live", "replay"),
+        default="auto",
+        help="fail closed if the observed simulator mode differs (default: auto)",
+    )
+    live_monitor_parser.add_argument(
+        "--wait-seconds", type=_finite_nonnegative, default=20.0
+    )
+    live_monitor_parser.add_argument(
+        "--duration-seconds", type=_finite_positive, default=30.0
+    )
+    live_monitor_parser.add_argument(
+        "--poll-seconds", type=_finite_positive, default=0.01
+    )
+    live_monitor_parser.add_argument(
+        "--snapshot-seconds", type=_finite_positive, default=0.5
+    )
+    live_monitor_parser.add_argument(
+        "--stale-after-seconds", type=_finite_positive, default=0.5
+    )
+    live_monitor_parser.add_argument(
+        "--require-in-car",
+        action="store_true",
+        help="exit 5 after the terminal receipt unless an in-car snapshot was observed",
     )
 
     live_preflight_parser = subcommands.add_parser(
@@ -2827,6 +2870,65 @@ def main(argv: Sequence[str] | None = None) -> int:
                     sort_keys=True,
                 )
             )
+            return 3
+    elif args.command == "monitor-live":
+        def emit_live_monitor_record(record: dict[str, object]) -> None:
+            print(
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+            )
+
+        def emit_live_monitor_error(code: str, error: BaseException) -> None:
+            print(str(error), file=sys.stderr)
+            emit_live_monitor_record(
+                {
+                    "contract_version": LIVE_MONITOR_CONTRACT_VERSION,
+                    "error": code,
+                    "message": str(error),
+                    "record_type": "live_monitor_error",
+                }
+            )
+
+        try:
+            receipt = monitor_live_transport(
+                WindowsPyirsdkTransport(),
+                emit=emit_live_monitor_record,
+                source_id=args.source_id,
+                session_id=args.session_id,
+                expected_source_kind=_collector_source_kind(
+                    args.expected_source_kind
+                ),
+                wait_seconds=args.wait_seconds,
+                duration_s=args.duration_seconds,
+                poll_seconds=args.poll_seconds,
+                snapshot_seconds=args.snapshot_seconds,
+                stale_after_s=args.stale_after_seconds,
+            )
+            emit_live_monitor_record(
+                {
+                    "record_type": "live_monitor_receipt",
+                    "receipt": receipt.to_dict(),
+                }
+            )
+            if args.require_in_car and receipt.in_car_snapshot_count == 0:
+                return 5
+            return 0
+        except SdkProbeUnavailable as exc:
+            emit_live_monitor_error("SDK_UNAVAILABLE", exc)
+            return 2
+        except LiveMonitorError as exc:
+            emit_live_monitor_error(exc.code, exc)
+            return 3
+        except SdkProbeConsistencyError as exc:
+            emit_live_monitor_error("SDK_CONSISTENCY_ERROR", exc)
+            return 3
+        except OSError as exc:
+            emit_live_monitor_error("IO_ERROR", exc)
             return 3
     elif args.command == "collect-live":
         try:

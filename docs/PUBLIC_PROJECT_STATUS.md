@@ -18,6 +18,7 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Tire reasoning | Implemented as a performance belief | The project does not claim direct physical tire wear without a supported source. |
 | Corner diagnosis | Implemented for repeated comparable evidence | Curb/risk claims remain blocked without trusted labels. |
 | Deterministic reports | Implemented | JSON and script-free HTML outputs preserve provenance and limitations. |
+| Privacy-safe live state bridge | Implemented; live field check pending | Tick-level normalization feeds bounded JSONL snapshots for future overlay/speech consumers without raw telemetry or control. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | The canary was out of car, so strategy and driving capabilities correctly remained blocked. |
@@ -39,6 +40,13 @@ The collector cadence was also corrected so `poll_seconds` is a minimum
 read-start interval rather than extra sleep added after serialization. The
 default 10 ms setting now tracks the native 60 Hz source during the same
 full-field, durable-write path without requiring a 1 ms busy-poll setting.
+
+A separate `monitor-live` command now normalizes every distinct tick while
+emitting only a bounded, privacy-safe state snapshot at a default 2 Hz. It is a
+state bridge rather than a recommendation engine: `READY` means the bridge is
+usable, not that strategy or driving evidence has passed. Its deterministic,
+privacy, stale, cadence and CLI behavior are covered offline; a field check of
+the new command remains pending the next simulator session.
 
 The next blocker is human-driven evidence: configure the physical driving
 inputs, enter the car, then record a sufficiently long clean run and pit
