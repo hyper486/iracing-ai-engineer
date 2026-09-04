@@ -1,6 +1,6 @@
 # Public project status
 
-Snapshot: 2026-09-03 EDT
+Snapshot: 2026-09-04 EDT
 
 ## Product objective
 
@@ -14,7 +14,7 @@ and can produce evidence-backed corner coaching and a post-session report.
 |---|---|---|
 | Replayable telemetry foundation | Implemented | Defensive IBT/SDK adapters, normalization and deterministic replay exist. |
 | Fuel, stint and pit reasoning | Implemented with evidence gates | Missing event rules or calibration produce `WAIT`, not invented values. |
-| Rejoin/traffic reasoning | Implemented with evidence gates | Estimates are time-domain and do not claim opponent fuel. |
+| Rejoin/traffic reasoning | Implemented with evidence gates; review corrections applied | Physical circular-track projection binds the selected stop lap; ambiguous future position is WAIT. |
 | Tire reasoning | Implemented as a performance belief | The project does not claim direct physical tire wear without a supported source. |
 | Corner diagnosis | Implemented for repeated comparable evidence | Curb/risk claims remain blocked without trusted labels. |
 | Deterministic reports | Implemented | JSON and script-free HTML outputs preserve provenance and limitations. |
@@ -24,10 +24,25 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | The canary was out of car, so strategy and driving capabilities correctly remained blocked. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Current live boundary
+## Review corrections
 
-Easy Anti-Cheat and the simulator now start normally. A privacy-safe summary of
-the first real shared-memory canary is:
+The September 4 review fixes address frozen-buffer freshness, metadata-only
+updates, event/snapshot quality consistency, source-reset privacy, physical
+rejoin position across lap deficits, future pit timing, legacy traffic gate
+bypass, strategy/diagnosis coupling, corner coast/accounting errors, public
+account identifiers, and Windows wheel-path portability. The advisor bridge
+also checks that a rejoin estimate belongs to the actual recommendation action.
+See [the review-fix record](REVIEW_FIXES.md) for scope and regression coverage.
+
+A valid M2 strategy candidate can now reach the shadow speech policy while
+driving-diagnosis promotion remains WAIT. This does not enable audio or vehicle
+control, promote unsupported driving advice, or make the product live-accepted.
+
+## Last recorded live boundary
+
+The previous live session established normal simulator startup and a real
+shared-memory canary. It was not rerun during this software review. Its
+privacy-safe summary is:
 
 - `SourceKind=SDK_LIVE`, full simulator mode and a 60 Hz SDK tick rate;
 - 294 persisted frames across a five-second default-cadence capture;
@@ -48,9 +63,12 @@ usable, not that strategy or driving evidence has passed. Its deterministic,
 privacy, stale, cadence and CLI behavior are covered offline; a field check of
 the new command remains pending the next simulator session.
 
-The next blocker is human-driven evidence: configure the physical driving
-inputs, enter the car, then record a sufficiently long clean run and pit
-sequence. Host-specific telemetry, logs and device details remain private.
+The next live-validation prerequisite is human-driven evidence: configure the
+physical driving inputs, enter the car, then record a sufficiently long clean
+run and pit sequence. Host-specific telemetry, logs and device details remain
+private. Software work also remains: real-time tactical delivery, an audible
+engineering interface, broader multi-stop planning, and calibrated curb/trail
+braking coaching are not made complete by the transport canary or these fixes.
 
 This boundary does not change the product goal and does not justify an
 out-of-car canary being relabeled as end-to-end acceptance. Final acceptance

@@ -142,7 +142,7 @@ Calibration alone still cannot produce `PASS_TRAFFIC_DATA`: the estimate must
 be bound to the exact M2 fuel quantity, tire choice, and service ordering.
 
 The analysis-v2 candidate now performs that final binding through the separate
-[`time-domain-rejoin-estimate-v1`](TIME_DOMAIN_REJOIN_ESTIMATE.md) contract. A
+[`time-domain-rejoin-estimate-v2`](TIME_DOMAIN_REJOIN_ESTIMATE.md) contract. A
 stable action-specific bracket may pass the traffic gate; an uncertainty
 zero-crossing or unstable neighbor order remains WAIT.
 

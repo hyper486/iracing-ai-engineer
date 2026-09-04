@@ -6,9 +6,10 @@ clock from that same run. M2 receipts require separately pinned digests and
 are fully re-admitted. M3 is rebuilt from separately pinned serialized
 driving replay bytes. No caller-supplied clock or self-hash can promote data.
 
-This module emits no prose, audio, network traffic, or simulator control. The
-current diagnosis contract has unresolved promotion gates, so its only public
-result is a P3 ``WAIT_DATA`` overlay lifecycle and zero tactical speech.
+This module emits no prose, audio, network traffic, or simulator control.
+Admitted M2 candidates enter the shadow speech policy independently of driving
+diagnosis promotion. Missing strategy evidence remains a P3 ``WAIT_DATA``;
+driving gates and all timing/mute requirements remain intact.
 """
 
 from __future__ import annotations
@@ -50,7 +51,7 @@ from .speech_policy import (
 )
 from .telemetry import Presence, SourceKind, TelemetrySample
 
-ADVISOR_TIMELINE_CONTRACT_VERSION = "advisor-timeline-v2"
+ADVISOR_TIMELINE_CONTRACT_VERSION = "advisor-timeline-v3"
 ADVISOR_CLOCK_RECEIPT_CONTRACT_VERSION = "advisor-clock-receipt-v1"
 DEFAULT_LEASE_DURATION_US = 2_000_000
 
@@ -1051,7 +1052,9 @@ def _validate_m2_surface(
                 6,
             ),
             "fuel_add_l": service.get("fuel_add_l"),
-            "recommended_lap_from_now": 0,
+            "recommended_lap_from_now": _plain_int(
+                service.get("recommended_lap_from_now"), "M2 rejoin pit horizon"
+            ),
         }
         rebuilt_rejoin = _M2._build_action_bound_rejoin(
             context_traffic,
@@ -1061,10 +1064,6 @@ def _validate_m2_surface(
         )
         if rebuilt_rejoin != action_rejoin_map:
             _fail("M2_RECEIPT_INVALID", "M2 rejoin estimate is not reproducible")
-    input_estimate_available = (
-        isinstance(context.get("_traffic"), dict)
-        and context["_traffic"].get("estimate_available") is True
-    )
     action_estimate_available = (
         isinstance(action_rejoin, Mapping)
         and action_rejoin.get("estimate_available") is True
@@ -1073,7 +1072,7 @@ def _validate_m2_surface(
         "input": context.get("_traffic"),
         "status": (
             "PASS_TRAFFIC_DATA"
-            if input_estimate_available or action_estimate_available
+            if action_estimate_available
             else "WAIT_REJOIN_ESTIMATE"
             if context.get("_traffic") is not None
             else "WAIT_TRAFFIC_DATA"
@@ -1167,7 +1166,7 @@ def _validate_m2_surface(
         ),
         "traffic_data": (
             {"reason_codes": [], "status": "PASS_TRAFFIC_DATA"}
-            if input_estimate_available or action_estimate_available
+            if action_estimate_available
             else {
                 "reason_codes": list(action_rejoin["reason_codes"]),
                 "status": "WAIT_REJOIN_ESTIMATE",
@@ -1336,6 +1335,26 @@ def _validate_recommendation(
     laps = _plain_int(action.get("recommended_lap_from_now"), "recommended lap")
     if laps > 100:
         _fail("M2_RECOMMENDATION_UNMAPPABLE", "pit-window lap exceeds speech schema")
+    traffic_output = _mapping(receipt.get("traffic_rejoin"), "M2 traffic output")
+    action_rejoin = _mapping(traffic_output.get("estimate"), "M2 action-bound rejoin estimate")
+    service = _mapping(action_rejoin.get("service_scenario"), "M2 rejoin service scenario")
+    expected_service_action = {
+        "change_tires": action["change_tires"],
+        "fuel_add_l": action_numbers["fuel_add_l"],
+        "recommended_lap_from_now": laps,
+        "stationary_service_s": action_numbers["estimated_stationary_service_s"],
+    }
+    if type(service.get("change_tires")) is not bool or any(
+        service.get(key) != expected for key, expected in expected_service_action.items()
+    ):
+        _fail("M2_RECEIPT_INVALID", "M2 rejoin service does not match recommended action")
+    timing = service.get("fuel_tire_service_timing")
+    if timing not in {"PARALLEL", "SEQUENTIAL"}:
+        _fail("M2_RECEIPT_INVALID", "M2 rejoin service timing is invalid")
+    if is_v2 and isinstance(tire_strategy.get("belief"), Mapping):
+        scenario = _mapping(tire_strategy["belief"].get("scenario"), "M2 tire scenario")
+        if timing != scenario.get("fuel_tire_service_timing"):
+            _fail("M2_RECEIPT_INVALID", "M2 rejoin and tire service timing disagree")
     calibration = context.get("_calibration")
     if type(calibration) is not dict:
         _fail("M2_RECEIPT_INVALID", "M2 recommendation lacks calibrated service model")
@@ -1343,18 +1362,14 @@ def _validate_recommendation(
     tire_time = (
         float(calibration["tire_change_time_s"]) if action.get("change_tires") is True else 0.0
     )
-    allowed_stationary = {
-        round(fuel_time + tire_time, 6),
-        round(max(fuel_time, tire_time), 6),
-    }
-    if not any(
-        math.isclose(
-            action_numbers["estimated_stationary_service_s"],
-            expected,
-            rel_tol=0.0,
-            abs_tol=1e-6,
-        )
-        for expected in allowed_stationary
+    expected_stationary = round(
+        fuel_time + tire_time if timing == "SEQUENTIAL" else max(fuel_time, tire_time), 6
+    )
+    if not math.isclose(
+        action_numbers["estimated_stationary_service_s"],
+        expected_stationary,
+        rel_tol=0.0,
+        abs_tol=1e-6,
     ):
         _fail("M2_RECEIPT_INVALID", "M2 stationary service time is not calibrated")
     expected_total = round(
@@ -1414,8 +1429,6 @@ def _validate_recommendation(
     traffic = context.get("_traffic")
     if type(traffic) is not dict:
         _fail("M2_RECEIPT_INVALID", "candidate requires admitted traffic evidence")
-    traffic_output = _mapping(receipt.get("traffic_rejoin"), "M2 traffic output")
-    action_rejoin = traffic_output.get("estimate")
     exact_rejoin_sha256 = (
         action_rejoin.get("estimate_sha256")
         if isinstance(action_rejoin, Mapping)
@@ -1848,7 +1861,7 @@ def _build_from_admitted(
     for receipt, clock in zip(receipts, clocks, strict=True):
         has_candidate = bool(_list(receipt.get("recommendations"), "M2 recommendations"))
         upstream_candidates += int(has_candidate)
-        tactical = diagnosis_ready and has_candidate
+        tactical = has_candidate
         tactical_observations += int(tactical)
         overlay_observations += int(not tactical)
         desired = _desired_envelope(
@@ -1857,7 +1870,7 @@ def _build_from_admitted(
             session_time_us=clock.session_time_us,
             lease_duration_us=lease_duration_us,
             supersedes=(active.content_revision_sha256 if active is not None else None),
-            tactical_allowed=diagnosis_ready,
+            tactical_allowed=True,
         )
         if active is not None and desired.content_revision_sha256 == active.content_revision_sha256:
             refresh = SpeechRefresh(
@@ -1907,7 +1920,7 @@ def _build_from_admitted(
     latest_has_candidate = bool(
         _list(receipts[-1].get("recommendations"), "latest M2 recommendations")
     )
-    if not diagnosis_ready or not latest_has_candidate:
+    if not latest_has_candidate:
         status = "WAIT_DATA"
     elif config.muted:
         status = "SHADOW_CANDIDATE_MUTED"
@@ -1927,7 +1940,8 @@ def _build_from_admitted(
     base: dict[str, object] = {
         "advisor_only": True,
         "bridge_policy": {
-            "diagnosis_promotion_required": True,
+            "diagnosis_promotion_required": False,
+            "driving_diagnosis_ready": diagnosis_ready,
             "lease_duration_us": lease_duration_us,
             "missing_strategy_state": "WAIT_DATA",
             "tactical_timing_evidence_synthesized": False,

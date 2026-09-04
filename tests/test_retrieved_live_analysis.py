@@ -202,6 +202,7 @@ def _write_complete_identity_live_capture(
     path: Path,
     *,
     session_flags: int = 0,
+    stable_motion: bool = False,
 ) -> tuple[ModuleType, dict[str, object], dict[str, object]]:
     helper = _load_live_fixture_module()
     fixture = helper._load_paired_fixture_module()
@@ -214,6 +215,26 @@ def _write_complete_identity_live_capture(
         }
         for item in fixture._paired_frames()
     ]
+    if stable_motion:
+        # A seven-lap-ahead PASS needs a stable observed motion envelope.
+        # Keep the final player position, and make both actors' cumulative
+        # progress linear and lap counters consistent across every wrap.
+        final_progress = frames[-1]["LapCompleted"] + frames[-1]["LapDistPct"]
+        rate = final_progress / frames[-1]["SessionTime"]
+        for frame in frames:
+            progress = rate * frame["SessionTime"]
+            opponent_progress = progress + 0.4
+            player_laps, opponent_laps = int(progress), int(opponent_progress)
+            frame.update(
+                Lap=player_laps + 1,
+                LapCompleted=player_laps,
+                LapDistPct=progress - player_laps,
+                CarIdxLap=[player_laps + 1, opponent_laps + 1],
+                CarIdxLapCompleted=[player_laps, opponent_laps],
+                CarIdxLapDistPct=[
+                    progress - player_laps, opponent_progress - opponent_laps
+                ],
+            )
     descriptors = fixture._descriptors(frames[0])
     session_info = {
         "WeekendInfo": {
@@ -663,7 +684,7 @@ def test_same_capture_motion_closes_action_bound_rejoin_and_replays_exactly(
     tmp_path: Path,
 ) -> None:
     capture = tmp_path / "live-20260823T220000Z.jsonl"
-    _, authority, live = _write_complete_identity_live_capture(capture)
+    _, authority, live = _write_complete_identity_live_capture(capture, stable_motion=True)
     profile = _profile()
     calibration = _complete_identity_calibration()
     rules = _complete_identity_rules()
@@ -708,7 +729,7 @@ def test_same_capture_motion_closes_action_bound_rejoin_and_replays_exactly(
         "status": "PASS_TRAFFIC_DATA",
     }
     assert strategy["traffic_rejoin"]["status"] == "PASS_TRAFFIC_DATA"
-    assert estimate["contract_version"] == "time-domain-rejoin-estimate-v1"
+    assert estimate["contract_version"] == "time-domain-rejoin-estimate-v2"
     assert estimate["estimate_available"] is True
     assert estimate["status"] == "AVAILABLE_STABLE_BRACKET"
     assert estimate["decision_tick"] == strategy["strategy_context"]["observation"][
@@ -754,6 +775,7 @@ def test_same_capture_motion_closes_action_bound_rejoin_and_replays_exactly(
         fuel_add_l=float(recommendation["action"]["fuel_add_l"]),
         change_tires=bool(recommendation["action"]["change_tires"]),
         fuel_tire_service_timing="SEQUENTIAL",
+        recommended_lap_from_now=int(recommendation["action"]["recommended_lap_from_now"]),
     )
     assert independently_built == estimate
     assert receipt["readiness"]["strategy_advice_available"] is True
@@ -793,7 +815,7 @@ def test_same_capture_tire_model_can_select_change_and_replay_exactly(
     tmp_path: Path,
 ) -> None:
     capture = tmp_path / "live-20260823T220000Z.jsonl"
-    _, authority, live = _write_complete_identity_live_capture(capture)
+    _, authority, live = _write_complete_identity_live_capture(capture, stable_motion=True)
     profile = _profile()
     calibration = _complete_identity_calibration()
     tire_model = _complete_identity_tire_performance_model()

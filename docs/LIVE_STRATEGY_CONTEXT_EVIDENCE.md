@@ -142,7 +142,7 @@ rule.
 
 M2 now closes that final synthetic-contract step. Once all other gates produce
 an exact action, it invokes the separately documented
-[`time-domain-rejoin-estimate-v1`](TIME_DOMAIN_REJOIN_ESTIMATE.md) projection.
+[`time-domain-rejoin-estimate-v2`](TIME_DOMAIN_REJOIN_ESTIMATE.md) projection.
 A stable bracket advances `traffic_data` to `PASS_TRAFFIC_DATA`; a zero-crossing
 or overlapping neighbor order remains `WAIT_AMBIGUOUS_REJOIN_ORDER` and emits
 no position claim.

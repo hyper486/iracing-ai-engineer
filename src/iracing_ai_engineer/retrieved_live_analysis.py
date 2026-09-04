@@ -41,6 +41,11 @@ from .live_engineer_session import (
     replay_retrieved_live_engineer_session,
     validate_live_engineer_session,
 )
+from .rejoin_projection import (
+    REJOIN_CONTRACT_VERSION,
+    REJOIN_METHOD_VERSION,
+    project_physical_rejoin,
+)
 from .session_report import (
     EngineerSessionReportError,
     build_engineer_session_report,
@@ -69,8 +74,8 @@ TIRE_PERFORMANCE_BELIEF_CONTRACT_VERSION = "tire-performance-belief-v1"
 TIRE_PERFORMANCE_BELIEF_METHOD_VERSION = "linear-age-service-tradeoff-v1"
 TIRE_STINT_CONTEXT_CONTRACT_VERSION = "tire-stint-context-v1"
 TRAFFIC_MOTION_CONTEXT_CONTRACT_VERSION = "traffic-motion-context-v1"
-TIME_DOMAIN_REJOIN_ESTIMATE_CONTRACT_VERSION = "time-domain-rejoin-estimate-v1"
-TIME_DOMAIN_REJOIN_METHOD_VERSION = "relative-progress-envelope-v1"
+TIME_DOMAIN_REJOIN_ESTIMATE_CONTRACT_VERSION = REJOIN_CONTRACT_VERSION
+TIME_DOMAIN_REJOIN_METHOD_VERSION = REJOIN_METHOD_VERSION
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _CALIBRATION_MAX_INPUT_BYTES = 16 * 1024 * 1024
@@ -316,6 +321,7 @@ _REJOIN_SERVICE_KEYS = frozenset(
         "change_tires",
         "fuel_add_l",
         "fuel_tire_service_timing",
+        "recommended_lap_from_now",
         "stationary_service_s",
         "total_pit_loss_range_s",
     }
@@ -1567,23 +1573,6 @@ def validate_traffic_motion_context(
     return context
 
 
-def _nearest_stable_neighbor(
-    candidates: list[dict[str, object]],
-) -> tuple[dict[str, object] | None, bool]:
-    if not candidates:
-        return None, True
-    ordered = sorted(
-        candidates,
-        key=lambda item: (
-            (float(item["gap_range_s"][0]) + float(item["gap_range_s"][1])) / 2.0,
-            int(item["car_idx"]),
-        ),
-    )
-    winner = ordered[0]
-    winner_high = float(winner["gap_range_s"][1])
-    if any(winner_high >= float(item["gap_range_s"][0]) for item in ordered[1:]):
-        return None, False
-    return winner, True
 
 
 def validate_time_domain_rejoin_estimate(
@@ -1633,6 +1622,7 @@ def validate_time_domain_rejoin_estimate(
     if type(service.get("change_tires")) is not bool:
         _fail("REJOIN_ESTIMATE_INVALID", "rejoin tire choice is invalid")
     _finite_number(service.get("fuel_add_l"), "rejoin fuel addition", minimum=0.0)
+    _plain_int(service.get("recommended_lap_from_now"), "rejoin pit lap")
     _finite_number(
         service.get("stationary_service_s"), "rejoin stationary service", minimum=0.0
     )
@@ -1695,6 +1685,7 @@ def build_time_domain_rejoin_estimate(
     fuel_add_l: float,
     change_tires: bool,
     fuel_tire_service_timing: str,
+    recommended_lap_from_now: int = 0,
 ) -> dict[str, object]:
     """Project a pit-action-specific rejoin bracket from same-capture motion."""
 
@@ -1721,6 +1712,7 @@ def build_time_domain_rejoin_estimate(
             f"rejoin calibration failed closed: {exc.code}: {exc}",
         ) from exc
     fuel_add = _finite_number(fuel_add_l, "rejoin fuel addition", minimum=0.0)
+    _plain_int(recommended_lap_from_now, "rejoin pit lap")
     if type(change_tires) is not bool:
         _fail("REJOIN_SCENARIO_INVALID", "rejoin tire choice must be boolean")
     if fuel_tire_service_timing not in {"PARALLEL", "SEQUENTIAL"}:
@@ -1738,66 +1730,11 @@ def build_time_domain_rejoin_estimate(
         raise AssertionError("validated calibration lost its uncertainty")
     loss_low = float(pit_uncertainty[0]) + stationary
     loss_high = float(pit_uncertainty[1]) + stationary
-    player = _mapping(motion.get("player"), "traffic motion player")
-    player_rates = player.get("rate_range_laps_per_s")
-    if not isinstance(player_rates, list):  # pragma: no cover - validator invariant
-        raise AssertionError("validated player motion lost its rate range")
-    player_low, player_high = map(float, player_rates)
-    ahead_candidates: list[dict[str, object]] = []
-    behind_candidates: list[dict[str, object]] = []
-    ambiguity = False
-    for raw in motion["opponents"]:
-        opponent = _mapping(raw, "traffic motion opponent")
-        delta = float(opponent["current_signed_lap_delta"])
-        if delta > 0.0:
-            current_low = delta / player_high
-            current_high = delta / player_low
-        elif delta < 0.0:
-            opponent_rates = opponent["rate_range_laps_per_s"]
-            if not isinstance(opponent_rates, list):  # pragma: no cover
-                raise AssertionError("validated opponent motion lost its rate range")
-            opponent_low, opponent_high = map(float, opponent_rates)
-            magnitude = abs(delta)
-            current_low = -(magnitude / opponent_low)
-            current_high = -(magnitude / opponent_high)
-        else:
-            current_low = current_high = 0.0
-        projected_low = current_low + loss_low
-        projected_high = current_high + loss_high
-        if projected_low <= 0.0 <= projected_high:
-            ambiguity = True
-            continue
-        if projected_low > 0.0:
-            ahead_candidates.append(
-                {
-                    "car_idx": int(opponent["car_idx"]),
-                    "gap_range_s": [
-                        round(projected_low, 6),
-                        round(projected_high, 6),
-                    ],
-                }
-            )
-        else:
-            behind_candidates.append(
-                {
-                    "car_idx": int(opponent["car_idx"]),
-                    "gap_range_s": [
-                        round(abs(projected_high), 6),
-                        round(abs(projected_low), 6),
-                    ],
-                }
-            )
-    nearest_ahead, ahead_stable = _nearest_stable_neighbor(ahead_candidates)
-    nearest_behind, behind_stable = _nearest_stable_neighbor(behind_candidates)
-    reasons: list[str] = []
-    if ambiguity:
-        reasons.append("REJOIN_ZERO_CROSSING_WITHIN_UNCERTAINTY")
-    if not ahead_stable:
-        reasons.append("REJOIN_AHEAD_ORDER_AMBIGUOUS")
-    if not behind_stable:
-        reasons.append("REJOIN_BEHIND_ORDER_AMBIGUOUS")
-    if nearest_ahead is None and nearest_behind is None and not reasons:
-        reasons.append("NO_REJOIN_NEIGHBOR_AVAILABLE")
+    nearest_ahead, nearest_behind, reasons = project_physical_rejoin(
+        motion,
+        loss_range_s=(loss_low, loss_high),
+        recommended_lap_from_now=recommended_lap_from_now,
+    )
     available = not reasons
     source_receipt_sha256 = canonical_sha256(
         {
@@ -1809,6 +1746,7 @@ def build_time_domain_rejoin_estimate(
         "change_tires": change_tires,
         "fuel_add_l": round(fuel_add, 6),
         "fuel_tire_service_timing": fuel_tire_service_timing,
+        "recommended_lap_from_now": recommended_lap_from_now,
         "stationary_service_s": round(stationary, 6),
         "total_pit_loss_range_s": [round(loss_low, 6), round(loss_high, 6)],
     }

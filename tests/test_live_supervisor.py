@@ -425,14 +425,16 @@ def test_runtime_manifest_uses_generator_newline_hash_semantics():
 
 
 def test_security_tree_cross_language_vector_is_frozen():
+    # This public vector binds the documented placeholder SID, not a private
+    # deployment receipt. Canonical property/ACE ordering is unchanged.
     objects = sorted(
         (item.to_dict() for item in _security_objects()),
         key=lambda item: item["path"].upper(),
     )
     payload = supervisor._security_tree_bytes(objects)
-    assert len(payload) == 1040
+    assert len(payload) == 988
     assert hashlib.sha256(payload).hexdigest() == (
-        "0cfd767a1b3cb2331420831e1381dc0f711e1cd9895fd3cd5ee41a701f3aa249"
+        "798f206af3e42025fb0b90e3f9686339b4af921daf31380a93f772ea9a1bbb3e"
     )
 
 

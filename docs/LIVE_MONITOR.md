@@ -28,11 +28,19 @@ invalid or inconsistent stream returns exit code 3.
 
 - Every distinct SDK tick is normalized and sent through the shared streaming
   event state machine.
-- Same-tick reads are counted but not reprocessed.
+- Same-tick reads are counted and normally deduplicated. An independent
+  SessionInfo update counter change is not a telemetry-buffer conflict.
+- A monotonic health timer checks time since the last distinct SDK tick,
+  including same-tick reads and the final wait. Crossing the stale threshold
+  invalidates the last state even if the SDK buffer never advances again.
+  A new health snapshot can therefore share a tick with an earlier snapshot;
+  unchanged stale reads do not produce repeated health events.
 - The default SDK poll interval is 10 ms, measured from one read start to the
   next; serialization or normalization time is not added as extra sleep.
 - A bounded display snapshot is emitted every 0.5 seconds by default, plus a
-  final snapshot when the last observed tick has not yet been projected.
+  final snapshot when the latest frame or health state has not yet been
+  projected. State revisions, rather than tick equality alone, determine
+  whether the terminal receipt has a complete snapshot stream.
 - The transport, normalization and event pipeline remain read-only. The command
   has no simulator-launch, steering, pedal, shift, pit-box, network, audio or
   file-persistence path.
@@ -56,6 +64,20 @@ The terminal `live_monitor_receipt` binds the snapshot stream and the shared
 event-pipeline receipt, including frame, duplicate, dropped-tick, in-car and
 status counts. Raw SDK frames, SessionInfo driver identity, setup names and
 telemetry arrays are not emitted.
+
+Event details use a per-event field allowlist, including source resets; raw
+source/session identifiers are excluded from nested details as well as the
+snapshot envelope. Event-layer quality rejections (such as SessionTime
+regression) also block the snapshot and appear in its quality issues/reasons.
+The next admitted sample can clear that rejection.
+
+`frame_count` and `source_kind_counts` count distinct captured ticks. The shared
+event receipt can additionally include one derived stale-health observation
+per buffer-freeze episode. This observation keeps the last SDK clocks and
+telemetry unchanged and contributes no captured frame or new in-car evidence.
+It allows the event stream to record stale/resumed transitions without
+reprocessing every duplicate read. Recovery after a long capture gap can
+remain blocked until the next timely progressing sample.
 
 ## Status semantics
 

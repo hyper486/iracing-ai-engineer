@@ -1230,12 +1230,14 @@ def test_pinned_hatchling_wheel_contains_and_isolates_engineer_session(
         capture_output=True,
         text=True,
     )
-    assert imported.stdout.splitlines() == [
+    imported_lines = imported.stdout.splitlines()
+    assert imported_lines[:3] == [
         "engineer-session-v1",
         "iracing_ai_engineer.engineer_session",
         "iracing_ai_engineer.pit_stint",
-        f"{wheels[0]}/iracing_ai_engineer/engineer_session.py",
     ]
+    assert len(imported_lines) == 4
+    assert Path(imported_lines[3]) == wheels[0] / "iracing_ai_engineer" / "engineer_session.py"
 
 
 @pytest.mark.skipif(

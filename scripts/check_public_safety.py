@@ -18,6 +18,8 @@ ALLOWED_MAC_USERS = frozenset({"example", "racer", "runner", "test", "testuser"}
 ALLOWED_EMAIL_DOMAINS = frozenset(
     {"example.com", "example.invalid", "users.noreply.github.com"}
 )
+ALLOWED_ACCOUNT_SIDS = frozenset({"S-1-5-21-0-0-0", "S-1-5-21-0-0-0-1001"})
+ACCOUNT_SID_RE = re.compile(r"\bS-1-5-21-\d+-\d+-\d+(?:-\d+)?\b", re.IGNORECASE)
 
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("github-token", re.compile(r"gh[pousr]_[A-Za-z0-9_]{20,}")),
@@ -49,14 +51,9 @@ EMAIL_RE = re.compile(
 IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 SENSITIVE_PATH_RE = re.compile(
     r"(?:^|/)(?:\.env(?:\..*)?|id_rsa|id_ed25519|credentials?|secrets?|"
-    r"[^/]+\.(?:key|pem|p12|pfx|etl|dmp|dump|pcap|pcapng))$",
+    r"[^/]+\.(?:key|pem|p12|pfx|etl|dmp|dump|pcap|pcapng|ibt|rpy|jsonl|parquet))$",
     re.IGNORECASE,
 )
-
-# Split these strings so this scanner does not contain the forbidden values it
-# is designed to detect.
-KNOWN_PRIVATE_MARKERS = ()
-
 
 @dataclass(frozen=True, order=True)
 class Finding:
@@ -98,8 +95,9 @@ def _line_findings(text: str, location: str) -> list[Finding]:
             if pattern.search(line):
                 findings.append(Finding(rule, line_location))
 
-        if any(marker.lower() in line.lower() for marker in KNOWN_PRIVATE_MARKERS):
-            findings.append(Finding("known-private-marker", line_location))
+        for match in ACCOUNT_SID_RE.finditer(line):
+            if match.group(0).upper() not in ALLOWED_ACCOUNT_SIDS:
+                findings.append(Finding("windows-account-sid", line_location))
 
         for match in WINDOWS_HOME_RE.finditer(line):
             if match.group("user").casefold() not in ALLOWED_WINDOWS_USERS:
@@ -135,7 +133,7 @@ def _scan_blob(data: bytes, location: str) -> list[Finding]:
     if len(data) > MAX_PUBLIC_FILE_BYTES:
         return [Finding("file-over-5-mib", location)]
     if b"\0" in data:
-        return []
+        return [Finding("unreviewed-binary", location)]
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
@@ -157,17 +155,29 @@ def scan_worktree(root: Path) -> list[Finding]:
 
 def scan_history(root: Path) -> list[Finding]:
     findings: list[Finding] = []
+    trees = _run_git(root, "log", "--all", "--format=%T", text=True)
+    assert isinstance(trees, str)
+    for tree in sorted(set(trees.splitlines())):
+        paths = _run_git(root, "ls-tree", "-r", "--name-only", "-z", tree)
+        assert isinstance(paths, bytes)
+        for raw_path in paths.split(b"\0"):
+            if not raw_path:
+                continue
+            path = raw_path.decode("utf-8")
+            if SENSITIVE_PATH_RE.search(path):
+                findings.append(Finding("sensitive-path-name", f"history-tree:{tree[:12]}:{path}"))
     output = _run_git(root, "rev-list", "--objects", "--all", "--no-object-names", text=True)
     assert isinstance(output, str)
     object_ids = sorted(set(output.splitlines()))
     for object_id in object_ids:
         object_type = _run_git(root, "cat-file", "-t", object_id, text=True)
         assert isinstance(object_type, str)
-        if object_type.strip() != "blob":
+        kind = object_type.strip()
+        if kind not in {"blob", "commit", "tag"}:
             continue
-        data = _run_git(root, "cat-file", "blob", object_id)
+        data = _run_git(root, "cat-file", kind, object_id)
         assert isinstance(data, bytes)
-        findings.extend(_scan_blob(data, f"history-blob:{object_id[:12]}"))
+        findings.extend(_scan_blob(data, f"history-{kind}:{object_id[:12]}"))
 
     emails_output = _run_git(root, "log", "--all", "--format=%ae%n%ce", text=True)
     assert isinstance(emails_output, str)

@@ -63,6 +63,7 @@ FIXED_STATE_ROOT = Path(r"C:\Users\racer\AppData\Local\AEIS\state\r8")
 FIXED_RUNTIME_PYTHON = PurePosixPath("runtime/python.exe")
 FIXED_INSTALL_MANIFEST = "install-manifest.json"
 FIXED_RUNTIME_MANIFEST = "release-runtime-manifest.json"
+# Public archive placeholder; never a byte-identical host deployment identity.
 FIXED_RUNTIME_USER_SID = "S-1-5-21-0-0-0-1001"
 BUILTIN_ADMINISTRATORS_SID = "S-1-5-32-544"
 LOCAL_SYSTEM_SID = "S-1-5-18"

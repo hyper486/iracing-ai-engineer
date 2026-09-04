@@ -150,7 +150,7 @@ pit-loss/service model without motion evidence advances the reason to
 remaining reason is `ACTION_BOUND_REJOIN_ESTIMATE_REQUIRED`. The analysis-v2
 candidate now binds that motion, the calibrated loss range, and the exact M2
 fuel/tire service action through
-[`time-domain-rejoin-estimate-v1`](TIME_DOMAIN_REJOIN_ESTIMATE.md). Only a
+[`time-domain-rejoin-estimate-v2`](TIME_DOMAIN_REJOIN_ESTIMATE.md). Only a
 stable neighbor bracket promotes the capability to `PASS_TRAFFIC_DATA`; a
 zero-crossing or overlapping order remains `WAIT_REJOIN_ESTIMATE`.
 Pit-open and penalty state are checked independently; stale/reset/schema-change

@@ -26,6 +26,12 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, NoReturn
 
+from .rejoin_projection import (
+    REJOIN_CONTRACT_VERSION,
+    REJOIN_METHOD_VERSION,
+    project_physical_rejoin,
+)
+
 CONTRACT_VERSION = "offline-m2-strategy-receipt-v1"
 CONTRACT_V2_VERSION = "offline-m2-strategy-receipt-v2"
 CONTEXT_CONTRACT_VERSION = "offline-m2-strategy-context-v1"
@@ -1610,25 +1616,6 @@ def _build_branch_plan(
     }, []
 
 
-def _nearest_stable_rejoin_neighbor(
-    candidates: list[dict[str, object]],
-) -> tuple[dict[str, object] | None, bool]:
-    if not candidates:
-        return None, True
-    ordered = sorted(
-        candidates,
-        key=lambda item: (
-            (float(item["gap_range_s"][0]) + float(item["gap_range_s"][1])) / 2.0,
-            int(item["car_idx"]),
-        ),
-    )
-    winner = ordered[0]
-    winner_high = float(winner["gap_range_s"][1])
-    if any(winner_high >= float(item["gap_range_s"][0]) for item in ordered[1:]):
-        return None, False
-    return winner, True
-
-
 def _build_action_bound_rejoin(
     traffic: Mapping[str, object],
     calibration: Mapping[str, object],
@@ -1646,56 +1633,12 @@ def _build_action_bound_rejoin(
     )
     loss_low = float(uncertainty[0]) + stationary
     loss_high = float(uncertainty[1]) + stationary
-    player = _mapping(motion.get("player"), "traffic motion player")
-    player_rates = _list(
-        player.get("rate_range_laps_per_s"), "traffic player rate range"
+    pit_lap = _plain_int(action.get("recommended_lap_from_now"), "rejoin pit lap")
+    nearest_ahead, nearest_behind, reasons = project_physical_rejoin(
+        motion,
+        loss_range_s=(loss_low, loss_high),
+        recommended_lap_from_now=pit_lap,
     )
-    player_low, player_high = map(float, player_rates)
-    ahead_candidates: list[dict[str, object]] = []
-    behind_candidates: list[dict[str, object]] = []
-    zero_crossing = False
-    for raw in _list(motion.get("opponents"), "traffic motion opponents"):
-        opponent = _mapping(raw, "traffic motion opponent")
-        delta = float(opponent["current_signed_lap_delta"])
-        if delta > 0.0:
-            current_low = delta / player_high
-            current_high = delta / player_low
-        elif delta < 0.0:
-            opponent_rates = _list(
-                opponent.get("rate_range_laps_per_s"),
-                "traffic opponent rate range",
-            )
-            opponent_low, opponent_high = map(float, opponent_rates)
-            magnitude = abs(delta)
-            current_low = -(magnitude / opponent_low)
-            current_high = -(magnitude / opponent_high)
-        else:
-            current_low = current_high = 0.0
-        projected_low = current_low + loss_low
-        projected_high = current_high + loss_high
-        if projected_low <= 0.0 <= projected_high:
-            zero_crossing = True
-            continue
-        row = {
-            "car_idx": int(opponent["car_idx"]),
-            "gap_range_s": (
-                [round(projected_low, 6), round(projected_high, 6)]
-                if projected_low > 0.0
-                else [round(abs(projected_high), 6), round(abs(projected_low), 6)]
-            ),
-        }
-        (ahead_candidates if projected_low > 0.0 else behind_candidates).append(row)
-    nearest_ahead, ahead_stable = _nearest_stable_rejoin_neighbor(ahead_candidates)
-    nearest_behind, behind_stable = _nearest_stable_rejoin_neighbor(behind_candidates)
-    reasons: list[str] = []
-    if zero_crossing:
-        reasons.append("REJOIN_ZERO_CROSSING_WITHIN_UNCERTAINTY")
-    if not ahead_stable:
-        reasons.append("REJOIN_AHEAD_ORDER_AMBIGUOUS")
-    if not behind_stable:
-        reasons.append("REJOIN_BEHIND_ORDER_AMBIGUOUS")
-    if nearest_ahead is None and nearest_behind is None and not reasons:
-        reasons.append("NO_REJOIN_NEIGHBOR_AVAILABLE")
     available = not reasons
     source_receipt_sha256 = canonical_sha256(
         {
@@ -1707,19 +1650,20 @@ def _build_action_bound_rejoin(
         "change_tires": action["change_tires"],
         "fuel_add_l": action["fuel_add_l"],
         "fuel_tire_service_timing": fuel_tire_service_timing,
+        "recommended_lap_from_now": pit_lap,
         "stationary_service_s": action["estimated_stationary_service_s"],
         "total_pit_loss_range_s": [round(loss_low, 6), round(loss_high, 6)],
     }
     material: dict[str, object] = {
         "calibration_model_sha256": calibration["model_sha256"],
-        "contract_version": "time-domain-rejoin-estimate-v1",
+        "contract_version": REJOIN_CONTRACT_VERSION,
         "decision_tick": traffic["observed_at_decision_tick"],
         "estimate_available": available,
         "identity_sha256": traffic["identity_sha256"],
-        "method_version": "relative-progress-envelope-v1",
+        "method_version": REJOIN_METHOD_VERSION,
         "motion_context_sha256": motion["motion_sha256"],
-        "nearest_ahead": nearest_ahead if available else None,
-        "nearest_behind": nearest_behind if available else None,
+        "nearest_ahead": nearest_ahead,
+        "nearest_behind": nearest_behind,
         "reason_codes": reasons,
         "service_scenario": service,
         "source_receipt_sha256": source_receipt_sha256,
@@ -2561,16 +2505,13 @@ def build_m2_strategy_receipt(
                     fuel_tire_service_timing=rejoin_timing,
                 )
 
-    input_traffic_estimate_available = (
-        isinstance(traffic, dict) and traffic.get("estimate_available") is True
-    )
     action_traffic_estimate_available = (
         isinstance(action_rejoin_estimate, dict)
         and action_rejoin_estimate.get("estimate_available") is True
     )
-    traffic_estimate_available = (
-        input_traffic_estimate_available or action_traffic_estimate_available
-    )
+    # Only the estimate reproduced for this exact action can authorize it.
+    # Legacy input estimates remain descriptive and cannot override a WAIT.
+    traffic_estimate_available = action_traffic_estimate_available
     if traffic is None:
         capabilities["traffic_data"] = _capability(
             "WAIT_TRAFFIC_DATA", ("REJOIN_TRAFFIC_INPUT_UNAVAILABLE",)
@@ -2654,8 +2595,6 @@ def build_m2_strategy_receipt(
             and action_rejoin_estimate is not None
             else None
         )
-        if input_traffic_estimate_available:
-            exact_rejoin_estimate_sha256 = traffic["traffic_sha256"]
         if exact_rejoin_estimate_sha256 is None:  # pragma: no cover - gate invariant
             raise AssertionError("passing traffic gate lacks a rejoin estimate")
         rejoin_estimate_semantic_sha256 = (

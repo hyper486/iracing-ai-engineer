@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import SimpleNamespace
 
 import pytest
 
-from iracing_ai_engineer import cli
+from iracing_ai_engineer import cli, live_monitor
 from iracing_ai_engineer.live_monitor import (
     LIVE_MONITOR_CONTRACT_VERSION,
     LiveMonitor,
@@ -224,6 +224,156 @@ def test_monitor_rejects_same_tick_with_changed_telemetry() -> None:
         monitor.feed(conflict)
 
 
+def test_session_info_refresh_is_not_a_duplicate_telemetry_conflict() -> None:
+    monitor = LiveMonitor(source_id="local", session_id="practice", sdk_tick_rate_hz=60)
+    frame = _frame(100, in_car=True)
+    monitor.feed(frame)
+    monitor.snapshot()
+    refreshed = replace(
+        frame, session_info_update=2, captured_monotonic_s=frame.captured_monotonic_s + 0.01
+    )
+
+    assert monitor.feed(refreshed) is False
+    assert monitor.snapshot_pending is False
+    changed = replace(refreshed, values={**refreshed.values, "FuelLevel": 41.0})
+    with pytest.raises(LiveMonitorError, match="DUPLICATE_CONFLICT"):
+        monitor.feed(changed)
+    receipt = monitor.finish()
+    assert receipt.frame_count == 1
+    assert receipt.duplicate_frame_count == 1
+
+
+def test_frozen_buffer_becomes_blocked_and_requires_a_final_health_snapshot() -> None:
+    monitor = LiveMonitor(source_id="local", session_id="practice", sdk_tick_rate_hz=60)
+    first = _frame(100, in_car=True)
+    monitor.feed(first)
+    snapshots = [monitor.snapshot()]
+    last = _frame(101, in_car=True)
+    monitor.feed(last)
+    snapshots.append(monitor.snapshot())
+    assert snapshots[-1]["status"] == "READY"
+    progress_at = last.captured_monotonic_s
+    assert monitor.feed(replace(last, captured_monotonic_s=progress_at + 0.5)) is False
+    assert not monitor.snapshot_pending
+    monitor.feed(replace(last, captured_monotonic_s=progress_at + 0.51))
+
+    with pytest.raises(LiveMonitorError, match="FINAL_SNAPSHOT_REQUIRED"):
+        monitor.finish()
+    snapshots.append(monitor.snapshot())
+    blocked = snapshots[-1]
+    assert blocked["status"] == "BLOCKED"
+    assert blocked["quality"]["status"] == "REJECTED"
+    assert blocked["quality"]["stale"] is True
+    assert "SOURCE_STALE" in blocked["reasons"]
+    assert "source_stale" in [event["kind"] for event in blocked["events"]]
+    assert blocked["telemetry"] == snapshots[-2]["telemetry"]
+    assert blocked["session_time_us"] == snapshots[-2]["session_time_us"]
+    for index in range(100):
+        monitor.feed(replace(last, captured_monotonic_s=progress_at + 1.0 + index))
+        assert not monitor.snapshot_pending
+
+    receipt = monitor.finish()
+    assert monitor.finish() is receipt
+    assert receipt.frame_count == 2
+    assert receipt.duplicate_frame_count == 102
+    assert receipt.snapshot_count == 3
+    assert receipt.in_car_snapshot_count == 2
+    assert receipt.final_status == "BLOCKED"
+    assert receipt.event_receipt.sample_count == 3
+    assert dict(receipt.event_receipt.event_kind_counts)["source_stale"] == 1
+    assert all(item["snapshot_sha256"] == _snapshot_digest(item) for item in snapshots)
+    stream = b"".join(
+        json.dumps(
+            item, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")
+        ).encode()
+        + b"\n"
+        for item in snapshots
+    )
+    assert receipt.snapshots_sha256 == hashlib.sha256(stream).hexdigest()
+    material = receipt.to_dict()
+    expected_hash = material.pop("receipt_sha256")
+    assert expected_hash == hashlib.sha256(
+        json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def test_frozen_buffer_recovers_only_when_new_samples_resume() -> None:
+    monitor = LiveMonitor(source_id="local", session_id="practice", sdk_tick_rate_hz=60)
+    last = _frame(100, in_car=True)
+    monitor.feed(last)
+    monitor.snapshot()
+    monitor.advance_time(last.captured_monotonic_s + 0.6)
+    assert monitor.snapshot()["status"] == "BLOCKED"
+    resumed_at = last.captured_monotonic_s + 0.7
+    monitor.feed(replace(_frame(101, in_car=True), captured_monotonic_s=resumed_at))
+    assert monitor.snapshot()["status"] == "BLOCKED"
+    monitor.feed(replace(_frame(102, in_car=True), captured_monotonic_s=resumed_at + 1 / 60))
+    resumed = monitor.snapshot()
+
+    assert resumed["status"] == "READY"
+    assert resumed["quality"]["stale"] is False
+    assert "source_resumed" in [event["kind"] for event in resumed["events"]]
+    receipt = monitor.finish()
+    assert receipt.frame_count == 3
+    assert receipt.event_receipt.sample_count == 4
+    assert dict(receipt.event_receipt.event_kind_counts)["source_stale"] == 1
+
+
+@pytest.mark.parametrize("clock", [None, True, -1, float("nan"), float("inf")])
+def test_monitor_requires_a_finite_observation_clock(clock) -> None:
+    monitor = LiveMonitor(source_id="local", session_id="practice", sdk_tick_rate_hz=60)
+    with pytest.raises(LiveMonitorError, match="OBSERVATION_TIME_INVALID"):
+        monitor.feed(replace(_frame(100, in_car=True), captured_monotonic_s=clock))
+
+
+def test_timer_observation_clock_cannot_regress() -> None:
+    monitor = LiveMonitor(source_id="local", session_id="practice", sdk_tick_rate_hz=60)
+    monitor.feed(_frame(100, in_car=True), observed_monotonic_s=10.0)
+    with pytest.raises(LiveMonitorError, match="OBSERVATION_TIME_REGRESSION"):
+        monitor.advance_time(9.0)
+
+
+def test_session_time_rejection_matches_snapshot_and_recovers_on_next_frame() -> None:
+    monitor = LiveMonitor(source_id="local", session_id="practice", sdk_tick_rate_hz=60)
+    monitor.feed(_frame(100, in_car=True))
+    monitor.snapshot()
+    regressed = _frame(101, in_car=True)
+    regressed.values["SessionTime"] = 0.0
+    monitor.feed(regressed)
+    rejected = monitor.snapshot()
+
+    assert rejected["status"] == "BLOCKED"
+    assert rejected["quality"]["status"] == "REJECTED"
+    assert "SESSION_TIME_REGRESSION" in rejected["reasons"]
+    assert "quality_rejected" in [event["kind"] for event in rejected["events"]]
+    monitor.feed(_frame(102, in_car=True))
+    recovered = monitor.snapshot()
+    assert recovered["status"] == "READY"
+    assert "SESSION_TIME_REGRESSION" not in recovered["reasons"]
+    assert monitor.finish().event_receipt.rejected_sample_count == 1
+
+
+def test_source_reset_details_do_not_reveal_raw_identity() -> None:
+    monitor = LiveMonitor(
+        source_id="racer-private-rig", session_id="private-session", sdk_tick_rate_hz=60
+    )
+    monitor.feed(_frame(100, in_car=False))
+    snapshots = [monitor.snapshot()]
+    monitor.feed(_frame(101, in_car=False, sim_mode="replay"))
+    snapshots.append(monitor.snapshot())
+    reset = next(event for event in snapshots[-1]["events"] if event["kind"] == "source_reset")
+    assert reset["details"] == {
+        "previous_schema": "normalized-telemetry-v3",
+        "previous_source_kind": "SDK_LIVE",
+        "reasons": ["SOURCE_KIND_CHANGED"],
+    }
+    serialized = json.dumps((snapshots, monitor.finish().to_dict()))
+    assert "racer-private-rig" not in serialized
+    assert "private-session" not in serialized
+    assert "source_id" not in serialized
+    assert "session_id" not in serialized
+
+
 @pytest.mark.parametrize("source_id", ["", " padded", "padded ", "bad\nvalue"])
 def test_monitor_rejects_ambiguous_source_identifier(source_id: str) -> None:
     with pytest.raises(LiveMonitorError, match="SOURCE_ID_INVALID"):
@@ -356,6 +506,118 @@ def test_transport_normalizes_every_tick_but_emits_bounded_snapshots() -> None:
     assert clock.sleeps == [pytest.approx(0.006)]
     assert transport.closed is True
     assert all("UserName" not in fields for fields in transport.requested_fields)
+
+
+def test_transport_emits_stale_state_even_without_a_new_buffer_tick() -> None:
+    clock = _Clock()
+    last = _frame(101, in_car=True)
+    transport = _Transport([_frame(100, in_car=True), last, *[last] * 10], clock)
+    snapshots: list[dict[str, object]] = []
+
+    receipt = monitor_live_transport(
+        transport,
+        emit=snapshots.append,
+        source_id="local",
+        session_id="practice",
+        wait_seconds=0,
+        duration_s=10,
+        poll_seconds=0.1,
+        snapshot_seconds=0.05,
+        max_reads=len(transport.frames),
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert [item["status"] for item in snapshots] == ["DEGRADED", "READY", "BLOCKED"]
+    assert receipt.final_status == "BLOCKED"
+    assert receipt.frame_count == 2
+    assert receipt.duplicate_frame_count == 10
+    assert receipt.event_receipt.sample_count == 3
+    assert transport.closed
+
+
+def test_transport_counts_normalization_and_emit_time_against_poll_budget(monkeypatch) -> None:
+    clock = _Clock()
+    transport = _Transport([_frame(100, in_car=True), _frame(101, in_car=True)], clock)
+    original_normalize = live_monitor.normalize_sdk_frame
+
+    def normalize(*args, **kwargs):
+        sample = original_normalize(*args, **kwargs)
+        clock.now += 0.002
+        return sample
+
+    def emit(snapshot):
+        clock.now += 0.003
+
+    monkeypatch.setattr(live_monitor, "normalize_sdk_frame", normalize)
+    monitor_live_transport(
+        transport,
+        emit=emit,
+        source_id="local",
+        session_id="practice",
+        wait_seconds=0,
+        duration_s=1,
+        poll_seconds=0.01,
+        max_reads=2,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert clock.sleeps == [pytest.approx(0.001)]
+    assert transport.closed
+
+
+def test_transport_rechecks_staleness_after_final_wait() -> None:
+    clock = _Clock()
+    transport = _Transport([_frame(100, in_car=True)], clock)
+    snapshots: list[dict[str, object]] = []
+    receipt = monitor_live_transport(
+        transport,
+        emit=snapshots.append,
+        source_id="local",
+        session_id="practice",
+        wait_seconds=0,
+        duration_s=0.75,
+        poll_seconds=1.0,
+        snapshot_seconds=1.0,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert clock.now == 0.75
+    assert [item["status"] for item in snapshots] == ["DEGRADED", "BLOCKED"]
+    assert receipt.final_status == "BLOCKED"
+    assert receipt.frame_count == 1
+    assert receipt.in_car_snapshot_count == 1
+    assert transport.closed
+
+
+def test_slow_final_snapshot_sink_cannot_leave_a_ready_terminal_receipt() -> None:
+    clock = _Clock()
+    transport = _Transport([_frame(100, in_car=True), _frame(101, in_car=True)], clock)
+    snapshots: list[dict[str, object]] = []
+
+    def emit(snapshot):
+        snapshots.append(snapshot)
+        if len(snapshots) == 2:
+            clock.now += 1.0
+
+    receipt = monitor_live_transport(
+        transport,
+        emit=emit,
+        source_id="local",
+        session_id="practice",
+        wait_seconds=0,
+        duration_s=10,
+        max_reads=2,
+        monotonic=clock.monotonic,
+        sleep=clock.sleep,
+    )
+
+    assert [item["status"] for item in snapshots] == ["DEGRADED", "READY", "BLOCKED"]
+    assert receipt.final_status == "BLOCKED"
+    assert receipt.frame_count == 2
+    assert receipt.event_receipt.sample_count == 3
 
 
 @dataclass

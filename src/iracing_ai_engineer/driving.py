@@ -8,7 +8,7 @@ the conservative quality/cleanliness gates in :mod:`iracing_ai_engineer.laps`.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from math import ceil
 from typing import Any, Literal
 
@@ -606,7 +606,22 @@ def detect_corner_segments(
                 carry_end_m=float(grid[max(exit_index, next_brake)]),
             )
         )
-    return tuple(corners)
+    # Search limits use every braking run, including runs later rejected as
+    # corner candidates. Only retained corners can own accounting boundaries;
+    # otherwise a skipped brake dab (or a partial run at the finish line)
+    # leaves part of the lap unaccounted for.
+    return tuple(
+        replace(
+            corner,
+            accounting_start_m=0.0 if index == 0 else corner.brake_start_m,
+            carry_end_m=(
+                corners[index + 1].brake_start_m
+                if index + 1 < len(corners)
+                else float(grid[-1])
+            ),
+        )
+        for index, corner in enumerate(corners)
+    )
 
 
 def _grid_index(grid: np.ndarray, distance_m: float) -> int:
@@ -657,7 +672,9 @@ def _corner_lap_metrics(
     )
 
     coast_distance: float | None = None
-    if release is not None and pickup is not None and pickup > release:
+    if release is not None and pickup is not None:
+        # An empty interval is an observed zero, including overlapping brake
+        # and throttle. None is reserved for an unobserved endpoint.
         coast = (lap.brake[release:pickup] <= config.brake_release_threshold) & (
             lap.throttle[release:pickup] <= 0.15
         )

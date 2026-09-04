@@ -286,14 +286,14 @@ def _traffic(identity: dict[str, object], *, decision_tick: int) -> dict[str, ob
                 "current_signed_lap_delta": 0.5,
                 "point_count": 601,
                 "rate_laps_per_s": 0.01,
-                "rate_range_laps_per_s": [0.0095, 0.0105],
+                "rate_range_laps_per_s": [0.00999, 0.01001],
             }
         ],
         "player": {
             "car_idx": 0,
             "point_count": 601,
             "rate_laps_per_s": 0.01,
-            "rate_range_laps_per_s": [0.0095, 0.0105],
+            "rate_range_laps_per_s": [0.00999, 0.01001],
         },
         "reason_codes": [],
         "source_receipt_sha256": "d" * 64,
@@ -1043,6 +1043,36 @@ def test_direct_traffic_observation_is_retained_but_cannot_claim_rejoin(upstream
         "status": "WAIT_REJOIN_ESTIMATE",
     }
     assert "WAIT_REJOIN_ESTIMATE" in receipt["quality_gate"]["reason_codes"]
+
+
+def test_legacy_available_traffic_cannot_override_action_bound_overlap(upstream):
+    fuel, m1 = upstream
+    context = _context(fuel, m1)
+    traffic = context["traffic_rejoin"]
+    motion = traffic["motion_context"]
+    motion["opponents"][0]["current_signed_lap_delta"] = -0.355
+    motion["motion_sha256"] = canonical_sha256(
+        {key: value for key, value in motion.items() if key != "motion_sha256"}
+    )
+    traffic.update(
+        motion_context_sha256=motion["motion_sha256"],
+        estimate_available=True,
+        status="AVAILABLE",
+        rejoin_gap_range_s=[99.0, 100.0],
+    )
+    traffic["traffic_sha256"] = canonical_sha256(
+        {key: value for key, value in traffic.items() if key != "traffic_sha256"}
+    )
+    context = _rehash_context(context)
+
+    receipt = _build(fuel, m1, context, rules=_rules(context["event_identity"]))
+
+    assert receipt["traffic_rejoin"]["estimate"]["reason_codes"] == [
+        "REJOIN_ZERO_CROSSING_WITHIN_UNCERTAINTY"
+    ]
+    assert receipt["capabilities"]["traffic_data"]["status"] == "WAIT_REJOIN_ESTIMATE"
+    assert receipt["quality_gate"]["status"] == "WAIT_CAPABILITIES"
+    assert receipt["recommendations"] == []
 
 
 @pytest.mark.parametrize(

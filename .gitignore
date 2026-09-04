@@ -25,6 +25,7 @@ deliverable/
 receipts/
 state/
 *.ibt
+*.rpy
 *.jsonl
 *.parquet
 *.etl

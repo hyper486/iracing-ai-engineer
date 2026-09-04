@@ -97,7 +97,7 @@ def _wait_m2(
     source_epoch: int = 1,
     session_epoch: int = 1,
 ) -> dict[str, object]:
-    result = copy.deepcopy(_load(M2_PATH))
+    result = copy.deepcopy(_wait_template())
     context = result["strategy_context"]
     lifecycle = result["lifecycle"]
     input_binding = result["input_binding"]
@@ -144,6 +144,14 @@ def _wait_m2(
     )
     result["recommendations"] = []
     return _rehash_m2(result)
+
+
+@cache
+def _wait_template() -> dict[str, object]:
+    helpers = runpy.run_path("tests/test_offline_m2_strategy_receipt.py")
+    fuel, m1 = helpers["upstream"].__wrapped__()
+    context = helpers["_context"](fuel, m1, traffic=False)
+    return helpers["_build"](fuel, m1, context, rules=None)
 
 
 @cache
@@ -204,6 +212,9 @@ def _refresh_candidate_traffic(
     )
     assert isinstance(estimate, dict)
     traffic_output["estimate"] = estimate
+    recommendation["recommendation_basis"]["rejoin_estimate_semantic_sha256"] = (
+        advisor_module._M2._rejoin_semantic_sha256(estimate)
+    )
     return str(estimate["estimate_sha256"])
 
 
@@ -293,6 +304,11 @@ def _advance_candidate_m2(
     assert isinstance(valid_until, dict)
     previous_id = str(lifecycle["active_recommendation_id"])
     observation["decision_tick"] = tick
+    if recommended_lap_from_now is not None:
+        action["recommended_lap_from_now"] = recommended_lap_from_now
+        basis_action = basis["action"]
+        assert isinstance(basis_action, dict)
+        basis_action["recommended_lap_from_now"] = recommended_lap_from_now
     rejoin_sha256 = _refresh_candidate_traffic(result, tick=tick)
     context["context_sha256"] = canonical_sha256(
         {key: item for key, item in context.items() if key != "context_sha256"}
@@ -301,11 +317,6 @@ def _advance_candidate_m2(
     input_binding["input_lineage_sha256"] = canonical_sha256(
         {key: item for key, item in input_binding.items() if key != "input_lineage_sha256"}
     )
-    if recommended_lap_from_now is not None:
-        action["recommended_lap_from_now"] = recommended_lap_from_now
-        basis_action = basis["action"]
-        assert isinstance(basis_action, dict)
-        basis_action["recommended_lap_from_now"] = recommended_lap_from_now
     recommendation_id = f"m2-strategy:{canonical_sha256(basis)}"
     recommendation["recommendation_id"] = recommendation_id
     recommendation["supersedes_id"] = previous_id if recommendation_id != previous_id else None
@@ -351,16 +362,6 @@ def _advance_candidate_m2(
     assert isinstance(previous_lifecycle, dict)
     lifecycle["state_revision"] = previous_lifecycle["state_revision"] + 1
     return _rehash_m2(result)
-
-
-def _force_diagnosis_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    original = advisor_module._validate_diagnosis_receipt
-
-    def force_ready(*args: object, **kwargs: object) -> tuple[dict[str, object], bool]:
-        receipt, _ = original(*args, **kwargs)
-        return receipt, True
-
-    monkeypatch.setattr(advisor_module, "_validate_diagnosis_receipt", force_ready)
 
 
 class _Bundle(dict[str, Any]):
@@ -429,15 +430,12 @@ def _make_bundle(tmp_path: Path, kind: str) -> _Bundle:
 
 @pytest.fixture(scope="module")
 def ibt_bundle(tmp_path_factory: pytest.TempPathFactory) -> _Bundle:
-    if not all(path.is_file() for path in (IBT_PATH, M2_PATH, M3_PATH, DRIVING_PATH)):
-        pytest.skip("REQUIRES_DATA: private Audi/Spa replay bundle is not published")
+    # The paired reader and receipts are synthetic and require no private IBT.
     return _make_bundle(tmp_path_factory.mktemp("advisor-ibt"), "ibt")
 
 
 @pytest.fixture(scope="module")
 def collector_bundle(tmp_path_factory: pytest.TempPathFactory) -> _Bundle:
-    if not all(path.is_file() for path in (M2_PATH, M3_PATH, DRIVING_PATH)):
-        pytest.skip("REQUIRES_DATA: private Audi/Spa replay bundle is not published")
     return _make_bundle(tmp_path_factory.mktemp("advisor-collector"), "collector")
 
 
@@ -474,7 +472,7 @@ def test_ibt_and_collector_derive_clock_from_same_active_normalized_stream(
     )
 
 
-def test_current_m3_wait_gates_force_one_p3_and_zero_tactical(
+def test_missing_m2_candidate_yields_one_p3_and_zero_tactical(
     ibt_bundle: _Bundle,
 ) -> None:
     result = ibt_bundle["timeline"]
@@ -501,7 +499,7 @@ def test_current_m3_wait_gates_force_one_p3_and_zero_tactical(
     }
 
 
-def test_valid_upstream_candidate_is_still_p3_wait_while_m3_gates_wait(
+def test_valid_upstream_candidate_reaches_policy_while_m3_gates_wait(
     ibt_bundle: _Bundle,
 ) -> None:
     candidate = _candidate_m2(
@@ -518,12 +516,30 @@ def test_valid_upstream_candidate_is_still_p3_wait_while_m3_gates_wait(
                 ibt_bundle["driving_bytes"]
             ).hexdigest(),
         )
-    assert result["status"] == "WAIT_DATA"
+    assert result["status"] == "SHADOW_CANDIDATE_MUTED"
     assert result["summary"]["upstream_tactical_candidate_count"] == 1
-    assert result["summary"]["tactical_observation_count"] == 0
+    assert result["summary"]["tactical_observation_count"] == 1
     assert result["summary"]["final_active_tactical_count"] == 0
-    assert result["speech_policy_run"]["decisions"] == []
-    assert result["speech_policy_run"]["input_records"][0]["payload"]["priority"] == "P3"
+    assert result["bridge_policy"]["diagnosis_promotion_required"] is False
+    assert result["bridge_policy"]["driving_diagnosis_ready"] is False
+    assert [item["kind"] for item in result["speech_policy_run"]["decisions"]] == [
+        "SUPPRESS_MUTED"
+    ]
+    assert result["speech_policy_run"]["input_records"][0]["payload"]["priority"] != "P3"
+    assert all(
+        item["audible"] is False and item["executable"] is False
+        for item in result["speech_policy_run"]["decisions"]
+    )
+    assert validate_advisor_timeline(
+        result,
+        [candidate],
+        ibt_bundle["driving_bytes"],
+        expected_m2_receipt_sha256s=[candidate["m2_strategy_receipt_sha256"]],
+        expected_driving_replay_serialized_sha256=hashlib.sha256(
+            ibt_bundle["driving_bytes"]
+        ).hexdigest(),
+        expected_clock_receipt_sha256=result["clock_receipt"]["clock_receipt_sha256"],
+    ) == result
 
 
 def test_rejects_self_rehashed_recommendation_tamper_with_attacker_digest(
@@ -550,11 +566,96 @@ def test_rejects_self_rehashed_recommendation_tamper_with_attacker_digest(
         )
 
 
+def _replace_rejoin_and_rehash_candidate(
+    candidate: dict[str, object], estimate: dict[str, object]
+) -> dict[str, object]:
+    result = copy.deepcopy(candidate)
+    result["traffic_rejoin"]["estimate"] = estimate
+    recommendation = result["recommendations"][0]
+    basis = recommendation["recommendation_basis"]
+    basis["rejoin_estimate_semantic_sha256"] = advisor_module._M2._rejoin_semantic_sha256(estimate)
+    recommendation_id = f"m2-strategy:{canonical_sha256(basis)}"
+    recommendation["recommendation_id"] = recommendation_id
+    recommendation["evidence_ids"][4] = f"rejoin-estimate:{estimate['estimate_sha256']}"
+    result["lifecycle"]["active_recommendation_id"] = recommendation_id
+    result["lifecycle"]["events"][0]["recommendation_id"] = recommendation_id
+    return _rehash_m2(result)
+
+
+@pytest.mark.parametrize(
+    ("field", "wrong_value"),
+    [
+        ("recommended_lap_from_now", 0),
+        ("fuel_add_l", 21.0),
+        ("change_tires", True),
+        ("estimated_stationary_service_s", 11.0),
+    ],
+)
+def test_rejects_rehashed_rejoin_for_a_different_action(
+    ibt_bundle: _Bundle, field: str, wrong_value: object
+) -> None:
+    candidate = _candidate_m2(
+        ibt_bundle["source_binding"],
+        tick=int(ibt_bundle["frames"][-1]["SessionTick"]),
+    )
+    action = candidate["recommendations"][0]["action"]
+    assert action[field] != wrong_value
+    wrong_action = {**action, field: wrong_value}
+    estimate = advisor_module._M2._build_action_bound_rejoin(
+        candidate["strategy_context"]["traffic_rejoin"],
+        candidate["calibration"]["calibrated_model"],
+        wrong_action,
+        fuel_tire_service_timing="SEQUENTIAL",
+    )
+    assert estimate is not None and estimate["estimate_available"] is True
+    # A valid estimate for another action must remain invalid after every
+    # dependent hash, recommendation ID, lifecycle ID and external pin agree.
+    bad = _replace_rejoin_and_rehash_candidate(candidate, estimate)
+    with (
+        ibt_bundle["open_run"]() as run,
+        pytest.raises(
+            AdvisorTimelineError, match="rejoin service does not match recommended action"
+        ),
+    ):
+        build_advisor_timeline(
+            run,
+            [bad],
+            ibt_bundle["driving_bytes"],
+            expected_m2_receipt_sha256s=[bad["m2_strategy_receipt_sha256"]],
+            expected_driving_replay_serialized_sha256=hashlib.sha256(
+                ibt_bundle["driving_bytes"]
+            ).hexdigest(),
+        )
+
+
+def test_rejects_rehashed_rejoin_timing_inconsistent_with_tire_scenario() -> None:
+    candidate = copy.deepcopy(_candidate_v2_template())
+    context = candidate["strategy_context"]
+    action = candidate["recommendations"][0]["action"]
+    assert action["change_tires"] is True
+    timing = candidate["traffic_rejoin"]["estimate"]["service_scenario"]["fuel_tire_service_timing"]
+    other_timing = "PARALLEL" if timing == "SEQUENTIAL" else "SEQUENTIAL"
+    estimate = advisor_module._M2._build_action_bound_rejoin(
+        context["traffic_rejoin"],
+        candidate["calibration"]["calibrated_model"],
+        action,
+        fuel_tire_service_timing=other_timing,
+    )
+    assert estimate is not None and estimate["estimate_available"] is True
+    bad = _replace_rejoin_and_rehash_candidate(candidate, estimate)
+    with pytest.raises(AdvisorTimelineError, match="rejoin and tire service timing disagree"):
+        advisor_module._validate_m2_receipts(
+            [bad],
+            [bad["m2_strategy_receipt_sha256"]],
+            source_binding=context["source_binding"],
+            source_epoch=1,
+            session_epoch=1,
+        )
+
+
 def test_tactical_same_content_refresh_and_changed_content_supersede(
     ibt_bundle: _Bundle,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _force_diagnosis_ready(monkeypatch)
     ticks = [int(frame["SessionTick"]) for frame in ibt_bundle["frames"][-3:]]
     first = _candidate_m2(ibt_bundle["source_binding"], tick=ticks[0])
     second = _advance_candidate_m2(first, tick=ticks[1])
@@ -602,9 +703,7 @@ def test_tactical_same_content_refresh_and_changed_content_supersede(
 
 def test_default_muted_candidate_status_matches_empty_final_active_state(
     ibt_bundle: _Bundle,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _force_diagnosis_ready(monkeypatch)
     candidate = _candidate_m2(
         ibt_bundle["source_binding"],
         tick=int(ibt_bundle["frames"][-1]["SessionTick"]),
@@ -995,10 +1094,15 @@ def test_real_audi_is_source_derived_one_p3_wait_and_zero_tactical() -> None:
         result["speech_policy_run"]["receipt"]["receipt_sha256"]
         == "436755fbd09d15a6f24b4f4a29384bfdb6f0dd34518152bc0bc4c4fcdee77eab"
     )
-    assert (
-        result["advisor_timeline_sha256"]
-        == "e85bd0bf2574f0b5614078369eb10572658dc62d8e030217a1ea3a56f4f649a9"
-    )
+    assert result["contract_version"] == "advisor-timeline-v3"
+    assert validate_advisor_timeline(
+        result,
+        [m2],
+        driving,
+        expected_m2_receipt_sha256s=[m2["m2_strategy_receipt_sha256"]],
+        expected_driving_replay_serialized_sha256=hashlib.sha256(driving).hexdigest(),
+        expected_clock_receipt_sha256=result["clock_receipt"]["clock_receipt_sha256"],
+    ) == result
     assert result["advisor_timeline_sha256"] == canonical_sha256(
         {key: item for key, item in result.items() if key != "advisor_timeline_sha256"}
     )

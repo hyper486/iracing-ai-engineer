@@ -30,6 +30,12 @@ acceptance is still pending a human-driven, on-track run with enough laps and
 pit evidence for strategy and driving advice. See
 [the public project status](docs/PUBLIC_PROJECT_STATUS.md).
 
+The September 4 correctness/privacy review fixes are documented in
+[the review-fix record](docs/REVIEW_FIXES.md). Rejoin estimates now bind the
+future stop lap and physical position around the track, and valid strategy
+candidates no longer depend on driving-diagnosis promotion to reach the shadow
+policy. Live tactical delivery, audio and broader coaching still require work.
+
 ## Quick start
 
 Requirements:

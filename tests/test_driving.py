@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 import iracing_ai_engineer.driving as driving_module
 from iracing_ai_engineer.driving import (
@@ -287,6 +288,111 @@ def test_analysis_refuses_too_few_clean_laps_without_partial_output():
     assert report.laps == ()
     assert report.corner_metrics == ()
     assert report.diagnoses == ()
+
+
+@pytest.mark.parametrize("pickup_m", [240, 230], ids=["at-release", "overlap"])
+def test_zero_coast_reference_preserves_repeated_long_coast_diagnosis(pickup_m):
+    channels, observations = _synthetic_session()
+    for lap in observations[:6]:
+        channels["Throttle"][lap.start_frame + pickup_m : lap.start_frame + 270] = 1.0
+
+    report = analyze_driving(channels, observations, track_length_m=TRACK_LENGTH_M)
+
+    assert report.status == "READY"
+    reference = next(
+        item
+        for item in report.corner_metrics
+        if item.corner_id == "C01" and item.lap_ordinal == report.reference.lap_ordinal
+    )
+    assert reference.brake_release_m == 240.0
+    assert reference.throttle_pickup_m == pickup_m
+    assert reference.coast_distance_m == 0.0
+    diagnosis = next(item for item in report.diagnoses if item.diagnosis == "LONG_COAST")
+    assert diagnosis.evidence_lap_ordinals == (7, 8)
+    comparison = next(item for item in diagnosis.comparisons if item.metric == "coast_distance_m")
+    assert comparison.reference_value == 0.0
+    assert comparison.evidence_median == 74.0
+
+
+@pytest.mark.parametrize("missing_event", ["brake", "throttle"])
+def test_unobserved_coast_endpoint_stays_unavailable(missing_event):
+    channels, observations = _synthetic_session()
+    # One non-reference lap loses an event; the other laps still establish
+    # the corner and its reference trace.
+    lap = observations[-1]
+    channel = "Brake" if missing_event == "brake" else "Throttle"
+    channels[channel][lap.start_frame : lap.start_frame + 530] = 0.0
+
+    report = analyze_driving(channels, observations, track_length_m=TRACK_LENGTH_M)
+
+    assert report.status == "READY"
+    metric = next(
+        item
+        for item in report.corner_metrics
+        if item.corner_id == "C01" and item.lap_ordinal == lap.ordinal
+    )
+    if missing_event == "brake":
+        assert metric.brake_release_m is None
+    else:
+        assert metric.throttle_pickup_m is None
+    assert metric.coast_distance_m is None
+
+
+@pytest.mark.parametrize("dab_start_m", [430, 1140], ids=["between-corners", "after-last-corner"])
+def test_skipped_straight_brake_dab_preserves_lap_analysis(dab_start_m):
+    channels, observations = _synthetic_session()
+    baseline = analyze_driving(channels, observations, track_length_m=TRACK_LENGTH_M)
+    for lap in observations:
+        channels["Brake"][
+            lap.start_frame + dab_start_m : lap.start_frame + dab_start_m + 15
+        ] = 0.2
+
+    report = analyze_driving(channels, observations, track_length_m=TRACK_LENGTH_M)
+
+    assert report.status == "READY"
+    assert len(report.corners) == len(baseline.corners) == 3
+    assert report.diagnoses == baseline.diagnoses
+    assert report.corners[0].accounting_start_m == 0.0
+    assert report.corners[-1].carry_end_m == TRACK_LENGTH_M
+    assert all(
+        left.carry_end_m == right.accounting_start_m
+        for left, right in zip(report.corners[:-1], report.corners[1:], strict=True)
+    )
+    assert all(item.closed and abs(item.residual_s) <= 1e-12 for item in report.delta_closures)
+
+
+def test_braking_across_finish_line_preserves_full_lap_accounting():
+    channels, observations = _synthetic_session()
+    shifted_observations = []
+    for lap in observations:
+        start, end = lap.start_frame, lap.end_frame_exclusive
+        # Shift the first braking event across zero distance, preserving one
+        # complete periodic lap and reconstructing its time from the speed.
+        for name in ("Speed", "Throttle", "Brake", "SteeringWheelAngle"):
+            shifted = np.roll(channels[name][start : end - 1], -200)
+            channels[name][start:end] = np.r_[shifted, shifted[0]]
+        speed = channels["Speed"][start:end]
+        elapsed = np.r_[0.0, np.cumsum(1.0 / ((speed[:-1] + speed[1:]) / 2.0))]
+        channels["SessionTime"][start:end] = lap.start_time_s + elapsed
+        shifted_observations.append(
+            replace(
+                lap,
+                duration_s=float(elapsed[-1]),
+                end_time_s=lap.start_time_s + float(elapsed[-1]),
+            )
+        )
+
+    report = analyze_driving(
+        channels, shifted_observations, track_length_m=TRACK_LENGTH_M
+    )
+
+    assert report.status == "READY"
+    assert len(report.corners) == 3
+    assert report.corners[0].brake_start_m == 0.0
+    assert report.corners[-1].carry_end_m == TRACK_LENGTH_M
+    assert len(report.delta_closures) == len(observations)
+    assert any(item.actual_lap_delta_s > 0.0 for item in report.delta_closures)
+    assert all(item.closed and abs(item.residual_s) <= 1e-12 for item in report.delta_closures)
 
 
 def test_analysis_refuses_non_reproducible_fastest_group():

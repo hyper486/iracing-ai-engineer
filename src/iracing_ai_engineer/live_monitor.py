@@ -15,12 +15,12 @@ import math
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any
 
 from .collector import ReadOnlySdkTransport, validate_variable_descriptors
-from .events import TelemetryEvent, TelemetryEventPipeline, TelemetryEventReceipt
+from .events import EventKind, TelemetryEvent, TelemetryEventPipeline, TelemetryEventReceipt
 from .sdk_probe import (
     OPPONENT_ARRAY_FIELDS,
     TARGET_FIELDS,
@@ -30,6 +30,7 @@ from .sdk_probe import (
 )
 from .telemetry import (
     Presence,
+    Provenance,
     QualityStatus,
     SourceKind,
     TelemetryField,
@@ -54,6 +55,21 @@ LIVE_MONITOR_FIELDS = tuple(
 )
 
 _CORE_FIELDS = frozenset(("SessionNum", "SessionTick", "SessionTime"))
+
+# Event details are a second identity boundary: SOURCE_RESET contains a raw
+# previous_source_id even though the event's top-level identity is omitted.
+_EVENT_DETAIL_FIELDS = {
+    EventKind.SOURCE_STARTED: ("schema",),
+    EventKind.SOURCE_RESET: ("previous_source_kind", "previous_schema", "reasons"),
+    EventKind.SESSION_RESET: ("reasons",),
+    EventKind.QUALITY_REJECTED: ("issues",),
+    EventKind.DROPPED_TICKS: ("count",),
+    EventKind.LAP_COMPLETED: (
+        "completed_count", "current_laps_completed", "previous_laps_completed",
+    ),
+    EventKind.LAP_WRAP: ("current_lap_distance_pct", "previous_lap_distance_pct"),
+    EventKind.FLAG_CHANGED: ("changed_mask", "current_flags", "previous_flags"),
+}
 
 
 class LiveMonitorError(ValueError):
@@ -125,7 +141,6 @@ def _frame_digest(frame: RawSdkFrame) -> str:
     return _sha256(
         {
             "read_errors": list(frame.read_errors),
-            "session_info_update": frame.session_info_update,
             "sim_mode_raw": frame.sim_mode_raw,
             "values": frame.values,
         }
@@ -134,8 +149,13 @@ def _frame_digest(frame: RawSdkFrame) -> str:
 
 def _event_projection(event: TelemetryEvent) -> dict[str, object]:
     payload = event.to_dict()
+    details = payload["details"]
     return {
-        "details": payload["details"],
+        "details": {
+            key: details[key]
+            for key in _EVENT_DETAIL_FIELDS.get(event.kind, ())
+            if key in details
+        },
         "event_sequence": event.sequence,
         "kind": event.kind.value,
         "session_time_us": event.session_time_us,
@@ -237,6 +257,12 @@ class LiveMonitor:
         self._latest_buffer_tick: int | None = None
         self._latest_frame_digest: str | None = None
         self._last_snapshot_buffer_tick: int | None = None
+        self._state_revision = 0
+        self._last_snapshot_revision = -1
+        self._last_progress_at: float | None = None
+        self._last_observed_at: float | None = None
+        self._buffer_stale = False
+        self._event_rejection_issues: tuple[str, ...] = ()
         self._snapshot_hasher = hashlib.sha256()
         self._snapshot_count = 0
         self._frame_count = 0
@@ -256,13 +282,73 @@ class LiveMonitor:
     def last_snapshot_buffer_tick(self) -> int | None:
         return self._last_snapshot_buffer_tick
 
-    def feed(self, frame: RawSdkFrame) -> bool:
+    @property
+    def snapshot_pending(self) -> bool:
+        return (
+            self._latest_sample is not None
+            and self._last_snapshot_revision != self._state_revision
+        )
+
+    def _observe_clock(self, observed_monotonic_s: object) -> float:
+        if (
+            isinstance(observed_monotonic_s, bool)
+            or not isinstance(observed_monotonic_s, (int, float))
+            or not math.isfinite(observed_monotonic_s)
+            or observed_monotonic_s < 0
+        ):
+            raise LiveMonitorError("OBSERVATION_TIME_INVALID")
+        now = float(observed_monotonic_s)
+        if self._last_observed_at is not None and now < self._last_observed_at:
+            raise LiveMonitorError("OBSERVATION_TIME_REGRESSION")
+        self._last_observed_at = now
+        return now
+
+    def advance_time(self, observed_monotonic_s: float) -> None:
+        """Invalidate the last state when no SDK tick has progressed in time."""
+
+        if self._receipt is not None:
+            raise RuntimeError("live monitor is already finished")
+        now = self._observe_clock(observed_monotonic_s)
+        if (
+            self._latest_sample is None
+            or self._last_progress_at is None
+            or self._buffer_stale
+            or now <= self._last_progress_at + self._stale_after_s
+        ):
+            return
+        self._buffer_stale = True
+        self._state_revision += 1
+        # This is one derived health observation of the last SDK sample, not
+        # another captured frame. Keep its source clocks unchanged; a timer
+        # must never fabricate telemetry progression or a new in-car frame.
+        sample = self._latest_sample
+        issues = tuple(sorted(set(_field_value(sample.quality.issues) or ()) | {"SOURCE_STALE"}))
+        stale_sample = replace(
+            sample,
+            quality=replace(
+                sample.quality,
+                stale=TelemetryField.present(True, Provenance.DERIVED),
+                dropped_ticks=TelemetryField.present(0, Provenance.DERIVED),
+                status=TelemetryField.present(QualityStatus.REJECTED, Provenance.DERIVED),
+                issues=TelemetryField.present(issues, Provenance.DERIVED),
+            ),
+        )
+        self._pending_events.extend(self._events.feed(stale_sample))
+
+    def feed(
+        self, frame: RawSdkFrame, *, observed_monotonic_s: float | None = None
+    ) -> bool:
         """Consume one frozen frame; return false for a same-tick duplicate."""
 
         if self._receipt is not None:
             raise RuntimeError("live monitor is already finished")
         if not isinstance(frame, RawSdkFrame):
             raise TypeError("frame must be a RawSdkFrame")
+        now = self._observe_clock(
+            frame.captured_monotonic_s
+            if observed_monotonic_s is None
+            else observed_monotonic_s
+        )
         frame_digest = _frame_digest(frame)
         if frame.buffer_tick == self._latest_buffer_tick:
             if frame_digest != self._latest_frame_digest:
@@ -271,6 +357,7 @@ class LiveMonitor:
                     "same SDK buffer tick carried different telemetry",
                 )
             self._duplicate_frame_count += 1
+            self.advance_time(now)
             return False
 
         _, source_kind = _source_kind_from_mode(frame.sim_mode_raw)
@@ -295,6 +382,13 @@ class LiveMonitor:
             expected_car_count=self._expected_car_count,
         )
         emitted = self._events.feed(sample)
+        self._event_rejection_issues = tuple(sorted({
+            issue
+            for event in emitted
+            if event.kind is EventKind.QUALITY_REJECTED
+            for issue in dict(event.details).get("issues", ("EVENT_QUALITY_REJECTED",))
+            if isinstance(issue, str)
+        }))
         self._pending_events.extend(emitted)
         self._latest_sample = sample
         self._latest_context = classify_context(frame.sim_mode_raw, frame.values)
@@ -302,6 +396,9 @@ class LiveMonitor:
         self._latest_source_kind = source_kind
         self._latest_buffer_tick = frame.buffer_tick
         self._latest_frame_digest = frame_digest
+        self._last_progress_at = now
+        self._buffer_stale = False
+        self._state_revision += 1
         self._frame_count += 1
         self._source_kind_counts[source_kind.value] += 1
         dropped = _field_value(sample.quality.dropped_ticks)
@@ -309,13 +406,25 @@ class LiveMonitor:
             self._dropped_tick_count += dropped
         return True
 
+    def _quality_state(self) -> tuple[QualityStatus | None, tuple[str, ...], bool | None]:
+        if self._latest_sample is None:
+            raise LiveMonitorError("NO_FRAME")
+        quality = self._latest_sample.quality
+        issues = set(_field_value(quality.issues) or ())
+        issues.update(self._event_rejection_issues)
+        if self._buffer_stale:
+            issues.add("SOURCE_STALE")
+        status = _field_value(quality.status)
+        if self._buffer_stale or self._event_rejection_issues:
+            status = QualityStatus.REJECTED
+        stale = True if self._buffer_stale else _field_value(quality.stale)
+        return status, tuple(sorted(issues)), stale
+
     def _status(self) -> tuple[str, tuple[str, ...]]:
         if self._latest_sample is None or self._latest_context is None:
             raise LiveMonitorError("NO_FRAME")
-        sample = self._latest_sample
         context = self._latest_context
-        quality = _field_value(sample.quality.status)
-        issues = _field_value(sample.quality.issues) or ()
+        quality, issues, _ = self._quality_state()
         conflicts = tuple(str(item) for item in context["conflicts"])
         core_read_errors = tuple(
             f"READ_ERROR:{name}"
@@ -362,18 +471,17 @@ class LiveMonitor:
             or self._latest_buffer_tick is None
         ):
             raise LiveMonitorError("NO_FRAME")
-        if self._last_snapshot_buffer_tick == self._latest_buffer_tick:
+        if not self.snapshot_pending:
             raise LiveMonitorError("NO_NEW_FRAME")
 
         sample = self._latest_sample
         context = self._latest_context
         status, reasons = self._status()
         session_time_s = _field_value(sample.session.session_time_s)
-        quality_status = _field_value(sample.quality.status)
-        issues = _field_value(sample.quality.issues) or ()
+        quality_status, issues, stale = self._quality_state()
         opponents = sample.opponents
         in_car = context["player_control_state"] == "IN_CAR_PHYSICS"
-        if in_car:
+        if in_car and not self._buffer_stale:
             self._in_car_snapshot_count += 1
         self._status_counts[status] += 1
 
@@ -397,7 +505,7 @@ class LiveMonitor:
             "quality": {
                 "dropped_ticks": _field_value(sample.quality.dropped_ticks),
                 "issues": list(issues),
-                "stale": _field_value(sample.quality.stale),
+                "stale": stale,
                 "status": quality_status.value if quality_status is not None else None,
             },
             "reasons": list(reasons),
@@ -446,6 +554,7 @@ class LiveMonitor:
         self._snapshot_hasher.update(_canonical_json(snapshot) + b"\n")
         self._snapshot_count += 1
         self._last_snapshot_buffer_tick = self._latest_buffer_tick
+        self._last_snapshot_revision = self._state_revision
         self._pending_events.clear()
         self._final_status = status
         return snapshot
@@ -457,7 +566,7 @@ class LiveMonitor:
             return self._receipt
         if self._snapshot_count == 0 or self._final_status is None:
             raise LiveMonitorError("NO_SNAPSHOT")
-        if self._last_snapshot_buffer_tick != self._latest_buffer_tick:
+        if self.snapshot_pending:
             raise LiveMonitorError("FINAL_SNAPSHOT_REQUIRED")
         event_receipt = self._events.finish()
         base: dict[str, object] = {
@@ -577,16 +686,19 @@ def monitor_live_transport(
                 )
             read_started_at = monotonic()
             frame = transport.read_frozen(selected_fields)
+            frame_observed_at = monotonic()
             sim_mode, sim_mode_update = transport.sim_mode()
             frame = _bind_frame_sim_mode(frame, sim_mode, sim_mode_update)
-            is_new = monitor.feed(frame)
+            monitor.feed(frame, observed_monotonic_s=frame_observed_at)
             reads += 1
             now = monotonic()
-            if is_new and (next_snapshot_at is None or now >= next_snapshot_at):
+            monitor.advance_time(now)
+            if monitor.snapshot_pending and (next_snapshot_at is None or now >= next_snapshot_at):
                 emit(monitor.snapshot())
                 next_snapshot_at = now + snapshot_seconds
             if max_reads is not None and reads >= max_reads:
                 break
+            now = monotonic()
             remaining = deadline - now
             until_next_poll = poll_seconds - (now - read_started_at)
             if remaining > 0 and until_next_poll > 0:
@@ -594,8 +706,10 @@ def monitor_live_transport(
 
         if monitor.latest_buffer_tick is None:
             raise LiveMonitorError("NO_FRAME")
-        if monitor.last_snapshot_buffer_tick != monitor.latest_buffer_tick:
+        monitor.advance_time(monotonic())
+        while monitor.snapshot_pending:
             emit(monitor.snapshot())
+            monitor.advance_time(monotonic())
         return monitor.finish()
     except BaseException as exc:
         primary_error = exc

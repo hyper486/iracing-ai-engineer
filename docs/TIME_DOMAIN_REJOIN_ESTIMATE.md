@@ -12,7 +12,7 @@ The implementation does not turn a current distance into a time gap by label
 alone. It requires a separately self-hashed `traffic-motion-context-v1`, an
 identity-matched `matched-pit-service-median-v1` calibration, and the exact
 fuel amount, tire choice, and service-timing rule used by the M2 action. The
-result is a self-hashed `time-domain-rejoin-estimate-v1` object and remains
+result is a self-hashed `time-domain-rejoin-estimate-v2` object and remains
 advisor-only.
 
 ## Same-capture motion evidence
@@ -74,16 +74,36 @@ total_pit_loss_range_s =
   pit_lane_loss_uncertainty_s + stationary_service_s
 ```
 
-A positive signed lap delta means that the opponent is currently ahead. Its
-current time-gap interval uses the player's observed rate range. A negative
-delta means that the opponent is behind and uses that opponent's rate range.
-The action-specific pit-loss interval is then added to every signed current
-gap. Positive projected values are ahead of the rejoining player; negative
-values are behind.
+Version 2 separates race-order distance from physical position. The stored
+signed lap delta contains completed laps, so the projection first removes its
+integer-lap part. A car a lap down can still be immediately beside the player.
+For every combination of observed player/opponent rate bounds and pit-loss
+bounds, the scenario projects:
+
+```text
+relative_progress_laps = fractional_current_delta
+  + (opponent_rate / player_rate - 1) * recommended_lap_from_now
+  + opponent_rate * total_pit_loss_s
+```
+
+The second term covers relative motion during the player's travel to the
+recommended stop. The last term represents pit loss as additional elapsed
+time against the player's counterfactual progress. All bound combinations
+form a conservative interval under this constant-rate scenario. Crossing any
+integer lap means a possible physical overlap and returns WAIT. Otherwise the
+interval is reduced modulo one lap, and each opponent contributes both a
+forward and backward track distance. Forward time uses the player's rate;
+backward time uses the opponent's rate. With just one opponent, that car can
+be the nearest in both directions around the circuit.
+
+The method is `physical-progress-envelope-v2`. The service scenario now binds
+`recommended_lap_from_now`, including zero for an immediate stop. The public
+builder defaults that argument to zero; M2 supplies its selected stop lap.
+Legacy v1 estimates cannot be promoted as v2 estimates.
 
 The estimate becomes `AVAILABLE_STABLE_BRACKET` only when:
 
-- no opponent's interval crosses zero;
+- no opponent's interval crosses any integer-lap physical overlap;
 - the closest-ahead interval cannot swap order with another ahead interval;
 - the closest-behind interval cannot swap order with another behind interval;
   and
@@ -97,7 +117,7 @@ index.
 ## M2 integration
 
 M2 now derives its action before promoting the traffic capability. The same
-fuel addition, tire choice, calibrated stationary time, and official
+fuel addition, tire choice, recommended stop lap, calibrated stationary time, and official
 fuel/tire service ordering are passed to the rejoin estimator. A passing
 estimate is persisted under `traffic_rejoin.estimate`, and the recommendation
 binds both its exact digest and a tick-independent semantic digest.
@@ -107,9 +127,10 @@ rates, action, and bracket refreshes evidence without inventing a different
 recommendation identity. A changed rate/bracket/action changes the semantic
 basis and triggers the existing revoke/issue path.
 
-The older frozen WAIT receipt shape remains readable. A motion-derived result
-requires the extended output shape and cannot be relabelled as a legacy
-traffic pass.
+The older frozen WAIT receipt shape remains readable. A legacy input with
+`estimate_available=true` is descriptive only: it cannot override a WAIT from
+the estimate computed for the current action. Only that action-bound result
+can pass the traffic gate.
 
 ## Verification
 
@@ -118,7 +139,10 @@ The focused suite covers:
 - exact motion/source/map/identity/tick binding;
 - deterministic action-specific fuel and tire service timing;
 - stable nearest-ahead and nearest-behind selection;
-- zero-crossing and overlapping-order WAIT behavior;
+- integer-lap translation invariance, wrap-crossing and overlapping-order WAIT;
+- relative-speed projection and exact binding of the recommended stop lap;
+- broad future rate envelopes returning WAIT without neighbor claims;
+- legacy AVAILABLE input failing to override current-action WAIT;
 - external-digest rejection after total rehashing;
 - same-capture motion extraction from a sealed synthetic `SDK_LIVE` capture;
 - M2 recommendation and evidence binding;
@@ -126,16 +150,16 @@ The focused suite covers:
 - advisor-timeline independent reproduction; and
 - object-exact engineer-session, JSON report, HTML, and bundle replay.
 
-The current focused rejoin/M2/retrieved-live/advisor-timeline result is
-`89 passed, 2 skipped`. Both skips are pre-existing missing public Audi/Spa
-artifacts, not rejoin-estimator failures.
+Run the focused rejoin, M2, retrieved-live and advisor-timeline suites for the
+current result. Public Audi/Spa artifact tests can skip when their explicitly
+required external data is absent.
 
 ## Acceptance boundary
 
 This closes the implementation and synthetic end-to-end proof for the
 time-domain rejoin slice. It does not yet establish real-race accuracy. The
 current rate envelope assumes the short-window progress behavior remains
-useful through the stop; it does not model a safety car, class-specific pace,
+useful until and through the selected stop; it does not model a safety car, class-specific pace,
 traffic battles, pit-entry/exit geometry, a driver swap, weather change, or a
 future pace discontinuity. The empirical pit-loss min/max is not a validated
 high-quantile coverage guarantee.

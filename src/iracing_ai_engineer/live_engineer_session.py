@@ -57,9 +57,8 @@ SECURITY_DESCRIPTOR_PROFILE = (
     "SYSTEM_AND_BUILTIN_ADMIN_FULL_RUNTIME_USER_RX_V1"
 )
 RUNTIME_TOKEN_ADMISSION_CONTRACT_VERSION = "windows-runtime-token-admission-v1"
-FIXED_RUNTIME_USER_SID = (
-    "S-1-5-21-0-0-0-1001"
-)
+# Public archive placeholder; private frozen receipts keep their own identity.
+FIXED_RUNTIME_USER_SID = "S-1-5-21-0-0-0-1001"
 DEV_SMOKE_PROFILE_ID = "development-smoke-unbound-v1"
 DEV_SMOKE_PROFILE_BYTE_SIZE = 662
 DEV_SMOKE_PROFILE_SHA256 = (
