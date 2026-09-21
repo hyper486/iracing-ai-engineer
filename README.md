@@ -16,6 +16,7 @@ practice opportunity.
 ## What is implemented
 
 - Defensive `.ibt` and live-SDK telemetry adapters with explicit provenance.
+- An optional standalone Crew Chief-derived, read-only Windows acquisition backend.
 - Append-only collection, normalization, lap/stint segmentation and replay.
 - Fuel-to-end, stint, pit-service and time-domain rejoin reasoning.
 - Conservative tire-performance beliefs that do not invent physical wear.
@@ -89,6 +90,11 @@ This command emits privacy-safe JSONL and does not persist raw telemetry. It
 does not calculate or speak tactical advice. See
 [the live-monitor contract](docs/LIVE_MONITOR.md).
 
+To reuse Crew Chief's acquisition source without running its application,
+see [the standalone reader prototype](docs/CREWCHIEF_READER.md). It is an
+opt-in `collect-live` backend; the default Python SDK reader and protected
+deployment remain unchanged.
+
 ## Architecture
 
 The numerical pipeline owns all calculations and gates. A future language or
@@ -122,6 +128,7 @@ Useful design documents:
 - [Driving diagnosis evidence](docs/OFFLINE_DRIVING_DIAGNOSIS_EVIDENCE.md)
 - [Post-session report](docs/OFFLINE_SESSION_REPORT.md)
 - [Privacy-safe live monitor](docs/LIVE_MONITOR.md)
+- [Standalone Crew Chief-derived reader](docs/CREWCHIEF_READER.md)
 
 ## Public/private boundary
 

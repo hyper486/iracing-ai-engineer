@@ -18,6 +18,7 @@ from .collector import (
     collect_transport_to_jsonl,
 )
 from .contracts import NORMALIZATION_PROFILE_VERSION, SDK_PROBE_CONTRACT_VERSION
+from .crewchief_transport import WindowsCrewChiefTransport
 from .live_monitor import (
     LIVE_MONITOR_CONTRACT_VERSION,
     LiveMonitorError,
@@ -515,6 +516,17 @@ def _parser() -> argparse.ArgumentParser:
     )
     collect_parser.add_argument("--source-id", required=True, type=_run_identifier)
     collect_parser.add_argument("--session-id", required=True, type=_run_identifier)
+    collect_parser.add_argument(
+        "--backend",
+        choices=("pyirsdk", "crewchief"),
+        default="pyirsdk",
+        help="read-only acquisition backend (default: pyirsdk)",
+    )
+    collect_parser.add_argument(
+        "--crewchief-reader",
+        type=Path,
+        help="locally built CrewChiefReader.exe; required with --backend crewchief",
+    )
     collect_parser.add_argument(
         "--expected-source-kind",
         choices=("auto", "live", "replay"),
@@ -2934,7 +2946,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             if args.output.exists():
                 raise FileExistsError(f"collector output already exists: {args.output}")
-            transport = WindowsPyirsdkTransport()
+            if args.backend == "crewchief":
+                if args.crewchief_reader is None:
+                    raise SdkProbeUnavailable(
+                        "--backend crewchief requires --crewchief-reader; "
+                        "build it with scripts/build_crewchief_reader.ps1"
+                    )
+                transport = WindowsCrewChiefTransport(args.crewchief_reader.resolve())
+            else:
+                if args.crewchief_reader is not None:
+                    raise SdkProbeUnavailable(
+                        "--crewchief-reader requires --backend crewchief"
+                    )
+                transport = WindowsPyirsdkTransport()
             receipt = collect_transport_to_jsonl(
                 transport,
                 args.output,

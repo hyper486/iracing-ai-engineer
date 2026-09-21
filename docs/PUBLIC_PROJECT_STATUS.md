@@ -1,6 +1,6 @@
 # Public project status
 
-Snapshot: 2026-09-04 EDT
+Snapshot: 2026-09-21 EDT
 
 ## Product objective
 
@@ -13,6 +13,7 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Boundary | Status | Meaning |
 |---|---|---|
 | Replayable telemetry foundation | Implemented | Defensive IBT/SDK adapters, normalization and deterministic replay exist. |
+| Standalone Crew Chief-derived acquisition | Optional prototype | Extracted read-only C# SDK reader feeds the existing collector; the default backend is unchanged and real-session parity is not yet established. |
 | Fuel, stint and pit reasoning | Implemented with evidence gates | Missing event rules or calibration produce `WAIT`, not invented values. |
 | Rejoin/traffic reasoning | Implemented with evidence gates; review corrections applied | Physical circular-track projection binds the selected stop lap; ambiguous future position is WAIT. |
 | Tire reasoning | Implemented as a performance belief | The project does not claim direct physical tire wear without a supported source. |
@@ -25,6 +26,16 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
 ## Review corrections
+
+The September 21 acquisition prototype reuses Crew Chief's low-level SDK source
+without its UI, speech, MQTT or strategy. It adds an opt-in `collect-live`
+backend, a pinned upstream MIT notice, bounded pipe validation and separate
+synthetic native tests. It adds no simulator or pit controls and does not
+change live acceptance. See [the reader contract](CREWCHIEF_READER.md).
+The local connection probe for this milestone found no available simulator SDK
+session, returned `SDK_UNAVAILABLE`, created no capture file and left no reader
+process running. The prior live-canary evidence below belongs to the existing
+backend, not to this new extraction.
 
 The September 4 review fixes address frozen-buffer freshness, metadata-only
 updates, event/snapshot quality consistency, source-reset privacy, physical

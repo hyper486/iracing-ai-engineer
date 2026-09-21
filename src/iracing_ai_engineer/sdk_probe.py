@@ -948,6 +948,54 @@ def build_probe_report(
     return report
 
 
+def _parse_session_info_snapshot(
+    raw_session_info: bytes, irsdk_module: Any
+) -> Mapping[str, object] | None:
+    """Parse a frozen SessionInfo buffer with the shared safe SDK YAML rules."""
+
+    utf8_signature = b"---\nWeekendInfo:\n Encoding: UTF8"
+    is_utf8 = raw_session_info.startswith(utf8_signature)
+    translated = raw_session_info.translate(
+        None if is_utf8 else irsdk_module.YAML_TRANSLATER
+    )
+    yaml_source = re.sub(
+        irsdk_module.YamlReader.NON_PRINTABLE,
+        "",
+        translated.rstrip(b"\x00").decode("utf-8" if is_utf8 else "cp1252"),
+    )
+
+    def escape_double_quoted_string(match: re.Match[str]) -> str:
+        value = re.sub(r'(["\\])', r"\\\1", match.group("value"))
+        return f'{match.group("key")}"{value}"'
+
+    if is_utf8:
+        yaml_source = re.sub(
+            r'(?P<key>^\s*\w+: )"(?P<value>.*)"$',
+            escape_double_quoted_string,
+            yaml_source,
+            flags=re.MULTILINE,
+        )
+        driver_fields = r"DriverSetupName"
+    else:
+        driver_fields = r"DriverSetupName|UserName|TeamName|AbbrevName|Initials"
+    yaml_source = re.sub(
+        rf"(?P<key>(?:{driver_fields}): )(?P<value>.+)",
+        escape_double_quoted_string,
+        yaml_source,
+    )
+    yaml_source = re.sub(
+        r"(?P<key>\w+: )(?P<value>,.*)",
+        escape_double_quoted_string,
+        yaml_source,
+    )
+
+    parsed = irsdk_module.yaml.load(
+        yaml_source,
+        Loader=irsdk_module.CustomYamlSafeLoader,
+    )
+    return parsed if isinstance(parsed, Mapping) else None
+
+
 class WindowsPyirsdkTransport:
     """Read-only pyirsdk transport with fail-closed shared-memory validation."""
 
@@ -1216,49 +1264,7 @@ class WindowsPyirsdkTransport:
     def _parse_session_info_snapshot(
         self, raw_session_info: bytes
     ) -> Mapping[str, object] | None:
-        """Parse one stable full SessionInfo buffer using pyirsdk's safe rules."""
-
-        utf8_signature = b"---\nWeekendInfo:\n Encoding: UTF8"
-        is_utf8 = raw_session_info.startswith(utf8_signature)
-        translated = raw_session_info.translate(
-            None if is_utf8 else self._irsdk.YAML_TRANSLATER
-        )
-        yaml_source = re.sub(
-            self._irsdk.YamlReader.NON_PRINTABLE,
-            "",
-            translated.rstrip(b"\x00").decode("utf-8" if is_utf8 else "cp1252"),
-        )
-
-        def escape_double_quoted_string(match: re.Match[str]) -> str:
-            value = re.sub(r'(["\\])', r"\\\1", match.group("value"))
-            return f'{match.group("key")}"{value}"'
-
-        if is_utf8:
-            yaml_source = re.sub(
-                r'(?P<key>^\s*\w+: )"(?P<value>.*)"$',
-                escape_double_quoted_string,
-                yaml_source,
-                flags=re.MULTILINE,
-            )
-            driver_fields = r"DriverSetupName"
-        else:
-            driver_fields = r"DriverSetupName|UserName|TeamName|AbbrevName|Initials"
-        yaml_source = re.sub(
-            rf"(?P<key>(?:{driver_fields}): )(?P<value>.+)",
-            escape_double_quoted_string,
-            yaml_source,
-        )
-        yaml_source = re.sub(
-            r"(?P<key>\w+: )(?P<value>,.*)",
-            escape_double_quoted_string,
-            yaml_source,
-        )
-
-        parsed = self._irsdk.yaml.load(
-            yaml_source,
-            Loader=self._irsdk.CustomYamlSafeLoader,
-        )
-        return parsed if isinstance(parsed, Mapping) else None
+        return _parse_session_info_snapshot(raw_session_info, self._irsdk)
 
     def session_info_snapshot(
         self,

@@ -124,6 +124,69 @@ def test_collect_live_maps_expected_source_kind(
     assert json.loads(capsys.readouterr().out)["completion_status"] == "COMPLETE"
 
 
+def test_collect_live_crewchief_backend_is_explicit_and_keeps_privacy(
+    monkeypatch, capsys, tmp_path
+):
+    reader = tmp_path / "CrewChiefReader.exe"
+    transport = object()
+    observed = {}
+
+    def make_transport(path):
+        assert path == reader
+        return transport
+
+    def collect(received_transport, output, **kwargs):
+        assert received_transport is transport
+        observed.update(kwargs)
+        return _Receipt()
+
+    def unexpected_default():
+        raise AssertionError("the default SDK backend must not be constructed")
+
+    monkeypatch.setattr(cli, "WindowsCrewChiefTransport", make_transport)
+    monkeypatch.setattr(cli, "WindowsPyirsdkTransport", unexpected_default)
+    monkeypatch.setattr(cli, "collect_transport_to_jsonl", collect)
+    assert cli.main(
+        [
+            "collect-live", str(tmp_path / "capture.jsonl"),
+            "--source-id", "local-sdk", "--session-id", "practice",
+            "--backend", "crewchief", "--crewchief-reader", str(reader),
+            "--expected-source-kind", "live",
+        ]
+    ) == 0
+    assert observed["include_driver_info"] is False
+    assert observed["expected_source_kind"] is SourceKind.SDK_LIVE
+    assert observed["fields"] is None
+    assert json.loads(capsys.readouterr().out)["completion_status"] == "COMPLETE"
+
+
+@pytest.mark.parametrize(
+    "backend_args",
+    [
+        ["--backend", "crewchief"],
+        ["--crewchief-reader", "CrewChiefReader.exe"],
+    ],
+)
+def test_collect_live_rejects_incomplete_backend_selection(
+    monkeypatch, capsys, tmp_path, backend_args
+):
+    def unexpected_transport(*args):
+        raise AssertionError("invalid backend arguments must not start a transport")
+
+    monkeypatch.setattr(cli, "WindowsCrewChiefTransport", unexpected_transport)
+    monkeypatch.setattr(cli, "WindowsPyirsdkTransport", unexpected_transport)
+    output = tmp_path / "capture.jsonl"
+    assert cli.main(
+        [
+            "collect-live", str(output),
+            "--source-id", "local-sdk", "--session-id", "practice",
+            *backend_args,
+        ]
+    ) == 2
+    assert json.loads(capsys.readouterr().out)["error"] == "SDK_UNAVAILABLE"
+    assert not output.exists()
+
+
 def test_collect_live_never_overwrites_existing_output(monkeypatch, capsys, tmp_path):
     output = tmp_path / "protected.jsonl"
     output.write_text("user data\n", encoding="utf-8")
