@@ -22,10 +22,49 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Privacy-safe live state bridge | Implemented; spectator-only field check | Tick-level normalization feeds bounded JSONL snapshots; spectator guard stayed WAIT_CAR. In-car validation remains pending. |
 | Local fuel dashboard | Experimental; offline/synthetic checks | Whole-lap fuel learning, freshness/driver guards and optional bounded private recording are implemented. This is not a multi-stop, traffic, tire or driving-guidance release. |
 | Local practice speech | Opt-in browser prototype | Only local English voices in confirmed Practice; Race speech is disabled. A hidden tab auto-mutes, so game-background playback is not guaranteed. |
+| DeepSeek engineer framework | Implemented; constrained evidence selection | Opt-in asynchronous questions, local grounding/rendering, bounded attempts and safe fallback; validated historical receipt context is separate from live fuel. Real provider/account and in-car acceptance remain unverified. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## DeepSeek framework integration
+
+The September 22 integration connects typed questions and quick-topic buttons
+to a separately queued DeepSeek answer planner. Only allowlisted engineering
+summaries plus the user's question leave the host when explicitly enabled and
+configured. The model selects existing fact IDs; local code renders all claims,
+numbers and mandatory limitations. No raw telemetry, driver identity, paths,
+source hashes, keys or whole receipts are sent in the generated context.
+
+The default is cloud-off. Missing keys, provider failure, invalid plans and
+exhausted attempt budgets preserve local answers and do not block SDK reading.
+Live answers are snapshot-bound and withdrawn on expiry or safety/session
+changes. Validated historical engineer-session receipts can provide descriptive
+strategy/driving/tire context, always marked historical/shadow-only and not
+authenticated original telemetry. This does not close the live multi-stop,
+traffic, tire-service, corner-coaching or background race-audio gaps.
+
+See [the DeepSeek guide](DEEPSEEK_ENGINEER.md) for local-only key entry, limits,
+privacy, historical input and the synthetic loopback rehearsal. No real provider
+call has been validated for this milestone because a local key is not configured.
+Synthetic/mock checks are not `SDK_LIVE` acceptance.
+
+The end-to-end historical receipt check also found and fixed a producer-side
+rounding inconsistency: a millisecond-rounded descriptive gain upper bound
+could exceed its unrounded observed loss and fail the existing receipt
+validator. The producer now clamps its own bounds; validator tolerance and
+driving-promotion rules are unchanged. A complete synthetic multi-lap receipt is
+built and independently revalidated in the regression test.
+
+Full regression: **1,726 passed, 43 skipped**. Ruff, public-safety scanning
+including history, and staged diff checks passed. The skips remain explicit
+missing-data, private-deployment or platform-only cases, not live passes.
+The standalone loopback rehearsal passed all five scenario groups without SDK
+access, credentials or provider calls. Browser smoke checks exercised the
+missing-key state, quick questions, local fallback and old-answer withdrawal.
+The local worker was refreshed while waiting for the simulator with zero
+recorded bytes; no authentic in-car, real-provider or audio acceptance is claimed.
 
 ## Experimental fuel dashboard
 

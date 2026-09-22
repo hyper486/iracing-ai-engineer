@@ -433,6 +433,15 @@ def _parser() -> argparse.ArgumentParser:
     live_app_parser.add_argument("--tank-capacity-liters", type=_finite_positive)
     live_app_parser.add_argument("--record-directory", type=Path)
     live_app_parser.add_argument("--record-max-mib", type=_positive_int, default=4096)
+    live_app_parser.add_argument("--llm-provider", choices=("off", "deepseek"), default="off")
+    live_app_parser.add_argument("--llm-model", default="deepseek-flash")
+    live_app_parser.add_argument("--llm-request-limit", type=_positive_int, default=60)
+    live_app_parser.add_argument("--llm-min-interval-seconds", type=_finite_positive, default=10)
+    live_app_parser.add_argument("--llm-timeout-seconds", type=_finite_positive, default=12)
+    live_app_parser.add_argument(
+        "--session-artifact", type=Path,
+        help="validated engineer-session-v1 receipt, historical chat only; not raw telemetry",
+    )
 
     live_monitor_parser = subcommands.add_parser(
         "monitor-live",
@@ -1595,14 +1604,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "live-app":
         from .live_app import run_live_app
         from .live_fuel import LiveFuelConfig
+        from .llm_engineer import EngineerConfig
 
         try:
             config = LiveFuelConfig(reserve_l=args.reserve_liters,
                                     minimum_valid_laps=args.minimum_valid_laps,
                                     tank_capacity_l=args.tank_capacity_liters)
+            engineer_config = EngineerConfig(
+                provider=args.llm_provider, model=args.llm_model,
+                request_limit=args.llm_request_limit,
+                min_interval_s=args.llm_min_interval_seconds,
+                timeout_s=args.llm_timeout_seconds, session_artifact=args.session_artifact,
+            )
             run_live_app(port=args.port, duration_s=args.duration_seconds, config=config,
                          record_directory=args.record_directory,
                          record_max_bytes=args.record_max_mib * 1024**2,
+                         engineer_config=engineer_config,
                          on_ready=lambda url: print(json.dumps({
                              "status": "EXPERIMENTAL_FUEL_APP", "url": url,
                              "advisor_only": True, "race_speech_enabled": False,

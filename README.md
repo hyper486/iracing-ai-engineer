@@ -101,6 +101,17 @@ Read [the setup, recording and safety limits](docs/LIVE_APP.md) before using it.
 中文快速测试步骤：[上车测试速查](docs/LIVE_TRIAL_ZH.md)。
 This milestone does not establish new authentic `SDK_LIVE` driving acceptance.
 
+### Optional DeepSeek engineer
+
+The [DeepSeek framework](docs/DEEPSEEK_ENGINEER.md) adds typed questions, quick
+topics, constrained fact selection, local rendering and failure fallback. Use
+`start_live_engineer.ps1 -DeepSeek` after configuring a key locally; without a
+key it still offers local explanations. No model call happens automatically.
+Historical validated session receipts can be explained separately from live
+fuel, without promoting old or synthetic evidence into current race advice.
+Run `uv run python scripts/rehearse_llm.py` for the no-key, no-game synthetic
+loopback check. Real model/account and live racing validation remain separate.
+
 ### Read-only state bridge
 
 With the simulator already running on the same Windows desktop, stream bounded

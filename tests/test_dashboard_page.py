@@ -35,7 +35,7 @@ def test_page_is_self_contained_read_only_and_accessible() -> None:
     assert links[0]["href"] == "/api/report"
     assert links[0]["download"] == "aeis-session-summary.json"
     buttons = [attrs for tag, attrs in page.elements if tag == "button"]
-    assert len(buttons) == 2
+    assert len(buttons) == 7
     assert all(attrs["aria-label"] for attrs in buttons)
     assert all(attrs["type"] == "button" for attrs in buttons)
     assert "默认静音" in DASHBOARD_HTML
@@ -47,8 +47,14 @@ def test_page_is_self_contained_read_only_and_accessible() -> None:
     assert "全程累计估计" not in DASHBOARD_HTML
     assert "innerHTML" not in DASHBOARD_HTML
     assert "eval(" not in DASHBOARD_HTML
-    assert "method:" not in DASHBOARD_HTML
+    assert DASHBOARD_HTML.count("method: 'POST'") == 1
     assert "fetch('/api/state'" in DASHBOARD_HTML
+    assert "fetch('/api/engineer'" in DASHBOARD_HTML
+    assert "fetch('/api/engineer/question'" in DASHBOARD_HTML
+    assert "'X-Engineer-Token': token" in DASHBOARD_HTML
+    assert "localStorage" not in DASHBOARD_HTML
+    assert "文字回复不会自动播报" in DASHBOARD_HTML
+    assert "请勿输入姓名、账号或其他身份信息" in DASHBOARD_HTML
     assert "item.localService === true" in DASHBOARD_HTML
 
 
@@ -63,10 +69,16 @@ let nextTimeout = 0;
 const state = {
   now: 0, result: null, failure: false, pending: false, spoken: [], cancelled: 0,
   voices: [{lang: 'en-US', localService: true}], autoStart: true,
+  engineerFailure: false, engineerPending: false, postPending: false, postStatus: 202,
+  postError: {error: 'RATE_LIMITED'},
+  engineer: {enabled: false, provider: 'deepseek', model: 'test-model', status: 'DISABLED',
+    requests_used: 0, request_limit: 60, min_interval_s: 10, csrf_token: 'test-csrf',
+    answer: null, error: null, capabilities: {session: false}},
 };
 function node(id) {
   if (!nodes.has(id)) nodes.set(id, {
-    textContent: '', hidden: false, disabled: false, style: {}, dataset: {}, attributes: {},
+    textContent: '', value: '', hidden: false, disabled: false,
+    style: {}, dataset: {}, attributes: {},
     children: [], callbacks: {},
     setAttribute(key, value) { this.attributes[key] = value; },
     addEventListener(key, value) { this.callbacks[key] = value; },
@@ -98,6 +110,16 @@ const context = {
   clearTimeout: (id) => { timeouts.delete(id); },
   fetch: async (url, options) => {
     calls.push({url, options});
+    if (url === '/api/engineer') {
+      if (state.engineerPending) return new Promise(() => {});
+      if (state.engineerFailure) throw Error('engineer offline');
+      return {ok: true, json: async () => JSON.parse(JSON.stringify(state.engineer))};
+    }
+    if (url === '/api/engineer/question') {
+      if (state.postPending) return new Promise(() => {});
+      return {ok: state.postStatus === 202, status: state.postStatus,
+        json: async () => state.postError};
+    }
     if (state.pending) return new Promise(() => {});
     if (state.failure) throw Error('offline');
     return {ok: true, json: async () => state.result};
@@ -429,4 +451,288 @@ def test_new_intent_replaces_active_speech_and_detaches_cancelled_callbacks() ->
       assert.equal(state.spoken[0].onerror, null);
       assert.equal(state.spoken[0].onend, null);
       assert.equal(node('voice-enable').attributes['aria-pressed'], 'true');
+    """)
+
+
+def test_engineer_never_auto_submits_and_posts_only_typed_question_with_token() -> None:
+    _javascript(r"""
+      assert.equal(calls.filter((call) => call.options.method === 'POST').length, 0);
+      assert.ok(calls.some((call) => call.url === '/api/engineer'));
+      node('engineer-question').value = '  现在油量够吗？  ';
+      await node('engineer-send').callbacks.click();
+      const post = calls.find((call) => call.options.method === 'POST');
+      assert.equal(post.url, '/api/engineer/question');
+      assert.equal(post.options.credentials, 'same-origin');
+      assert.equal(post.options.headers['X-Engineer-Token'], 'test-csrf');
+      assert.equal(post.options.headers['Content-Type'], 'application/json');
+      assert.deepEqual(JSON.parse(post.options.body), {question: '现在油量够吗？', scope: 'live'});
+      assert.match(node('engineer-request').textContent, /问题已接收/);
+      assert.equal(node('engineer-send').disabled, true);
+    """)
+
+
+@pytest.mark.parametrize("status", ["DISABLED", "MISSING_KEY", "BUDGET_EXHAUSTED", "ERROR"])
+def test_engineer_local_fallback_remains_available_without_cloud(status: str) -> None:
+    _javascript(f"state.engineer.status = {json.dumps(status)};" + r"""
+      state.engineer.enabled = false;
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-fuel').disabled, false);
+      await node('engineer-fuel').callbacks.click();
+      const post = calls.find((call) => call.options.method === 'POST');
+      assert.match(JSON.parse(post.options.body).question, /燃油/);
+      assert.equal(state.spoken.length, 0);
+    """)
+
+
+@pytest.mark.parametrize("status", ["BUSY", "RATE_LIMITED"])
+def test_engineer_busy_or_rate_limited_cannot_send(status: str) -> None:
+    _javascript(f"state.engineer.status = {json.dumps(status)};" + r"""
+      state.engineer.retry_after_s = 3;
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-strategy').disabled, true);
+      await node('engineer-strategy').callbacks.click();
+      assert.equal(calls.filter((call) => call.options.method === 'POST').length, 0);
+      state.now = 3100;
+      state.engineer.status = 'MISSING_KEY';
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-strategy').disabled, false);
+    """)
+
+
+@pytest.mark.parametrize("question", ["   ", "x" * 501])
+def test_engineer_rejects_empty_or_oversized_questions_without_post(question: str) -> None:
+    _javascript(f"node('engineer-question').value = {json.dumps(question)};" + r"""
+      await node('engineer-send').callbacks.click();
+      assert.match(node('engineer-request').textContent, /1 到 500/);
+      assert.equal(calls.filter((call) => call.options.method === 'POST').length, 0);
+    """)
+
+
+def test_engineer_polling_failure_is_isolated_from_telemetry() -> None:
+    _javascript(r"""
+      state.result = payload();
+      await intervals.find((item) => item.delay === 500).fn();
+      state.engineerFailure = true;
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('fuel-current').textContent, '31.2 L');
+      assert.equal(node('connection').dataset.tone, 'good');
+      assert.equal(node('engineer-send').disabled, true);
+      assert.match(node('engineer-request').textContent, /问答服务暂不可用/);
+    """)
+
+
+def test_engineer_answer_is_text_only_scope_labelled_and_never_spoken() -> None:
+    _javascript(r"""
+      state.result = payload();
+      await intervals.find((item) => item.delay === 500).fn();
+      node('voice-enable').callbacks.click();
+      state.engineer.model = '<b>model</b>';
+      state.engineer.answer = {id: 'a1', topic: 'fuel',
+        text: '<img src=x onerror=alert(1)>', origin: 'deepseek',
+        scope: 'live_snapshot', age_s: 1, stale: false};
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-answer-body').textContent, '<img src=x onerror=alert(1)>');
+      assert.equal(node('engineer-answer-body').children.length, 0);
+      assert.match(node('engineer-origin').textContent, /DeepSeek · <b>model/);
+      assert.match(node('engineer-answer-meta').textContent, /提问时的快照/);
+      assert.match(node('engineer-answer-meta').textContent, /1 秒前/);
+      assert.equal(state.spoken.length, 0);
+    """)
+
+
+@pytest.mark.parametrize("reason", ["server", "telemetry", "missing_age"])
+def test_engineer_stale_live_answer_withdraws_old_numbers(reason: str) -> None:
+    _javascript(r"""
+      state.result = payload();
+      await intervals.find((item) => item.delay === 500).fn();
+      state.engineer.answer = {id: 'a1', topic: 'fuel', text: 'Fuel 47.2 liters.',
+        origin: 'local_fallback', scope: 'live_snapshot', age_s: 1, stale: false};
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.match(node('engineer-answer-body').textContent, /47.2/);
+    """ + {
+        "server": """
+          state.engineer.answer.stale = true;
+          await intervals.find((item) => item.delay === 1000).fn();
+        """,
+        "telemetry": """
+          state.failure = true;
+          await intervals.find((item) => item.delay === 500).fn();
+          assert.equal(node('connection').dataset.tone, 'bad');
+        """,
+        "missing_age": """
+          state.engineer.answer.age_s = null;
+          await intervals.find((item) => item.delay === 1000).fn();
+        """,
+    }[reason] + r"""
+      assert.equal(node('engineer-answer').dataset.stale, 'true');
+      assert.match(node('engineer-answer-body').textContent, /旧数字与建议已撤回/);
+      assert.doesNotMatch(node('engineer-answer-body').textContent, /47.2/);
+    """)
+
+
+def test_engineer_historical_session_answer_survives_disconnect_with_clear_scope() -> None:
+    _javascript(r"""
+      state.engineer.capabilities.session = true;
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-session').hidden, false);
+      await node('engineer-session').callbacks.click();
+      const post = calls.find((call) => call.options.method === 'POST');
+      assert.equal(JSON.parse(post.options.body).scope, 'session');
+      state.engineer.answer = {id: 'a1', topic: 'review', text: '历史数据质量不足。',
+        origin: 'local_fallback', scope: 'historical_session', age_s: 5, stale: false};
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.match(node('engineer-answer-body').textContent, /历史数据质量不足/);
+      assert.match(node('engineer-answer-meta').textContent, /本次会话复盘 · 非实时指令/);
+      assert.match(node('engineer-origin').textContent, /本地规则解读 · 未调用模型/);
+      assert.match(node('engineer-request').textContent, /回答已更新/);
+    """)
+
+
+def test_engineer_session_request_is_blocked_when_capability_absent() -> None:
+    _javascript(r"""
+      assert.equal(node('engineer-session').hidden, true);
+      await node('engineer-session').callbacks.click();
+      assert.equal(calls.filter((call) => call.options.method === 'POST').length, 0);
+    """)
+
+
+@pytest.mark.parametrize("pending", ["engineerPending", "postPending"])
+def test_engineer_get_and_post_do_not_overlap_or_retry_ambiguous_submission(pending: str) -> None:
+    start = {
+        "engineerPending": """
+          state.engineerPending = true;
+          intervals.find((item) => item.delay === 1000).fn();
+        """,
+        "postPending": """
+          state.postPending = true;
+          node('engineer-question').value = '有什么依据？';
+          node('engineer-send').callbacks.click();
+        """,
+    }[pending]
+    _javascript(start + r"""
+      const before = calls.filter((call) => call.url.startsWith('/api/engineer')).length;
+      intervals.find((item) => item.delay === 1000).fn();
+      node('engineer-driving').callbacks.click();
+      assert.equal(calls.filter((call) => call.url.startsWith('/api/engineer')).length, before);
+      for (const timeout of timeouts.values()) timeout();
+      intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(calls.filter((call) => call.url.startsWith('/api/engineer')).length, before);
+      assert.match(node('engineer-request').textContent, /不会自动重发/);
+    """)
+
+
+def test_engineer_http_rejection_is_not_retried_and_preserves_question() -> None:
+    _javascript(r"""
+      state.postStatus = 400;
+      state.postError = {error: 'INVALID_QUESTION'};
+      node('engineer-question').value = '保留问题';
+      await node('engineer-send').callbacks.click();
+      assert.match(node('engineer-request').textContent, /1 到 500/);
+      assert.equal(node('engineer-question').value, '保留问题');
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(calls.filter((call) => call.options.method === 'POST').length, 1);
+    """)
+
+
+def test_engineer_quick_questions_and_client_cooldown() -> None:
+    _javascript(r"""
+      await node('engineer-strategy').callbacks.click();
+      assert.match(node('engineer-question').value, /进站判断/);
+      await node('engineer-driving').callbacks.click();
+      assert.equal(calls.filter((call) => call.options.method === 'POST').length, 1);
+      state.now = 11000;
+      await intervals.find((item) => item.delay === 1000).fn();
+      await node('engineer-driving').callbacks.click();
+      assert.match(node('engineer-question').value, /驾驶分析/);
+      assert.equal(calls.filter((call) => call.options.method === 'POST').length, 2);
+    """)
+
+
+def test_withdrawn_live_answer_does_not_reappear_after_reconnect_without_new_answer() -> None:
+    _javascript(r"""
+      state.result = payload();
+      await intervals.find((item) => item.delay === 500).fn();
+      state.engineer.answer = {id: 'old', topic: 'fuel', text: 'Fuel 47.2 liters.',
+        origin: 'local_fallback', scope: 'live_snapshot', age_s: 1, stale: false};
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.match(node('engineer-answer-body').textContent, /47.2/);
+      state.failure = true;
+      await intervals.find((item) => item.delay === 500).fn();
+      state.failure = false;
+      state.result.generation += 1;
+      await intervals.find((item) => item.delay === 500).fn();
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.doesNotMatch(node('engineer-answer-body').textContent, /47.2/);
+      state.engineer.answer.id = 'new';
+      state.engineer.answer.text = 'Current evidence is limited.';
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-answer-body').textContent, 'Current evidence is limited.');
+    """)
+
+
+def test_no_evidence_explanation_remains_visible_without_live_sdk() -> None:
+    _javascript(r"""
+      state.engineer.answer = {id: 'a1', topic: 'fuel', text: '没有有效遥测，无法判断油量。',
+        origin: 'local_fallback', scope: 'live_snapshot', age_s: 1, stale: false,
+        snapshot_was_valid: false};
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.match(node('engineer-answer-body').textContent, /没有有效遥测/);
+      assert.match(node('engineer-answer-meta').textContent, /无有效实时证据/);
+      assert.equal(node('connection').dataset.tone, 'bad');
+      state.engineer.answer.stale = true;
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.match(node('engineer-answer-body').textContent, /旧数字与建议已撤回/);
+    """)
+
+
+def test_engineer_restart_token_namespaces_reused_answer_ids() -> None:
+    _javascript(r"""
+      state.result = payload();
+      await intervals.find((item) => item.delay === 500).fn();
+      state.engineer.answer = {id: '1', topic: 'fuel', text: 'Old answer.',
+        origin: 'local_fallback', scope: 'live_snapshot', age_s: 1, stale: true};
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.match(node('engineer-answer-body').textContent, /旧数字与建议已撤回/);
+      state.engineer.csrf_token = 'new-instance-token';
+      state.engineer.answer.text = 'New answer.';
+      state.engineer.answer.stale = false;
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-answer-body').textContent, 'New answer.');
+    """)
+
+
+@pytest.mark.parametrize("error", [
+    "MODEL_UNAVAILABLE_OR_INVALID_PLAN", "MODEL_CONFIGURATION_INVALID", "private-provider-debug",
+])
+def test_engineer_configured_status_and_safe_fallback_error_disclosure(error: str) -> None:
+    _javascript(r"""
+      state.engineer.status = 'READY';
+    """ + f"state.engineer.error = {json.dumps(error)};" + r"""
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-backend').textContent, 'DeepSeek 已配置');
+      assert.equal(node('engineer-error').hidden, false);
+      assert.match(node('engineer-error').textContent, /本地解读/);
+      assert.doesNotMatch(node('engineer-error').textContent, /private-provider-debug/);
+      if (state.engineer.error === 'MODEL_CONFIGURATION_INVALID') {
+        assert.match(node('engineer-error').textContent, /密钥配置格式有误/);
+      } else {
+        assert.match(node('engineer-error').textContent, /不会自动重试/);
+      }
+      state.engineer.error = null;
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-error').hidden, true);
+      assert.equal(node('engineer-error').textContent, '');
+    """)
+
+
+def test_engineer_chinese_answer_and_topic_are_preserved_without_model_speech() -> None:
+    _javascript(r"""
+      state.engineer.answer = {id: 'zh1', topic: 'driving', text: '当前缺少有效弯角证据。',
+        origin: 'local_fallback', scope: 'live_snapshot', age_s: 1, stale: false,
+        snapshot_was_valid: false};
+      await intervals.find((item) => item.delay === 1000).fn();
+      assert.equal(node('engineer-answer-body').textContent, '当前缺少有效弯角证据。');
+      assert.match(node('engineer-answer-meta').textContent, /驾驶/);
+      assert.doesNotMatch(node('engineer-answer-meta').textContent, /driving/);
+      assert.equal(state.spoken.length, 0);
     """)

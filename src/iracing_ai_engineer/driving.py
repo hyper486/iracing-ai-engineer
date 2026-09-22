@@ -747,6 +747,10 @@ def _diagnosis(
         [max(0.0, item.total_segment_delta_s) for item in evidence], dtype=np.float64
     )
     loss = float(np.median(losses))
+    # Presentation rounding must not inflate the measured evidence bound.
+    # Also keep the lower endpoint inside that bound for small configured losses.
+    gain_high = min(loss, round(loss, 3))
+    gain_low = min(gain_high, round(max(0.01, loss * 0.4), 3))
     return DrivingDiagnosis(
         corner_id=corner_id,
         diagnosis=code,
@@ -762,7 +766,7 @@ def _diagnosis(
         ),
         comparisons=comparisons,
         estimated_loss_median_s=loss,
-        expected_gain_range_s=(round(max(0.01, loss * 0.4), 3), round(loss, 3)),
+        expected_gain_range_s=(gain_low, gain_high),
         confidence="high" if len(evidence) >= 3 else "medium",
     )
 

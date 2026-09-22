@@ -1,7 +1,7 @@
 # Experimental local fuel dashboard
 
 This Windows prototype displays read-only iRacing fuel estimates in a local
-browser. It is **experimental and fuel-only**, not a released endurance strategy
+browser. Its live calculations are **experimental and fuel-only**, not a released endurance strategy
 or driving coach. This milestone adds software and offline/synthetic checks;
 it does not establish new authentic `SDK_LIVE` driving acceptance. Full milestone
 gate results and browser-check boundaries are recorded in
@@ -10,7 +10,10 @@ gate results and browser-check boundaries are recorded in
 The app does not launch iRacing, drive the car, change pit-black-box settings,
 or issue a "box now" or tire-service instruction. Existing strategy and driving
 admission gates are unchanged. Multi-stop timing, traffic/rejoin decisions,
-tire decisions and corner coaching are not integrated into this dashboard.
+tire decisions and live corner coaching are not integrated into this dashboard.
+An optional [DeepSeek question/answer framework](DEEPSEEK_ENGINEER.md) now explains
+allowlisted live fuel evidence and separately validated historical receipts. It
+does not turn missing live capabilities into advice, and model text is never spoken.
 
 ## Start on Windows
 
@@ -45,6 +48,11 @@ Launcher options:
   value or ignore an event fuel-capacity restriction.
 - `-NoRecording`: disable raw telemetry recording for this run.
 - `-NoBrowser`: start the worker without opening a browser tab.
+- `-DeepSeek`: enable the optional backend using local `DEEPSEEK_API_KEY`;
+  missing keys leave local explanations available, without cloud requests.
+- `-DeepSeekModel`, `-LlmRequestLimit`: model identifier and per-worker attempt cap.
+- `-SessionArtifact`: optional validated historical engineer-session receipt,
+  not raw telemetry; never mixed into current-race state.
 
 If a compatible worker already occupies the chosen port, the launcher reuses
 it and does **not** apply new options. In particular, adding `-NoRecording` does

@@ -1,4 +1,4 @@
-"""Self-contained, read-only dashboard with fail-closed local practice speech."""
+"""Advisor-only dashboard with isolated typed Q&A and guarded local practice speech."""
 
 DASHBOARD_HTML = r"""<!doctype html>
 <html lang="zh-CN">
@@ -44,6 +44,18 @@ button.secondary{background:#1b2735;border-color:#596b7d}
 button:disabled{opacity:.55;cursor:not-allowed}a{color:#a4e4d5;text-underline-offset:4px}
 button:focus-visible,a:focus-visible{outline:3px solid #cce9ff;
 outline-offset:4px}.buttons{display:flex;gap:9px;flex-wrap:wrap;margin:16px 0}
+.engineer{margin-top:16px}.engineer .row{flex-wrap:wrap}.engineer label{display:block;
+font-size:14px;margin:18px 0 9px}.engineer textarea{display:block;width:100%;min-width:0;
+resize:vertical;min-height:90px;max-height:240px;background:#0b141e;color:#edf3f8;
+border:1px solid #43576b;border-radius:10px;padding:12px;font:inherit;font-size:14px;
+line-height:1.6}.engineer textarea:focus-visible{outline:3px solid #cce9ff;outline-offset:2px}
+.engineer textarea::placeholder{color:#879bb0}.answer{margin-top:17px;padding:17px;
+border:1px solid #3a4e61;background:#0d1823;border-radius:11px}
+.answer[data-stale="true"]{border-color:#84652e}.answer-body{white-space:pre-wrap;
+overflow-wrap:anywhere;font-size:14px;line-height:1.8;margin:13px 0 0}
+.answer-meta{color:#adbdcd;font-size:12px;line-height:1.7}.question-note{font-size:12px;
+color:#adbdcd;line-height:1.7;margin:0}.engineer .buttons{margin:12px 0}
+.engineer-error{color:#ffe0a7;font-size:13px;line-height:1.7;margin:12px 0 0}
 ul{padding-left:19px;color:#b9c7d6;font-size:13px;line-height:1.8;margin-bottom:0}
 .speech-line{font-size:13px;line-height:1.7;min-height:44px;color:#adbdcd}
 footer{margin-top:20px;color:#889caf;font-size:12px;line-height:1.7}
@@ -122,6 +134,37 @@ aria-label="立即静音并取消当前播报">立即静音</button></div>
 aria-label="下载本次安全聚合摘要 JSON">保存本次摘要</a>
 </section>
 </div>
+<section class="panel engineer" aria-label="文字工程师问答">
+<div class="row"><h2>问问工程师</h2><span class="badge" id="engineer-backend"
+role="status" aria-live="polite">正在连接问答服务</span></div>
+<p class="engineer-error" id="engineer-error" role="status" aria-live="polite" hidden></p>
+<p class="question-note">先由本地遥测规则提供依据，再由工程师解释。缺少证据时会明确说明；
+文字回复不会自动播报，也不会操作模拟器。请停车后提问、阅读。</p>
+<p class="question-note" id="engineer-privacy">启用云端时，仅向 DeepSeek 发送经过筛选的工程摘要
+及你输入的问题；不发送原始遥测或完整会话信息。请勿输入姓名、账号或其他身份信息。</p>
+<label for="engineer-question">你的问题</label>
+<textarea id="engineer-question" rows="3" maxlength="500" autocomplete="off"
+aria-describedby="engineer-privacy engineer-request"
+placeholder="例如：现在油量还能跑几圈？哪些信息不足以确定进站时机？"></textarea>
+<div class="buttons" aria-label="发送问题和快捷提问">
+<button id="engineer-send" type="button" aria-label="发送输入的问题" disabled>发送问题</button>
+<button id="engineer-fuel" class="secondary" type="button"
+aria-label="询问当前燃油证据" disabled>问燃油</button>
+<button id="engineer-strategy" class="secondary" type="button"
+aria-label="询问进站策略的依据与限制" disabled>问策略</button>
+<button id="engineer-driving" class="secondary" type="button"
+aria-label="询问驾驶分析证据" disabled>问驾驶</button>
+<button id="engineer-session" class="secondary" type="button"
+aria-label="请求本次会话复盘" hidden disabled>复盘本次</button>
+</div>
+<div class="row"><small id="engineer-request" role="status" aria-live="polite">
+不会自动发送问题或调用模型。</small><small id="engineer-budget">云端额度：等待状态</small></div>
+<div class="answer" id="engineer-answer" aria-label="工程师最新文字回答" hidden>
+<div class="row"><span class="badge" id="engineer-origin">来源待确认</span>
+<span class="answer-meta" id="engineer-answer-meta"></span></div>
+<p class="answer-body" id="engineer-answer-body"></p>
+</div>
+</section>
 <footer>此面板不发送模拟器、车辆或进站黑盒控制指令。
 连接中断、数据过期或退出驾驶状态时，旧估计会被撤下；语音不会排队补播。
 真实驾驶验收尚待完成。</footer>
@@ -138,6 +181,14 @@ aria-label="下载本次安全聚合摘要 JSON">保存本次摘要</a>
   let current = null, receivedAt = 0, requestTransit = 0, inFlight = false;
   let enabled = false, voice = null, activeSpeech = null, generation = null;
   let progressSequence = null, progressAt = 0;
+  let engineer = null, engineerInFlight = false, engineerReceivedAt = 0;
+  let lastQuestionAt = -Infinity, localRateUntil = 0, awaitingAnswer = false;
+  let previousAnswerId = null, engineerRequestNote = '不会自动发送问题或调用模型。';
+  const engineerStatuses = ['DISABLED', 'MISSING_KEY', 'READY', 'BUSY', 'RATE_LIMITED',
+    'BUDGET_EXHAUSTED', 'ERROR'];
+  const engineerControls = ['engineer-send', 'engineer-fuel', 'engineer-strategy',
+    'engineer-driving', 'engineer-session'];
+  const withdrawnEngineerAnswers = new Set();
   const seenSpeech = new Set();
   const fresh = () => current && current.connection === 'CONNECTED'
     && finite(current.updated_age_s) && current.updated_age_s >= 0
@@ -267,12 +318,14 @@ aria-label="下载本次安全聚合摘要 JSON">保存本次摘要</a>
     clearEstimates();
     cancelSpeech();
     put('voice-status', '实时数据不可用，播报已停止；等待新的有效提示。');
+    renderEngineerAnswer();
     listIssues(['连接或数据新鲜度未通过检查。', '仅提供建议，不控制赛车或进站设置。']);
   }
   function number(id, value, unit, digits = 1) {
     put(id, finite(value) && value >= 0 ? value.toFixed(digits) + unit : '—');
   }
   function render() {
+    renderEngineerAnswer();
     const state = current;
     const demo = state && state.source_mode === 'SYNTHETIC_DEMO';
     byId('demo-banner').hidden = !demo;
@@ -392,6 +445,191 @@ aria-label="下载本次安全聚合摘要 JSON">保存本次摘要</a>
       inFlight = false;
     }
   }
+  function engineerCooldown() {
+    const interval = engineer && finite(engineer.min_interval_s)
+      && engineer.min_interval_s >= 0 ? engineer.min_interval_s : 10;
+    return Math.max(0, localRateUntil - performance.now(),
+      lastQuestionAt + interval * 1000 - performance.now());
+  }
+  function canAskEngineer() {
+    return engineer && engineerStatuses.includes(engineer.status)
+      && typeof engineer.csrf_token === 'string' && engineer.csrf_token.length > 0
+      && !engineerInFlight && !['BUSY', 'RATE_LIMITED'].includes(engineer.status)
+      && engineerCooldown() <= 0;
+  }
+  function renderEngineerAnswer() {
+    const answer = engineer && engineer.answer;
+    if (!answer || typeof answer.id !== 'string' || answer.id.length === 0
+      || typeof answer.text !== 'string'
+      || !['deepseek', 'local_fallback'].includes(answer.origin)
+      || !['live_snapshot', 'historical_session'].includes(answer.scope)) {
+      byId('engineer-answer').hidden = true;
+      put('engineer-answer-body', '');
+      return;
+    }
+    byId('engineer-answer').hidden = false;
+    const invalid = answer.stale !== false || !finite(answer.age_s) || answer.age_s < 0 ||
+      (answer.scope === 'live_snapshot' && answer.snapshot_was_valid !== false && !fresh());
+    const answerKey = engineer.csrf_token + ':' + answer.origin + ':' + answer.id;
+    if (invalid && answer.scope === 'live_snapshot') withdrawnEngineerAnswers.add(answerKey);
+    const stale = invalid || withdrawnEngineerAnswers.has(answerKey);
+    byId('engineer-answer').dataset.stale = String(stale);
+    const model = typeof engineer.model === 'string' ? engineer.model : '模型未确认';
+    put('engineer-origin', answer.origin === 'local_fallback' ? '本地规则解读 · 未调用模型' :
+      'DeepSeek · ' + model);
+    byId('engineer-origin').dataset.tone = stale ? 'warn' : 'good';
+    const age = finite(answer.age_s) && answer.age_s >= 0 ?
+      answer.age_s + (performance.now() - engineerReceivedAt) / 1000 : null;
+    const scope = answer.scope === 'historical_session' ? '本次会话复盘 · 非实时指令' :
+      stale ? '快照已过期 · 正文已撤回' : answer.snapshot_was_valid === false ?
+        '无有效实时证据 · 仅说明能力边界' : '提问时的快照 · 非持续策略';
+    const topicLabels = {fuel: '燃油', strategy: '策略', driving: '驾驶',
+      status: '状态', review: '复盘'};
+    const topic = topicLabels[answer.topic] ? ' · ' + topicLabels[answer.topic] : '';
+    put('engineer-answer-meta', scope + topic +
+      (age === null ? '' : ' · ' + Math.floor(age) + ' 秒前'));
+    put('engineer-answer-body', stale ?
+      '这条回答依据的状态已失效，旧数字与建议已撤回。请重新提问以获取当前依据。' :
+      answer.text.slice(0, 8000));
+  }
+  function renderEngineer() {
+    const labels = {DISABLED: '云端未启用 · 可用本地解读', MISSING_KEY: '缺少密钥 · 可用本地解读',
+      READY: 'DeepSeek 已配置', BUSY: '正在整理回答', RATE_LIMITED: '稍后可再次提问',
+      BUDGET_EXHAUSTED: '云端额度用尽 · 可用本地解读', ERROR: '云端异常 · 可重试本地解读'};
+    put('engineer-backend', engineer && labels[engineer.status] || '问答服务未连接');
+    byId('engineer-backend').dataset.tone = engineer && engineer.status === 'READY' ?
+      'good' : 'warn';
+    const modelError = engineer && typeof engineer.error === 'string' && engineer.error.length > 0;
+    byId('engineer-error').hidden = !modelError;
+    put('engineer-error', !modelError ? '' : engineer.error === 'MODEL_CONFIGURATION_INVALID' ?
+      '密钥配置格式有误，请检查本机密钥与模型配置；当前使用本地解读，不显示原始错误内容。' :
+      '本次模型调用失败或响应不合格，已使用本地解读；不会自动重试。');
+    const cooldown = engineerCooldown();
+    const busy = engineerInFlight || (engineer && engineer.status === 'BUSY');
+    engineerControls.forEach((id) => { byId(id).disabled = !canAskEngineer(); });
+    byId('engineer-question').disabled = busy;
+    const sessionAllowed = engineer && engineer.capabilities
+      && engineer.capabilities.session === true;
+    byId('engineer-session').hidden = !sessionAllowed;
+    byId('engineer-session').disabled = !canAskEngineer() || !sessionAllowed;
+    byId('engineer-answer').setAttribute('aria-busy', String(Boolean(busy || awaitingAnswer)));
+    put('engineer-request', cooldown > 0 ? engineerRequestNote + ' 再等 ' +
+      Math.ceil(cooldown / 1000) + ' 秒可提问。' : engineerRequestNote);
+    put('engineer-budget', engineer && Number.isInteger(engineer.requests_used)
+      && Number.isInteger(engineer.request_limit) ? '云端调用 ' + engineer.requests_used +
+      ' / ' + engineer.request_limit + ' · 本地解读不占云端额度' : '云端额度：未知');
+    renderEngineerAnswer();
+  }
+  function engineerError(code) {
+    const labels = {RATE_LIMITED: '提问过于频繁，请稍后再试。', BUSY: '上一条问题仍在处理。',
+      INVALID_QUESTION: '请输入 1 到 500 字的问题。',
+      INVALID_TOKEN: '页面校验已失效，正在刷新状态。',
+      FORBIDDEN: '请求校验未通过，正在刷新状态。'};
+    return labels[code] || '这次请求未完成；请查看服务状态后手动重试。';
+  }
+  async function pollEngineer() {
+    if (engineerInFlight) return;
+    engineerInFlight = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+      engineer = null;
+      engineerRequestNote = '问答服务响应超时；遥测面板独立运行，不会自动重发问题。';
+      renderEngineer();
+    }, 900);
+    try {
+      const response = await fetch('/api/engineer', {cache: 'no-store',
+        credentials: 'same-origin', signal: controller.signal});
+      if (!response.ok) throw new Error('Engineer unavailable');
+      const value = await response.json();
+      if (controller.signal.aborted) return;
+      if (!value || !engineerStatuses.includes(value.status)) {
+        throw new Error('Invalid engineer state');
+      }
+      engineer = value;
+      engineerReceivedAt = performance.now();
+      if (engineer.status === 'RATE_LIMITED' && finite(engineer.retry_after_s)) {
+        localRateUntil = performance.now() + Math.max(0, engineer.retry_after_s) * 1000;
+      }
+      if (awaitingAnswer && engineer.answer && engineer.answer.id !== previousAnswerId) {
+        awaitingAnswer = false;
+        engineerRequestNote = '回答已更新；请核对依据范围与时间。';
+      } else if (awaitingAnswer && engineer.status === 'ERROR') {
+        awaitingAnswer = false;
+        engineerRequestNote = engineerError(engineer.error);
+      }
+    } catch (_) {
+      engineer = null;
+      engineerRequestNote = '问答服务暂不可用；遥测监控不受影响，不会自动重发问题。';
+    } finally {
+      clearTimeout(timeout);
+      engineerInFlight = false;
+      renderEngineer();
+    }
+  }
+  async function askEngineer(question, scope = 'live') {
+    if (!canAskEngineer()) return;
+    const text = typeof question === 'string' ? question.trim() : '';
+    if (text.length === 0 || [...text].length > 500) {
+      engineerRequestNote = '请输入 1 到 500 字的问题。';
+      renderEngineer();
+      return;
+    }
+    if (scope === 'session' && !(engineer.capabilities && engineer.capabilities.session === true)) {
+      return;
+    }
+    const token = engineer.csrf_token;
+    previousAnswerId = engineer.answer && engineer.answer.id;
+    awaitingAnswer = true;
+    engineerInFlight = true;
+    lastQuestionAt = performance.now();
+    engineerRequestNote = '正在提交问题；不会发送任何车辆控制指令。';
+    renderEngineer();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+      engineerRequestNote = '提交结果未确认；会继续查询状态，但不会自动重发问题。';
+      renderEngineer();
+    }, 1500);
+    try {
+      const response = await fetch('/api/engineer/question', {method: 'POST',
+        credentials: 'same-origin', cache: 'no-store', signal: controller.signal,
+        headers: {'Content-Type': 'application/json', 'X-Engineer-Token': token},
+        body: JSON.stringify({question: text, scope})});
+      if (controller.signal.aborted) return;
+      if (response.status === 202) {
+        awaitingAnswer = true;
+        engineerRequestNote = '问题已接收，等待工程师回答；不会自动重发。';
+      } else {
+        const error = await response.json();
+        if (controller.signal.aborted) return;
+        awaitingAnswer = false;
+        engineerRequestNote = engineerError(error && error.error);
+        if (response.status === 403) engineer.csrf_token = '';
+      }
+    } catch (_) {
+      engineerRequestNote = '提交结果未确认；请等待状态更新，不会自动重发问题。';
+    } finally {
+      clearTimeout(timeout);
+      engineerInFlight = false;
+      renderEngineer();
+    }
+  }
+  byId('engineer-send').addEventListener('click', () =>
+    askEngineer(byId('engineer-question').value));
+  const quickQuestions = {
+    'engineer-fuel': '根据当前有效证据，燃油还能跑几圈？有哪些不确定性？',
+    'engineer-strategy': '当前证据支持怎样的进站判断？哪些信息不足，不能给出具体指令？',
+    'engineer-driving': '当前数据能支持哪些驾驶分析？请区分已有证据和仍需采集的信息。',
+    'engineer-session': '请复盘本次会话，概括有效证据、数据质量和下一次值得验证的问题。',
+  };
+  Object.entries(quickQuestions).forEach(([id, question]) => {
+    byId(id).addEventListener('click', () => {
+      if (!canAskEngineer()) return;
+      byId('engineer-question').value = question;
+      return askEngineer(question, id === 'engineer-session' ? 'session' : 'live');
+    });
+  });
   byId('voice-enable').addEventListener('click', () => {
     findVoice();
     if (!voice || document.hidden) return;
@@ -414,7 +652,9 @@ aria-label="下载本次安全聚合摘要 JSON">保存本次摘要</a>
       || !safeDriving() || document.hidden)) cancelSpeech();
   }, 100);
   setInterval(poll, 500);
+  setInterval(pollEngineer, 1000);
   poll();
+  pollEngineer();
 })();
 </script>
 </body>

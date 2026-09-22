@@ -19,12 +19,18 @@ pytestmark = pytest.mark.skipif(
 MARKER = "LAUNCHER_TEST_JSON:"
 
 
-def _launch_with_mocks(*, no_recording: bool) -> dict[str, object]:
+def _launch_with_mocks(*, no_recording: bool, deepseek: bool = False) -> dict[str, object]:
     quoted_script = str(SCRIPT).replace("'", "''")
     option = " -NoRecording" if no_recording else ""
+    if deepseek:
+        option += (
+            " -DeepSeek -DeepSeekModel deepseek-v4-pro -LlmRequestLimit 7"
+            r" -SessionArtifact 'C:\Users\racer\Private Data\session.json'"
+        )
     command = r"""
 $ErrorActionPreference = 'Stop'
 $env:LOCALAPPDATA = 'C:\Users\racer\AppData\Local\Private Data'
+$env:DEEPSEEK_API_KEY = 'SYNTHETIC_ONLY_KEY'
 $script:launchCalls = 0
 $script:requestCalls = 0
 $script:launchArguments = @()
@@ -104,3 +110,16 @@ def test_launcher_preserves_each_argument_and_quoted_paths_without_padding(no_re
             assert argument[1:-1] == argument[1:-1].strip()
     if no_recording:
         assert "--record-directory" not in result["arguments"]
+
+
+def test_deepseek_launcher_passes_config_and_quoted_receipt_but_never_key():
+    result = _launch_with_mocks(no_recording=True, deepseek=True)
+    arguments = result["arguments"]
+    index = arguments.index("--llm-provider")
+    assert arguments[index:index + 6] == [
+        "--llm-provider", "deepseek", "--llm-model", "deepseek-v4-pro", "--llm-request-limit", "7",
+    ]
+    assert arguments[-2:] == [
+        "--session-artifact", r'"C:\Users\racer\Private Data\session.json"',
+    ]
+    assert "SYNTHETIC_ONLY_KEY" not in str(arguments)

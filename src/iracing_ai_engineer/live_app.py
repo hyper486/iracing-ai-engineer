@@ -1,7 +1,8 @@
-"""Loopback-only experimental fuel display. No simulator/control or cloud APIs.
+"""Loopback experimental fuel display with an optional isolated LLM advisor.
 
 The single reader owns SDK access. HTTP serves copies of bounded public state;
-it cannot mutate the reader. Fuel estimates do not promote the M2/M3 gates.
+it cannot mutate the reader. The opt-in model sees allowlisted summaries only.
+Fuel estimates and model explanations do not promote the M2/M3 gates.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from .collector import (
 from .dashboard_page import DASHBOARD_HTML
 from .live_fuel import LiveFuelConfig, LiveFuelEngineer
 from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
+from .llm_engineer import EngineerConfig, EngineerService
 from .runtime_clock import monotonic_now
 from .sdk_probe import SdkProbeUnavailable, WindowsPyirsdkTransport
 from .telemetry import SourceKind
@@ -45,6 +47,17 @@ LIMITATIONS = [
 
 def _finite(value: object) -> bool:
     return type(value) in (int, float) and math.isfinite(value)
+
+
+def _engineer_safety_binding(monitor: Mapping) -> tuple:
+    context, quality = monitor.get("context", {}), monitor.get("quality", {})
+    return (
+        monitor.get("binding_sha256"), monitor.get("source_kind"),
+        monitor.get("status") in ("READY", "DEGRADED"),
+        context.get("player_control_state"), context.get("sim_source_mode"),
+        tuple(context.get("conflicts", [])), quality.get("stale"),
+        quality.get("status") in ("READY", "DEGRADED"),
+    )
 
 
 def bound_session_type(payload: object, update: object, frame: object) -> str | None:
@@ -139,6 +152,7 @@ class AppState:
         self._lock = threading.Lock()
         self._updated: float | None = None
         self._generation = 0
+        self._engineer_revision = 0
         self._value: dict[str, Any] = {
             "contract_version": "experimental-live-fuel-app-v1",
             "connection": "WAIT_SIM",
@@ -182,6 +196,20 @@ class AppState:
         self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None
     ) -> None:
         with self._lock:
+            previous = self._value.get("monitor") or {}
+            previous_fuel = self._value.get("fuel") or {}
+            old_level, new_level = previous_fuel.get("current_fuel_l"), fuel.get("current_fuel_l")
+            if (
+                (self._updated is not None and self.clock() - self._updated > FRESHNESS_S)
+                or _engineer_safety_binding(previous) != _engineer_safety_binding(monitor)
+                or self._value.get("session_type") != session_type
+                or previous.get("telemetry", {}).get("session_num")
+                != monitor.get("telemetry", {}).get("session_num")
+                or previous_fuel.get("status") != fuel.get("status")
+                or monitor.get("interval_invalid_for_fuel")
+                or (_finite(old_level) and _finite(new_level) and new_level > old_level + 0.05)
+            ):
+                self._engineer_revision += 1
             self._updated = self.clock()
             self._value.update(
                 connection="CONNECTED",
@@ -202,7 +230,8 @@ class AppState:
         with self._lock:
             value = copy.deepcopy(self._value)
             age = None if self._updated is None else max(0.0, self.clock() - self._updated)
-            value.update(updated_age_s=age, generation=self._generation)
+            value.update(updated_age_s=age, generation=self._generation,
+                         engineer_revision=self._engineer_revision)
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
                 value.update(connection="DISCONNECTED", fuel=None, monitor=None, speech=None)
             intent = value.get("speech")
@@ -240,7 +269,9 @@ def _csp() -> str:
     return "; ".join(directives)
 
 
-def make_server(state: AppState, port: int = 8765) -> ThreadingHTTPServer:
+def make_server(
+    state: AppState, port: int = 8765, *, engineer: EngineerService | None = None
+) -> ThreadingHTTPServer:
     if type(port) is not int or not 0 <= port <= 65535:
         raise ValueError("invalid port")
 
@@ -283,6 +314,12 @@ def make_server(state: AppState, port: int = 8765) -> ThreadingHTTPServer:
                     json.dumps(payload, ensure_ascii=False, allow_nan=False).encode(),
                     "application/json; charset=utf-8",
                 )
+            elif self.path == "/api/engineer" and engineer is not None:
+                self._respond(
+                    200,
+                    json.dumps(engineer.snapshot(), ensure_ascii=False, allow_nan=False).encode(),
+                    "application/json; charset=utf-8",
+                )
             else:
                 self._respond(404, b"Not found", "text/plain")
 
@@ -290,7 +327,51 @@ def make_server(state: AppState, port: int = 8765) -> ThreadingHTTPServer:
         do_HEAD = _get
 
         def do_POST(self) -> None:
-            self._respond(405, b"Read only", "text/plain")
+            if self.path != "/api/engineer/question" or engineer is None:
+                self._respond(405, b"Read only", "text/plain")
+                return
+            host = f"127.0.0.1:{self.server.server_port}"
+            tokens = self.headers.get_all("X-Engineer-Token", [])
+            if (
+                self.headers.get_all("Host", []) != [host]
+                or self.headers.get_all("Origin", []) != [f"http://{host}"]
+                or self.headers.get_all("Sec-Fetch-Site", []) not in ([], ["same-origin"])
+                or len(tokens) != 1 or not engineer.authenticates(tokens[0])
+            ):
+                self._respond(403, b'{"error":"FORBIDDEN"}', "application/json")
+                return
+            lengths = self.headers.get_all("Content-Length", [])
+            if (
+                self.headers.get_all("Content-Type", []) != ["application/json"]
+                or self.headers.get_all("Transfer-Encoding", [])
+                or len(lengths) != 1 or not re.fullmatch(r"[0-9]{1,4}", lengths[0])
+                or not 1 <= int(lengths[0]) <= 4096
+            ):
+                self._respond(400, b'{"error":"INVALID_REQUEST"}', "application/json")
+                return
+            try:
+                self.connection.settimeout(2.0)
+                body = self.rfile.read(int(lengths[0]))
+                if len(body) != int(lengths[0]):
+                    raise ValueError("incomplete body")
+
+                def unique(pairs: list) -> dict:
+                    result = {}
+                    for key, value in pairs:
+                        if key in result:
+                            raise ValueError("duplicate key")
+                        result[key] = value
+                    return result
+
+                payload = json.loads(body, object_pairs_hook=unique)
+                if not isinstance(payload, dict) or not {"question"} <= set(payload) <= {
+                    "question", "scope"
+                }:
+                    raise ValueError("invalid payload")
+                code, result = engineer.submit(payload["question"], payload.get("scope", "live"))
+            except (ValueError, OSError, RecursionError):
+                code, result = 400, {"error": "INVALID_REQUEST"}
+            self._respond(code, json.dumps(result).encode(), "application/json")
 
     server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     server.daemon_threads = True
@@ -440,6 +521,7 @@ def run_live_app(
     config: LiveFuelConfig | None = None,
     record_directory: Path | None = None,
     record_max_bytes: int = 4 * 1024**3,
+    engineer_config: EngineerConfig | None = None,
     on_ready: Callable[[str], None] | None = None,
 ) -> None:
     if not _finite(duration_s) or not 0 < duration_s <= 43200:
@@ -447,7 +529,12 @@ def run_live_app(
     if type(record_max_bytes) is not int or record_max_bytes < 32 * 1024**2:
         raise ValueError("recording budget must be at least 32 MiB")
     state, stop = AppState(), threading.Event()
-    server = make_server(state, port)
+    engineer = EngineerService(state.snapshot, engineer_config)
+    try:
+        server = make_server(state, port, engineer=engineer)
+    except Exception:
+        engineer.close()
+        raise
     server.timeout = 0.5
     reader = threading.Thread(
         target=run_reader,
@@ -466,6 +553,7 @@ def run_live_app(
         pass
     finally:
         stop.set()
+        engineer.close()
         server.server_close()
         reader.join(timeout=5)
 

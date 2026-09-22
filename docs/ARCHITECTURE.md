@@ -221,13 +221,19 @@ Forbidden:
 - Block the real-time path.
 - Present an inference as a measurement.
 
-The first version can use only phrase templates; connect an LLM after the core system is validated.
+The integrated experimental version uses an optional DeepSeek answer planner:
+it selects allowlisted fact IDs and local templates render the final text.
+Live fuel and validated historical receipt contexts are separate. The async
+model lane is bounded, fail-closed and never drives speech or control. See
+[the implemented contract](DEEPSEEK_ENGINEER.md). The broader natural-language
+and coaching behaviors above remain product targets, not live acceptance.
 
 ## 12. Safety and rules
 
 - Do not automate steering, throttle, brake, clutch, or shifting. Sporting Code 8.1.1.2 prohibits third-party modification or automation of real-time driver inputs.
 - Read only the public iRacing SDK; do not inject processes, hook, sniff packets, or bypass hidden state.
-- If pit service settings are ever automated, use only official pit macros / SDK pit commands with separate opt-in, read-back confirmation, and a fast disable path.
+- Never send simulator-launch or pit-black-box commands; advisor-only is the
+  workspace product boundary, including when a model or user question requests control.
 - When the rules profile is unknown, pits are closed, data is stale, the session resets, or the CarIdx map changes unexpectedly, enter a degraded state and do not issue a deterministic tactical command.
 - Official-race speech is enabled only after shadow, Hosted, or AI-session validation.
 

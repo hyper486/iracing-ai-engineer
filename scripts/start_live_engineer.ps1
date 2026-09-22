@@ -3,6 +3,10 @@ param(
     [ValidateRange(1, 12)][int]$Hours = 6,
     [ValidateRange(0, 100)][double]$ReserveLiters = 2,
     [ValidateRange(0, 1000)][double]$TankCapacityLiters = 0,
+    [switch]$DeepSeek,
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$')][string]$DeepSeekModel = 'deepseek-flash',
+    [ValidateRange(1, 500)][int]$LlmRequestLimit = 60,
+    [ValidatePattern('^[^"\r\n]*$')][string]$SessionArtifact = '',
     [switch]$NoRecording,
     [switch]$NoBrowser
 )
@@ -32,6 +36,16 @@ if (-not $alreadyRunning) {
         $arguments += @('--tank-capacity-liters',
             $TankCapacityLiters.ToString([Globalization.CultureInfo]::InvariantCulture))
     }
+    if ($DeepSeek) {
+        $arguments += @('--llm-provider', 'deepseek', '--llm-model', $DeepSeekModel,
+            '--llm-request-limit', "$LlmRequestLimit")
+        if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
+            Write-Output 'DeepSeek key missing: local answers remain available. Set DEEPSEEK_API_KEY locally and restart to enable the model.'
+        }
+    }
+    if ($SessionArtifact) {
+        $arguments += @('--session-artifact', ('"' + $SessionArtifact + '"'))
+    }
     if (-not $NoRecording) {
         $captureRoot = Join-Path $privateRoot 'captures'
         $arguments += @('--record-directory', ('"' + $captureRoot + '"'))
@@ -55,5 +69,5 @@ if (-not $alreadyRunning) {
     Write-Output 'Reusing the running engineer. New configuration parameters were not applied.'
 }
 if (-not $NoBrowser) { Start-Process -FilePath $url }
-Write-Output "Fuel dashboard: $url"
+Write-Output "Engineer dashboard: $url"
 Write-Output 'Experimental estimates only. Race audio stays muted; no simulator controls.'
