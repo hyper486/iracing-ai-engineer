@@ -23,6 +23,8 @@ practice opportunity.
 - Distance-aligned corner evidence and repeated-loss diagnosis.
 - Advisor timelines, shadow speech policy and deterministic session reports.
 - A privacy-safe JSONL live-state bridge for future overlays and speech consumers.
+- An experimental local fuel dashboard with private recording and opt-in local
+  practice speech; race speech stays disabled.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
 
 An authentic `SourceKind=SDK_LIVE` transport canary now reaches the running
@@ -35,7 +37,8 @@ The September 4 correctness/privacy review fixes are documented in
 [the review-fix record](docs/REVIEW_FIXES.md). Rejoin estimates now bind the
 future stop lap and physical position around the track, and valid strategy
 candidates no longer depend on driving-diagnosis promotion to reach the shadow
-policy. Live tactical delivery, audio and broader coaching still require work.
+policy. Reliable race-audio delivery, full live tactical advice and broader
+coaching still require work; the fuel dashboard below does not promote those gates.
 
 ## Quick start
 
@@ -74,6 +77,31 @@ uv run python scripts/run_local_cli.py offline-demo \
 
 If the raw fixture is absent or evidence is insufficient, the correct result
 is an explicit `WAIT_*` state—not fabricated strategy or coaching.
+
+### Experimental Windows fuel dashboard
+
+From PowerShell in the repository root, with the Python environment prepared:
+
+```powershell
+.\scripts\start_live_engineer.ps1
+```
+
+This starts a hidden worker for six hours and opens
+[the local dashboard](http://127.0.0.1:8765/). Start iRacing yourself. The launcher
+defaults to private raw recording under
+`%LOCALAPPDATA%\iRacingAIEngineer\captures`, capped at 4 GiB per run; pass
+`-NoRecording` to disable it when starting a new worker.
+
+This is **experimental fuel-only estimation**, not a multi-stop, tire, traffic or
+corner-coaching release. Learning needs the first observed crossing followed by
+at least five valid complete laps by default. Practice speech is opt-in and uses
+only browser-reported local English voices. Race speech is disabled, and a hidden
+browser tab automatically mutes, so game-background speech is not guaranteed.
+Read [the setup, recording and safety limits](docs/LIVE_APP.md) before using it.
+中文快速测试步骤：[上车测试速查](docs/LIVE_TRIAL_ZH.md)。
+This milestone does not establish new authentic `SDK_LIVE` driving acceptance.
+
+### Read-only state bridge
 
 With the simulator already running on the same Windows desktop, stream bounded
 read-only state for a future overlay or speech process:
@@ -128,6 +156,7 @@ Useful design documents:
 - [Driving diagnosis evidence](docs/OFFLINE_DRIVING_DIAGNOSIS_EVIDENCE.md)
 - [Post-session report](docs/OFFLINE_SESSION_REPORT.md)
 - [Privacy-safe live monitor](docs/LIVE_MONITOR.md)
+- [Experimental local fuel dashboard](docs/LIVE_APP.md)
 - [Standalone Crew Chief-derived reader](docs/CREWCHIEF_READER.md)
 
 ## Public/private boundary

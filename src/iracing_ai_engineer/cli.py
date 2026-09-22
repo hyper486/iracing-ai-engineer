@@ -423,6 +423,17 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
 
+    live_app_parser = subcommands.add_parser(
+        "live-app", help="serve an experimental read-only fuel dashboard on loopback",
+    )
+    live_app_parser.add_argument("--port", type=_positive_int, default=8765)
+    live_app_parser.add_argument("--duration-seconds", type=_finite_positive, default=21600)
+    live_app_parser.add_argument("--reserve-liters", type=_finite_nonnegative, default=2.0)
+    live_app_parser.add_argument("--minimum-valid-laps", type=_positive_int, default=5)
+    live_app_parser.add_argument("--tank-capacity-liters", type=_finite_positive)
+    live_app_parser.add_argument("--record-directory", type=Path)
+    live_app_parser.add_argument("--record-max-mib", type=_positive_int, default=4096)
+
     live_monitor_parser = subcommands.add_parser(
         "monitor-live",
         help="stream privacy-safe advisor state from the read-only live SDK",
@@ -1581,7 +1592,26 @@ def _retrieved_live_optional_inputs(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
-    if args.command == "build-tire-performance-model":
+    if args.command == "live-app":
+        from .live_app import run_live_app
+        from .live_fuel import LiveFuelConfig
+
+        try:
+            config = LiveFuelConfig(reserve_l=args.reserve_liters,
+                                    minimum_valid_laps=args.minimum_valid_laps,
+                                    tank_capacity_l=args.tank_capacity_liters)
+            run_live_app(port=args.port, duration_s=args.duration_seconds, config=config,
+                         record_directory=args.record_directory,
+                         record_max_bytes=args.record_max_mib * 1024**2,
+                         on_ready=lambda url: print(json.dumps({
+                             "status": "EXPERIMENTAL_FUEL_APP", "url": url,
+                             "advisor_only": True, "race_speech_enabled": False,
+                         }), flush=True))
+        except (ValueError, OSError):
+            print(json.dumps({"error": "LIVE_APP_CONFIGURATION_OR_START_FAILED"}))
+            return 2
+        return 0
+    elif args.command == "build-tire-performance-model":
         from .retrieved_live_analysis import (
             MATCHED_TIRE_PERFORMANCE_DATASET_CONTRACT_VERSION,
             TirePerformanceError,

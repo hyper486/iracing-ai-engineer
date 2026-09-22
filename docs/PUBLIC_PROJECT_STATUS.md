@@ -20,10 +20,49 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Corner diagnosis | Implemented for repeated comparable evidence | Curb/risk claims remain blocked without trusted labels. |
 | Deterministic reports | Implemented | JSON and script-free HTML outputs preserve provenance and limitations. |
 | Privacy-safe live state bridge | Implemented; spectator-only field check | Tick-level normalization feeds bounded JSONL snapshots; spectator guard stayed WAIT_CAR. In-car validation remains pending. |
+| Local fuel dashboard | Experimental; offline/synthetic checks | Whole-lap fuel learning, freshness/driver guards and optional bounded private recording are implemented. This is not a multi-stop, traffic, tire or driving-guidance release. |
+| Local practice speech | Opt-in browser prototype | Only local English voices in confirmed Practice; Race speech is disabled. A hidden tab auto-mutes, so game-background playback is not guaranteed. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Experimental fuel dashboard
+
+The September 22 local-app work adds a loopback browser UI and a separate,
+experimental fuel-only estimator. The hidden PowerShell launcher defaults to
+six hours at `http://127.0.0.1:8765/`; it does not launch the simulator or send
+vehicle/pit-black-box commands. Setup, state meanings, stopping and limitations
+are in [the local-app guide](LIVE_APP.md).
+
+Learning needs the first observed crossing plus at least five valid complete
+laps by default. Pit/out laps, refueling, unsuitable flags, incidents and invalid
+intervals are excluded; old estimates are withdrawn when evidence becomes
+unusable. Sparse tick loss is tolerated only for this low-rate experimental fuel
+path, not by weakening high-rate driving-quality or M2/M3 admission gates.
+Finish demand requires a confirmed current Race session and a usable horizon;
+refill liters additionally require configured tank capacity and remaining demand
+that fits into one tank. No complete multi-stop/traffic/tire strategy or driving
+guidance is released by this UI.
+
+The launcher defaults to private raw capture under
+`%LOCALAPPDATA%\iRacingAIEngineer\captures`, with a 4 GiB per-run budget;
+`-NoRecording` disables it for a newly started worker. Recorder failure does not
+by itself kill the UI. These captures remain private and are not served by HTTP.
+Practice speech is manually opt-in, uses only browser-reported local English
+voices, and auto-mutes in a hidden tab. Official races and all other Race sessions
+remain silent; reliable game-background audio is not claimed.
+
+Full regression: **1,426 passed, 43 skipped**. Ruff, public-safety scanning
+including history, and staged diff checks passed. The skips remain explicit
+missing-data, private-deployment or platform-only cases, not live passes.
+Windows hidden startup, correctly quoted private capture arguments, loopback
+waiting state, browser rendering with explicitly synthetic learned-fuel values,
+and the mute control were checked locally. Browser checks reported no console
+errors; no audible playback or authentic in-car UI/audio acceptance is claimed.
+This establishes no new `SDK_LIVE` acceptance. The prior regression totals and
+spectator transport results below describe earlier milestones. The
+[Chinese trial checklist](LIVE_TRIAL_ZH.md) explains the next human-driven test.
 
 ## Review corrections
 
@@ -69,8 +108,10 @@ also checks that a rejoin estimate belongs to the actual recommendation action.
 See [the review-fix record](REVIEW_FIXES.md) for scope and regression coverage.
 
 A valid M2 strategy candidate can now reach the shadow speech policy while
-driving-diagnosis promotion remains WAIT. This does not enable audio or vehicle
-control, promote unsupported driving advice, or make the product live-accepted.
+driving-diagnosis promotion remains WAIT. That shadow path does not enable
+race audio or vehicle control, promote unsupported driving advice, or make the
+product live-accepted. The separate experimental practice-fuel speech above
+does not change those gates.
 
 ## Last recorded live boundary
 
@@ -130,8 +171,8 @@ SDK unavailable. In-car and post-change live-monitor verification remain pending
 The next live-validation prerequisite is human-driven evidence: configure the
 physical driving inputs, enter the car, then record a sufficiently long clean
 run and pit sequence. Host-specific telemetry, logs and device details remain
-private. Software work also remains: real-time tactical delivery, an audible
-engineering interface, broader multi-stop planning, and calibrated curb/trail
+private. Software work also remains: real-time tactical delivery, reliable
+background race audio, broader multi-stop planning, and calibrated curb/trail
 braking coaching are not made complete by the transport canary or these fixes.
 
 This boundary does not change the product goal and does not justify an

@@ -51,6 +51,7 @@ LIVE_MONITOR_FIELDS = tuple(
             "PlayerCarMyIncidentCount",
             "PlayerCarDriverIncidentCount",
             "PlayerCarTeamIncidentCount",
+            "CarLeftRight",
         )
     )
 )
@@ -251,6 +252,13 @@ class LiveMonitor:
         )
         self._events = TelemetryEventPipeline()
         self._pending_events: list[TelemetryEvent] = []
+        self._interval_invalid_for_fuel: set[str] = set()
+        self._interval_unsafe_for_speech: set[str] = set()
+        self._previous_incident_count: int | None = None
+        self._previous_fuel_level: float | None = None
+        self._previous_player_slot: int | None = None
+        self._latest_car_left_right: int | None = None
+        self._event_count = 0
         self._latest_sample: TelemetrySample | None = None
         self._latest_context: dict[str, Any] | None = None
         self._latest_read_errors: tuple[str, ...] = ()
@@ -274,6 +282,11 @@ class LiveMonitor:
         self._source_kind_counts: Counter[str] = Counter()
         self._final_status: str | None = None
         self._receipt: LiveMonitorReceipt | None = None
+
+    @property
+    def event_count(self) -> int:
+        """Number of emitted events, for bounded long-running consumers."""
+        return self._event_count
 
     @property
     def latest_buffer_tick(self) -> int | None:
@@ -334,7 +347,10 @@ class LiveMonitor:
                 issues=TelemetryField.present(issues, Provenance.DERIVED),
             ),
         )
-        self._pending_events.extend(self._events.feed(stale_sample))
+        emitted = self._events.feed(stale_sample)
+        self._pending_events.extend(emitted)
+        self._event_count += len(emitted)
+        self._interval_invalid_for_fuel.add("SOURCE_STALE")
 
     def feed(
         self, frame: RawSdkFrame, *, observed_monotonic_s: float | None = None
@@ -383,6 +399,7 @@ class LiveMonitor:
             expected_car_count=self._expected_car_count,
         )
         emitted = self._events.feed(sample)
+        self._event_count += len(emitted)
         self._event_rejection_issues = tuple(sorted({
             issue
             for event in emitted
@@ -393,6 +410,75 @@ class LiveMonitor:
         self._pending_events.extend(emitted)
         self._latest_sample = sample
         self._latest_context = classify_context(frame.sim_mode_raw, frame.values)
+        interval = self._interval_invalid_for_fuel
+        if set(frame.read_errors) & {
+            "FuelLevel", "LapCompleted", "LapDistPct", "PitstopActive", "OnPitRoad",
+            "PlayerCarInPitStall", "PlayerCarMyIncidentCount", "PlayerTrackSurface",
+            "SessionFlags", "PlayerCarIdx", "IsOnTrack", "IsOnTrackCar",
+        }:
+            interval.add("ESSENTIAL_READ_ERROR")
+        fuel_level = _field_value(sample.fuel.level_l)
+        if (fuel_level is not None and self._previous_fuel_level is not None
+                and fuel_level > self._previous_fuel_level):
+            interval.add("REFUEL_INTERVAL")
+        self._previous_fuel_level = fuel_level
+        player_slot = _field_value(sample.opponents.player_car_idx)
+        if self._previous_player_slot is not None and player_slot != self._previous_player_slot:
+            interval.add("IDENTITY_CHANGED_INTERVAL")
+        self._previous_player_slot = player_slot
+        if self._latest_context["player_control_state"] != "IN_CAR_PHYSICS":
+            interval.add("OUT_OF_CAR_INTERVAL")
+        if self._latest_context["sim_source_mode"] != "FULL":
+            interval.add("NONLIVE_INTERVAL")
+        if _field_value(sample.flags.player_track_surface) != 3:
+            interval.add("OFF_TRACK_OR_UNKNOWN_SURFACE")
+        if _field_value(sample.pit.on_pit_road) is not False:
+            interval.add("PIT_ROAD_OR_UNKNOWN")
+        if _field_value(sample.pit.in_pit_stall) is not False:
+            interval.add("PIT_STALL_OR_UNKNOWN")
+        if _field_value(sample.pit.pitstop_active) is not False:
+            interval.add("PIT_SERVICE_OR_UNKNOWN")
+        for name, field in (
+            ("FuelLevel", sample.fuel.level_l),
+            ("LapCompleted", sample.lap.laps_completed),
+            ("LapDistPct", sample.lap.lap_distance_pct),
+        ):
+            if _field_value(field) is None or name in frame.read_errors:
+                interval.add("FUEL_LAP_DATA_MISSING_OR_INVALID")
+        incidents = _field_value(sample.incidents.player_car_my_incident_count)
+        if incidents is None:
+            interval.add("INCIDENT_DATA_MISSING")
+        elif (self._previous_incident_count is not None
+              and incidents != self._previous_incident_count):
+            interval.add("INCIDENT_COUNTER_CHANGED")
+        self._previous_incident_count = incidents
+        flags = _field_value(sample.flags.session_flags)
+        # Match live_fuel's unsuitable flags, including checkered. Inspect each
+        # tick: event transitions can be suppressed during a dropped-tick gap.
+        if flags is None or flags & (
+            0x0001 | 0x0008 | 0x0010 | 0x0100 | 0x0200 | 0x0400 | 0x4000 | 0x8000
+            | 0x020000 | 0x100000 | 0x200000 | 0x20000000 | 0x40000000
+        ):
+            interval.add("CAUTION_OR_UNKNOWN_FLAGS")
+        alongside = frame.values.get("CarLeftRight")
+        self._latest_car_left_right = (
+            alongside if type(alongside) is int and 0 <= alongside <= 6
+            and "CarLeftRight" not in frame.read_errors else None
+        )
+        # A safe final display frame cannot erase a turn/brake/side-by-side
+        # event earlier in its half-second interval.
+        unsafe = self._interval_unsafe_for_speech
+        brake = _field_value(sample.controls.brake)
+        steer = _field_value(sample.controls.steering_angle_rad)
+        speed = _field_value(sample.lap.speed_mps)
+        if brake is None or brake > 0.02 or "Brake" in frame.read_errors:
+            unsafe.add("BRAKING_OR_UNKNOWN")
+        if steer is None or abs(steer) > 0.05 or "SteeringWheelAngle" in frame.read_errors:
+            unsafe.add("TURNING_OR_UNKNOWN")
+        if speed is None or speed < 15 or "Speed" in frame.read_errors:
+            unsafe.add("LOW_SPEED_OR_UNKNOWN")
+        if self._latest_car_left_right != 1:
+            unsafe.add("ALONGSIDE_OR_UNKNOWN")
         self._latest_read_errors = tuple(sorted(set(frame.read_errors)))
         self._latest_source_kind = source_kind
         self._latest_buffer_tick = frame.buffer_tick
@@ -499,6 +585,8 @@ class LiveMonitor:
             "contract_version": LIVE_MONITOR_CONTRACT_VERSION,
             "events": [_event_projection(event) for event in self._pending_events],
             "executable": False,
+            "interval_invalid_for_fuel": sorted(self._interval_invalid_for_fuel),
+            "interval_unsafe_for_speech": sorted(self._interval_unsafe_for_speech),
             "opponents": {
                 "array_status": opponents.presence.value,
                 "slot_count": len(opponents.entries),
@@ -522,6 +610,7 @@ class LiveMonitor:
             "telemetry": {
                 "air_temp_c": _field_value(sample.environment.air_temp_c),
                 "brake": _field_value(sample.controls.brake),
+                "car_left_right": self._latest_car_left_right,
                 "fuel_level_l": _field_value(sample.fuel.level_l),
                 "fuel_level_pct": _field_value(sample.fuel.level_pct),
                 "gear": _field_value(sample.controls.gear),
@@ -532,9 +621,16 @@ class LiveMonitor:
                 "lap_number": _field_value(sample.lap.lap_number),
                 "laps_completed": _field_value(sample.lap.laps_completed),
                 "on_pit_road": _field_value(sample.pit.on_pit_road),
+                "pitstop_active": _field_value(sample.pit.pitstop_active),
+                "player_car_idx": _field_value(sample.opponents.player_car_idx),
+                "player_incident_count": _field_value(
+                    sample.incidents.player_car_my_incident_count
+                ),
+                "player_track_surface": _field_value(sample.flags.player_track_surface),
                 "pits_open": _field_value(sample.pit.pits_open),
                 "rpm": _field_value(sample.controls.rpm),
                 "session_flags": _field_value(sample.flags.session_flags),
+                "session_num": _field_value(sample.session.session_num),
                 "session_laps_remaining": _field_value(
                     sample.session.session_laps_remaining
                 ),
@@ -557,6 +653,8 @@ class LiveMonitor:
         self._last_snapshot_buffer_tick = self._latest_buffer_tick
         self._last_snapshot_revision = self._state_revision
         self._pending_events.clear()
+        self._interval_invalid_for_fuel.clear()
+        self._interval_unsafe_for_speech.clear()
         self._final_status = status
         return snapshot
 

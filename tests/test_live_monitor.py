@@ -120,6 +120,85 @@ def _snapshot_digest(snapshot: dict[str, object]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _clean_fuel_frame(tick: int, **changes: object) -> RawSdkFrame:
+    frame = _frame(tick, in_car=True)
+    return replace(frame, values={
+        **frame.values, "PlayerTrackSurface": 3, "PitstopActive": False,
+        "PlayerCarMyIncidentCount": 0, "CarLeftRight": 1, **changes,
+    })
+
+
+@pytest.mark.parametrize("change,reason", [
+    ({"Brake": 0.8}, "BRAKING_OR_UNKNOWN"),
+    ({"Brake": None}, "BRAKING_OR_UNKNOWN"),
+    ({"SteeringWheelAngle": 0.2}, "TURNING_OR_UNKNOWN"),
+    ({"Speed": 0.0}, "LOW_SPEED_OR_UNKNOWN"),
+    ({"CarLeftRight": 2}, "ALONGSIDE_OR_UNKNOWN"),
+    ({"CarLeftRight": None}, "ALONGSIDE_OR_UNKNOWN"),
+])
+def test_speech_interval_keeps_intermediate_tick_hazards(change, reason):
+    monitor = LiveMonitor(source_id="unit", session_id="unit", sdk_tick_rate_hz=60)
+    monitor.feed(_clean_fuel_frame(100))
+    assert monitor.snapshot()["interval_unsafe_for_speech"] == []
+    monitor.feed(_clean_fuel_frame(101, **change))
+    monitor.feed(_clean_fuel_frame(102))
+    assert reason in monitor.snapshot()["interval_unsafe_for_speech"]
+    monitor.feed(_clean_fuel_frame(103))
+    assert monitor.snapshot()["interval_unsafe_for_speech"] == []
+
+
+@pytest.mark.parametrize("change,reason", [
+    ({"FuelLevel": None}, "FUEL_LAP_DATA_MISSING_OR_INVALID"),
+    ({"FuelLevel": -1.0}, "FUEL_LAP_DATA_MISSING_OR_INVALID"),
+    ({"LapCompleted": None}, "FUEL_LAP_DATA_MISSING_OR_INVALID"),
+    ({"LapDistPct": None}, "FUEL_LAP_DATA_MISSING_OR_INVALID"),
+    ({"PitstopActive": None}, "PIT_SERVICE_OR_UNKNOWN"),
+    ({"SessionFlags": 0x20000000}, "CAUTION_OR_UNKNOWN_FLAGS"),
+    ({"SessionFlags": 0x100000}, "CAUTION_OR_UNKNOWN_FLAGS"),
+])
+def test_fuel_interval_keeps_intermediate_missing_or_unsafe_tick(change, reason):
+    monitor = LiveMonitor(source_id="unit", session_id="unit", sdk_tick_rate_hz=60)
+    monitor.feed(_clean_fuel_frame(100))
+    assert monitor.snapshot()["interval_invalid_for_fuel"] == []
+    monitor.feed(_clean_fuel_frame(101, **change))
+    monitor.feed(_clean_fuel_frame(102))
+    assert reason in monitor.snapshot()["interval_invalid_for_fuel"]
+    monitor.feed(_clean_fuel_frame(103))
+    assert monitor.snapshot()["interval_invalid_for_fuel"] == []
+
+
+def test_monitor_flags_projection_keeps_both_transition_endpoints():
+    monitor = LiveMonitor(source_id="unit", session_id="unit", sdk_tick_rate_hz=60)
+    monitor.feed(_clean_fuel_frame(100, SessionFlags=0x08))
+    monitor.snapshot()
+    monitor.feed(_clean_fuel_frame(101, SessionFlags=0))
+    events = monitor.snapshot()["events"]
+    flag = next(event for event in events if event["kind"] == "flag_changed")
+    assert flag["details"]["previous_flags"] == 0x08
+    assert flag["details"]["current_flags"] == 0
+
+
+def test_intermediate_refuel_is_not_hidden_by_lower_final_fuel():
+    monitor = LiveMonitor(source_id="unit", session_id="unit", sdk_tick_rate_hz=60)
+    monitor.feed(_clean_fuel_frame(100, FuelLevel=42.0))
+    monitor.snapshot()
+    monitor.feed(_clean_fuel_frame(101, FuelLevel=42.001))
+    monitor.feed(_clean_fuel_frame(102, FuelLevel=41.9))
+    assert "REFUEL_INTERVAL" in monitor.snapshot()["interval_invalid_for_fuel"]
+
+
+def test_intermediate_player_slot_change_and_read_errors_are_kept():
+    monitor = LiveMonitor(source_id="unit", session_id="unit", sdk_tick_rate_hz=60)
+    monitor.feed(_clean_fuel_frame(100))
+    monitor.snapshot()
+    monitor.feed(replace(_clean_fuel_frame(101, PlayerCarIdx=1),
+                         read_errors=("SessionFlags",)))
+    monitor.feed(_clean_fuel_frame(102))
+    result = monitor.snapshot()
+    assert "IDENTITY_CHANGED_INTERVAL" in result["interval_invalid_for_fuel"]
+    assert "ESSENTIAL_READ_ERROR" in result["interval_invalid_for_fuel"]
+
+
 def test_monitor_projects_wait_then_ready_without_private_identity() -> None:
     monitor = LiveMonitor(
         source_id="local-monitor",
