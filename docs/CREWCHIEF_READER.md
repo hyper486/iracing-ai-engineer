@@ -105,8 +105,138 @@ Recorded Windows validation for this milestone (2026-09-21):
 - The real local connection probe returned `SDK_UNAVAILABLE`, created no raw
   capture and left no reader child running. No simulator was launched.
 
+### First real capture and performance follow-up
+
+A subsequent 60-second real SDK capture (September 21) completed with 335
+fields and 1,321 persisted frames: 21.99 Hz, 36.64% tick coverage, 2,284
+accounted missing ticks and a largest gap of 29 ticks (0.483 seconds).
+There were no field read errors, conflicting duplicates, stale events, schema
+changes or session resets. The strict replay reader admitted the structure,
+but quality remained **DEGRADED**. The car was stationary in its pit stall:
+there were no driven laps or pit transitions. Raw observations remain private.
+This proves a real connection, not adequate acquisition performance or product
+acceptance. A read-only microprobe of another backend without the same durable
+writer is not a fair performance comparison.
+
+The September 22 optimization keeps protocol v1 and the default backend. It
+reuses unchanged, validated schema metadata and SessionInfo parsing, and avoids
+repeating canonical JSON encoding at the built-in collector writer boundary.
+Cache keys preserve exact content and primitive types; a reused SessionInfo
+update counter alone cannot establish unchanged content. Per-frame snapshot,
+value, freshness, mode and schema checks remain in place. The collector still
+filters private driver metadata and flushes/fsyncs every record; no batching,
+asynchronous loss window, field reduction or weaker evidence threshold is added.
+
+The reproducible Python benchmark uses **invented** data only, 335 fields
+(including 20 arrays), synthetic session metadata, 300 observations and a
+three-tick increment to exercise both frame and tick-drop writes:
+
+```powershell
+uv run python scripts/benchmark_crewchief_pipeline.py --iterations 300 --tick-step 3
+```
+
+It uses the real durable JSONL writer but an in-memory protocol exchange. It
+does **not** measure native shared-memory access, C# encoding or pipe latency.
+It reports timings, complete file hashes and semantic-record hashes in receipts; timing
+values are not CI pass/fail thresholds. Golden-file regression checks bind the
+optimized pipeline to the pre-optimization output bytes and receipt.
+
+Local September 22 comparison against the Python modules from `95e0542` used
+three fresh processes per version, alternated in both orders, with the same
+benchmark runner. The table reports the median of the three per-run medians
+and the median of the three per-run p95 values, in milliseconds:
+
+| Measured stage | Before median / p95 | After median / p95 |
+|---|---:|---:|
+| Python bridge including metadata copy | 3.925 / 6.278 | 1.207 / 1.402 |
+| Collector ingest including per-record fsync | 9.182 / 12.770 | 5.221 / 5.673 |
+| Combined Python path | 13.193 / 19.083 | 6.460 / 7.073 |
+
+The combined median fell about 51% for this synthetic workload. All six runs
+produced the same 6,212,586-byte file and semantic receipt. The invented
+three-tick step deliberately retains all 598 missing ticks in the receipt;
+optimization does not hide data loss. A separate offline replay of all 1,321
+previously captured frames also produced identical record bytes and receipts
+before and after the collector change. This was replay of existing private
+evidence, not a new live capture.
+
+Optimization regression gates: **1,154 passed, 43 skipped**, with the existing
+`uv` executable available to the full suite. Skips require unavailable data,
+another platform or private deployment artifacts. The native suite now executes
+64 synthetic test groups, including warm-cache torn-snapshot checks and exact
+serialized-byte equivalence. Ruff and the history-inclusive public-safety scan
+also passed.
+
+### Real spectator-session comparison (September 22)
+
+The user subsequently entered a real online spectator session. Both backends
+were measured with all 335 fields, 60-second capture windows, the same 10 ms
+minimum read-start interval, private outputs and per-record fsync. The planned
+Crew Chief / pyirsdk / pyirsdk / Crew Chief sequence was interrupted by a
+SessionInfo consistency error in the third clip; a new pyirsdk file was recorded
+after the final Crew Chief clip. No partial file was resumed or repaired.
+
+| Clip / backend | Frames | Observed Hz | Tick coverage | Largest tick gap | Strict replay admission |
+|---|---:|---:|---:|---:|---|
+| 1 / Crew Chief | 2,406 | 40.07 | 66.74% | 0.200 s | Pass, DEGRADED |
+| 2 / pyirsdk | 3,426 | 57.10 | 95.17% | 0.267 s | Pass, with quality rejections |
+| 4 / Crew Chief | 2,443 | 40.69 | 67.79% | 0.167 s | Pass, DEGRADED |
+| 5 / pyirsdk retry | 3,443 | 57.40 | 95.67% | 0.333 s | Rejected: player car-class identity changed |
+
+Hz uses interframe intervals; coverage counts observed ticks against observed
+plus missing ticks. Clip 5's numbers are independently checked raw-record
+diagnostics, **not admitted analysis**; its receipt hash matches but identity
+validation still fails. Its `PlayerCarClass` scalar changes to zero while
+camera/player indices stay fixed and their car-class array slots remain
+nonzero. The existing adapter treats zero as present and rejects the identity
+change; neither that adapter nor this policy was changed by the optimization.
+The observation alone does not establish an official SDK sentinel contract.
+
+The first Crew Chief clip overlapped the tail of the regression run; its
+remaining-window coverage and the later repeat were similarly low. Session
+conditions can change across sequential clips, so these are observations, not
+a claim of controlled driving-performance equivalence. The admitted clips had
+identical complete descriptor maps, no field read errors, conflicting
+duplicates, schema changes or session resets, and no persisted DriverInfo.
+Missing ticks remain quality failures, not a normal exemption for spectators.
+
+Separately, 120 distinct pairs with the **same SDK tick and SessionInfo update
+counter** matched all 335 values and error statuses: 40,200 field comparisons,
+zero differences. This establishes sampled decoder parity, not sustained rate
+or end-to-end engineer acceptance. Read-only latency probes excluded the durable
+writer; their throughput must not be substituted for the table above.
+
+Additional boundaries exercised:
+
+- The aborted third clip contained 730 frames but no completion receipt. Strict
+  admission rejected it; explicit incomplete-prefix recovery was diagnostic only.
+- The fifth clip had a completion receipt but was rejected by the stricter
+  player-identity check. Writer completion alone does not establish usable input.
+- A capability probe blocked driving/fuel/strategy in spectator context. The
+  first monitor run hit the same SessionInfo race; a fresh five-second retry
+  completed with 300 frames, 11 `WAIT_CAR` snapshots, zero in-car snapshots and
+  no executable output. Its event stream still recorded three quality rejections.
+- Camera-car position arrays changed while player speed, fuel and throttle
+  remained zero. Camera-car data must not be substituted for player telemetry.
+
+All 15 normalized rejections in clip 2 had equal adjacent capture timestamps
+while SDK ticks and SessionTime advanced normally. The local Python 3.12 runtime
+uses `GetTickCount64()` for `time.monotonic()` (15.625 ms resolution); normalization
+treats a nonpositive capture-time delta as regression/staleness. This is a
+confirmed false rejection from coarse clock sampling, not JSON microsecond
+rounding or actual source freezing. The monitor's three warnings were not
+individually retained/diagnosed and are not independently proven to share it.
+
+Remaining work is to reduce Crew Chief full-pipeline latency, make normal
+SessionInfo update races recoverable within a bounded retry without accepting
+torn snapshots, unify capture and freshness logic on a high-resolution clock
+domain, and distinguish spectator identity changes from corrupted in-car
+identity. These are open issues, not fixed or waived by this milestone.
+The default remains pyirsdk. No simulator, camera or vehicle commands were sent;
+all raw captures, diagnostics and incomplete files remain private.
+
 This is an optional acquisition prototype, not a replacement proven superior
-to the default reader. Real-session field parity, acquisition rate, drop rate
-and recovery behavior must be measured before any default-backend change.
+to the default reader. Sustained acquisition quality and recovery behavior
+must be established before any default-backend change.
 Human-driven laps and a pit sequence remain necessary for end-to-end strategy
 and driving acceptance; synthetic tests and out-of-car canaries do not qualify.

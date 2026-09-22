@@ -71,6 +71,20 @@ def test_native_reader_synthetic_snapshot_contract(native_binaries):
         capture_output=True, text=True, timeout=30, check=False,
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS 64 native synthetic test groups" in result.stdout
+
+
+def test_native_cached_packets_preserve_exact_protocol_bytes(native_binaries):
+    result = subprocess.run(
+        [str(native_binaries["tests"]), "--emit-cached-snapshots"],
+        capture_output=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", errors="replace")
+    packets = result.stdout.splitlines(keepends=True)
+    assert len(packets) == 3
+    assert packets[0] == packets[1] == packets[2]
+    decoded = [_decode_snapshot(packet, captured_monotonic_s=0.0) for packet in packets]
+    assert decoded[0] == decoded[1] == decoded[2]
 
 
 def test_native_reader_eof_does_not_connect_or_emit_data(native_binaries):

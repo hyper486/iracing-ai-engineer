@@ -10,6 +10,11 @@ namespace Aeis.CrewChiefReader
     internal static class Program
     {
         internal const int MaximumOutputBytes = 16777216;
+        private static readonly object SerializerLock = new object();
+        private static readonly JavaScriptSerializer Serializer = new JavaScriptSerializer
+        {
+            MaxJsonLength = MaximumOutputBytes - 2, RecursionLimit = 32
+        };
 
         private static int Main(string[] args)
         {
@@ -21,6 +26,7 @@ namespace Aeis.CrewChiefReader
             }
             bool tooLong;
             string request;
+            var schemaCache = new ValidatedSchemaCache();
             while ((request = ReadRequest(Console.In, out tooLong)) != null)
             {
                 Dictionary<string, object> response;
@@ -30,11 +36,23 @@ namespace Aeis.CrewChiefReader
                 {
                     try
                     {
-                        using (var source = new LiveSharedMemoryReader()) response = SnapshotReader.Capture(source);
+                        using (var source = new LiveSharedMemoryReader()) response = SnapshotReader.Capture(source, schemaCache);
                     }
-                    catch (FileNotFoundException) { response = SnapshotReader.Failure("unavailable", "mapping_unavailable"); }
-                    catch (UnauthorizedAccessException) { response = SnapshotReader.Failure("unavailable", "mapping_access_denied"); }
-                    catch (Exception) { response = SnapshotReader.Failure("unavailable", "snapshot_failed"); }
+                    catch (FileNotFoundException)
+                    {
+                        schemaCache.Clear();
+                        response = SnapshotReader.Failure("unavailable", "mapping_unavailable");
+                    }
+                    catch (UnauthorizedAccessException)
+                    {
+                        schemaCache.Clear();
+                        response = SnapshotReader.Failure("unavailable", "mapping_access_denied");
+                    }
+                    catch (Exception)
+                    {
+                        schemaCache.Clear();
+                        response = SnapshotReader.Failure("unavailable", "snapshot_failed");
+                    }
                 }
                 string json = SerializeResponse(response);
                 try
@@ -49,22 +67,28 @@ namespace Aeis.CrewChiefReader
 
         internal static string SerializeResponse(Dictionary<string, object> response)
         {
-            var serializer = new JavaScriptSerializer { MaxJsonLength = MaximumOutputBytes - 2, RecursionLimit = 32 };
+            // The production loop is serial; also serialize concurrent internal
+            // callers so no assumption about serializer thread safety is needed.
+            lock (SerializerLock) return SerializeLocked(response);
+        }
+
+        private static string SerializeLocked(Dictionary<string, object> response)
+        {
             try
             {
-                string json = serializer.Serialize(response);
+                string json = Serializer.Serialize(response);
                 // Console.Out.WriteLine uses CRLF on Windows; include both bytes.
                 if (Encoding.UTF8.GetByteCount(json) + 2 > MaximumOutputBytes)
-                    return serializer.Serialize(SnapshotReader.Failure("inconsistent", "output_limit"));
+                    return Serializer.Serialize(SnapshotReader.Failure("inconsistent", "output_limit"));
                 return json;
             }
             catch (InvalidOperationException)
             {
-                return serializer.Serialize(SnapshotReader.Failure("inconsistent", "output_limit"));
+                return Serializer.Serialize(SnapshotReader.Failure("inconsistent", "output_limit"));
             }
             catch (Exception)
             {
-                return serializer.Serialize(SnapshotReader.Failure("unavailable", "serialization_failed"));
+                return Serializer.Serialize(SnapshotReader.Failure("unavailable", "serialization_failed"));
             }
         }
 

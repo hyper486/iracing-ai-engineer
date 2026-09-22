@@ -22,9 +22,10 @@ Extracted/adapted sources:
 - [LICENSE](https://gitlab.com/mr_belowski/CrewChiefV4/-/blob/150c8107ad03af621afec83712e96109cf2a3a93/LICENSE):
   the MIT notice is preserved in `LICENSE.CrewChief` and must accompany copies.
 
-`SnapshotReader.cs`, the NDJSON `Program.cs`, and synthetic tests are the local
-integration/safety wrapper, not unmodified upstream files. Header/layout parsing
-is independently implemented to match this repository's validated SDK v2 layout.
+`SnapshotReader.cs`, `ValidatedSchemaCache.cs`, the NDJSON `Program.cs`, and
+synthetic tests are the local integration/safety wrapper, not unmodified upstream
+files. Header/layout parsing is independently implemented to match this
+repository's validated SDK v2 layout.
 No upstream `CiRSDKHeader`, `CVarBuf`, `YamlParser`, `iRacingDiskSDK`, full
 `iRacingData`, game-state mapper or application dependency is required. In
 particular the upstream YAML parser's error logging and application control are
@@ -64,7 +65,13 @@ not incorporated; original SessionInfo bytes travel only through the private pip
   pyirsdk 1.3.6/SDK-v2 consistency contract. Historical writers that leave this
   field as padding are not silently accepted by weakening the check.
 - The mapped connection is reopened for every request, so disconnect/reconnect
-  does not keep a stale mapping handle indefinitely. No output is retained here.
+  does not keep a stale mapping handle indefinitely. No frame or SessionInfo
+  payload is retained across requests.
+- A single validated descriptor set can be reused only when the complete schema
+  bytes and static layout facts match. Cached protocol descriptors are read-only;
+  acquisition failures clear the entry. All per-request layout/schema comparisons,
+  frame tick checks and both SessionInfo copies remain mandatory. Serializer reuse is locked
+  and preserves the same output limits and protocol.
 
 ## Process protocol and privacy
 

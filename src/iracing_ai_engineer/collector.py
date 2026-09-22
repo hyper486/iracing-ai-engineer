@@ -29,7 +29,6 @@ from .sdk_probe import (
     RawSdkFrame,
     VariableDescriptor,
     _bind_frame_sim_mode,
-    schema_sha256,
 )
 from .telemetry import SourceKind
 
@@ -267,17 +266,82 @@ def _resolved_session_info_scope(sample: CollectorSample) -> SessionInfoPayloadS
 
 
 @dataclass(frozen=True)
+class _PreparedSchema:
+    digest: str
+    variables: list[dict[str, object]]
+    names: frozenset[str]
+
+
+def _schema_cache_key(
+    descriptors: tuple[VariableDescriptor, ...],
+) -> tuple[tuple[object, ...], ...] | None:
+    """Snapshot exact primitive fields; equality must never accept bool as int.
+
+    Frozen dataclasses can still be changed with object.__setattr__, so retaining
+    the descriptor objects (or their tuple identity) is not a safe cache key.
+    Subclasses and unexpected field types keep the full validation path.
+    """
+
+    if (
+        type(descriptors) is not tuple
+        or not descriptors
+        or len(descriptors) > _MAX_SCHEMA_VARIABLES
+    ):
+        return None
+    expected_types = (str, int, str, int, int, bool, str, str)
+    rows: list[tuple[object, ...]] = []
+    for item in descriptors:
+        if type(item) is not VariableDescriptor:
+            return None
+        row = (
+            item.name, item.type_code, item.dtype, item.offset, item.count,
+            item.count_as_time, item.unit, item.description,
+        )
+        if any(
+            type(value) is not expected
+            for value, expected in zip(row, expected_types, strict=True)
+        ):
+            return None
+        rows.append(row)
+    return tuple(rows)
+
+
+class _SchemaCache:
+    """One validated schema per collector, never a process-wide growing cache."""
+
+    def __init__(self) -> None:
+        self._key: tuple[tuple[object, ...], ...] | None = None
+        self._prepared: _PreparedSchema | None = None
+
+    def prepare(self, descriptors: tuple[VariableDescriptor, ...]) -> _PreparedSchema:
+        key = _schema_cache_key(descriptors)
+        if key is not None and key == self._key and self._prepared is not None:
+            return self._prepared
+        digest, variables = _schema_payload(descriptors)
+        prepared = _PreparedSchema(
+            digest=digest,
+            variables=variables,
+            names=frozenset(item.name for item in descriptors),
+        )
+        if key is not None:
+            self._key, self._prepared = key, prepared
+        return prepared
+
+
+@dataclass(frozen=True)
 class _PreparedSample:
     values: dict[str, object]
     session_info: dict[str, object] | None
     redacted_paths: tuple[str, ...]
     session_info_scope: SessionInfoPayloadScope
+    schema: _PreparedSchema | None = None
 
 
 def _prepare_collector_sample(
     sample: CollectorSample,
     *,
     include_driver_info: bool,
+    schema_cache: _SchemaCache | None = None,
 ) -> _PreparedSample:
     if not isinstance(sample, CollectorSample):
         raise CollectorConsistencyError("collector input must be a CollectorSample")
@@ -287,8 +351,13 @@ def _prepare_collector_sample(
     _plain_nonnegative_int(sample.frame.session_info_update, "session_info_update")
     if type(sample.tick_rate_hz) is not int or not 1 <= sample.tick_rate_hz <= 360:
         raise CollectorConsistencyError("tick_rate_hz must be a plain integer from 1 to 360")
-    validate_variable_descriptors(sample.descriptors)
-    descriptor_names = {descriptor.name for descriptor in sample.descriptors}
+    if schema_cache is None:
+        validate_variable_descriptors(sample.descriptors)
+        schema = None
+        descriptor_names = frozenset(descriptor.name for descriptor in sample.descriptors)
+    else:
+        schema = schema_cache.prepare(sample.descriptors)
+        descriptor_names = schema.names
     if not isinstance(sample.frame.values, Mapping):
         raise CollectorConsistencyError("frame values must be a mapping")
     safe_values = _json_safe(sample.frame.values)
@@ -321,6 +390,7 @@ def _prepare_collector_sample(
         session_info=sanitized,
         redacted_paths=redacted,
         session_info_scope=scope,
+        schema=schema,
     )
 
 
@@ -406,7 +476,7 @@ def _schema_payload(
 ) -> tuple[str, list[dict[str, object]]]:
     validate_variable_descriptors(descriptors)
     variables = [asdict(item) for item in sorted(descriptors, key=lambda item: item.name)]
-    return schema_sha256(descriptors), variables
+    return hashlib.sha256(_canonical_json(variables)).hexdigest(), variables
 
 
 class JsonlAppendWriter:
@@ -430,7 +500,14 @@ class JsonlAppendWriter:
         safe_record = _json_safe(record)
         if not isinstance(safe_record, dict):
             raise CollectorConsistencyError("collector record root must be a mapping")
-        payload = _canonical_json(safe_record) + b"\n"
+        self._write_encoded(_canonical_json(safe_record))
+
+    def _write_encoded(self, encoded: bytes) -> None:
+        """Write bytes already validated and encoded by this module."""
+
+        if self._handle is None:
+            raise RuntimeError("JSONL writer is not open")
+        payload = encoded + b"\n"
         written = self._handle.write(payload)
         if written != len(payload):
             raise OSError(
@@ -553,7 +630,14 @@ class JsonlHandleWriter:
         safe_record = _json_safe(record)
         if not isinstance(safe_record, dict):
             raise CollectorConsistencyError("collector record root must be a mapping")
-        payload = _canonical_json(safe_record) + b"\n"
+        self._write_encoded(_canonical_json(safe_record))
+
+    def _write_encoded(self, encoded: bytes) -> None:
+        """Keep handle identity, budget and durability checks on the fast path."""
+
+        if not self._active or self._descriptor is None:
+            raise RuntimeError("JSONL handle writer is not open")
+        payload = encoded + b"\n"
         self._validate_descriptor(expected_size=self._byte_size)
         if len(payload) > self.max_output_bytes - self._byte_size:
             raise CollectorConsistencyError(
@@ -565,11 +649,12 @@ class JsonlHandleWriter:
             if written <= 0:
                 raise OSError("short JSONL handle write")
             remaining = remaining[written:]
-        self._byte_size += len(payload)
-        self._digest.update(payload)
+        next_byte_size = self._byte_size + len(payload)
         if self.fsync_each_record:
             os.fsync(self._descriptor)
-        self._validate_descriptor(expected_size=self._byte_size)
+        self._validate_descriptor(expected_size=next_byte_size)
+        self._byte_size = next_byte_size
+        self._digest.update(payload)
 
     def close(self) -> None:
         if not self._active:
@@ -603,6 +688,32 @@ class JsonlHandleWriter:
                         "JSONL handle fsync after failure also failed: "
                         f"{type(close_error).__name__}: {close_error}"
                     )
+
+
+# Remember the original methods too: even an exact built-in instance may have
+# its public write method replaced by an embedding application or a test.
+_BUILTIN_WRITE_METHODS = {
+    JsonlAppendWriter: JsonlAppendWriter.write,
+    JsonlHandleWriter: JsonlHandleWriter.write,
+}
+
+
+def _write_collector_record(
+    writer: CollectorRecordWriter,
+    record: Mapping[str, object],
+    encoded: bytes,
+) -> None:
+    write = writer.write
+    original = _BUILTIN_WRITE_METHODS.get(type(writer))
+    if (
+        original is not None
+        and getattr(write, "__func__", None) is original
+        and getattr(write, "__self__", None) is writer
+    ):
+        writer._write_encoded(encoded)
+    else:
+        # Custom writers and subclasses retain their public protocol unchanged.
+        write(record)
 
 
 def _validated_run_identifier(value: object, label: str) -> str:
@@ -670,6 +781,7 @@ class LiveCollector:
         self._sim_mode: str | None = None
 
         self._schema_digest: str | None = None
+        self._schema_cache = _SchemaCache()
         self._tick_rate_hz: int | None = None
         self._schema_epoch = -1
         self._session_epoch = 0
@@ -711,7 +823,7 @@ class LiveCollector:
         if not isinstance(safe_record, dict):
             raise CollectorConsistencyError("collector record root must be a mapping")
         encoded = _canonical_json(safe_record)
-        self._writer.write(safe_record)
+        _write_collector_record(self._writer, safe_record, encoded)
         self._digest.update(len(encoded).to_bytes(8, "little"))
         self._digest.update(encoded)
         self._sequence += 1
@@ -878,8 +990,10 @@ class LiveCollector:
         prepared = _prepare_collector_sample(
             sample,
             include_driver_info=self._include_driver_info,
+            schema_cache=self._schema_cache,
         )
-        schema_digest, variables = _schema_payload(sample.descriptors)
+        assert prepared.schema is not None
+        schema_digest, variables = prepared.schema.digest, prepared.schema.variables
         mode, source_kind = _source_kind_from_sim_mode(sample.frame.sim_mode_raw)
         if self._expected_source_kind is not None and source_kind is not self._expected_source_kind:
             raise CollectorConsistencyError(
@@ -1050,8 +1164,8 @@ class LiveCollector:
         safe_record = _json_safe(record)
         if not isinstance(safe_record, dict):
             raise CollectorConsistencyError("collector receipt root must be a mapping")
-        _canonical_json(safe_record)
-        self._writer.write(safe_record)
+        encoded = _canonical_json(safe_record)
+        _write_collector_record(self._writer, safe_record, encoded)
         self._receipt = receipt
         return receipt
 

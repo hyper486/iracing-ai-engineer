@@ -176,25 +176,47 @@ namespace Aeis.CrewChiefReader
 
         internal static Dictionary<string, object> Capture(ISharedMemoryReader source)
         {
+            return Capture(source, null);
+        }
+
+        internal static Dictionary<string, object> Capture(ISharedMemoryReader source, ValidatedSchemaCache cache)
+        {
             string lastCode = "snapshot_changed";
             for (int attempt = 0; attempt < MaximumAttempts; attempt++)
             {
-                try { return CaptureOnce(source); }
+                try { return CaptureOnce(source, cache); }
                 catch (SnapshotException error)
                 {
+                    if (cache != null) cache.Clear();
                     if (error.Status == "unavailable") return Failure(error.Status, error.ErrorCode);
                     lastCode = error.ErrorCode;
                 }
-                catch (IOException) { return Failure("unavailable", "source_read_failed"); }
-                catch (UnauthorizedAccessException) { return Failure("unavailable", "source_read_failed"); }
+                catch (IOException)
+                {
+                    if (cache != null) cache.Clear();
+                    return Failure("unavailable", "source_read_failed");
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    if (cache != null) cache.Clear();
+                    return Failure("unavailable", "source_read_failed");
+                }
+                catch
+                {
+                    if (cache != null) cache.Clear();
+                    throw;
+                }
             }
             return Failure("inconsistent", lastCode);
         }
 
-        private static Dictionary<string, object> CaptureOnce(ISharedMemoryReader source)
+        private static Dictionary<string, object> CaptureOnce(ISharedMemoryReader source, ValidatedSchemaCache cache)
         {
             SdkLayout before = SdkLayout.Read(source);
-            List<CVarHeader> headers = CrewChiefSdkReader.GetVarHeaders(before.Schema, before.VariableCount, before.BufferLength);
+            ValidatedSchema cached = cache == null ? null : cache.GetOrBuild(before);
+            IList<CVarHeader> headers = cached == null
+                ? (IList<CVarHeader>)CrewChiefSdkReader.GetVarHeaders(before.Schema, before.VariableCount, before.BufferLength)
+                : cached.Headers;
             int selected = -1;
             for (int i = 0; i < before.BufferCount; i++)
                 if (before.BufferBegins[i] == before.BufferTicks[i] &&
@@ -212,11 +234,11 @@ namespace Aeis.CrewChiefReader
                 throw new SnapshotException("inconsistent", "session_info_changed");
 
             var values = new Dictionary<string, object>(StringComparer.Ordinal);
-            var descriptors = new List<Dictionary<string, object>>();
+            var descriptors = cached == null ? new List<Dictionary<string, object>>() : null;
             var errors = new List<string>();
             foreach (CVarHeader header in headers)
             {
-                descriptors.Add(header.ToProtocol());
+                if (descriptors != null) descriptors.Add(header.ToProtocol());
                 object value = CrewChiefSdkReader.GetData(header, frozen);
                 values.Add(header.Name, value);
                 if (value == null) errors.Add(header.Name);
@@ -234,7 +256,8 @@ namespace Aeis.CrewChiefReader
                 { "buffer_tick", before.BufferTicks[selected] },
                 { "session_info_update", before.SessionUpdate },
                 { "session_info_b64", Convert.ToBase64String(sessionFirst) },
-                { "descriptors", descriptors }, { "values", values }, { "read_errors", errors }
+                { "descriptors", cached == null ? (object)descriptors : cached.ProtocolDescriptors },
+                { "values", values }, { "read_errors", errors }
             };
         }
 

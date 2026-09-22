@@ -1,6 +1,7 @@
 // Synthetic byte-array tests only. Never compiled into the production entry point.
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Web.Script.Serialization;
@@ -30,9 +31,11 @@ namespace Aeis.CrewChiefReader.Tests
 
     internal sealed class Fixture
     {
+        internal static bool UseWarmCache;
         internal const int SchemaOffset = 128;
         internal const int BufferLength = 256;
         internal readonly MemorySource Source;
+        internal readonly ValidatedSchemaCache Cache;
         internal readonly int SessionOffset;
         internal readonly int[] BufferOffsets = new int[3];
         internal readonly Dictionary<string, int> FieldOffsets = new Dictionary<string, int>();
@@ -95,12 +98,18 @@ namespace Aeis.CrewChiefReader.Tests
                 Set(i, "VehicleName", Encoding.GetEncoding(28591).GetBytes("Synthetic Caf\u00e9"));
                 Set(i, "DoubleArray", BitConverter.GetBytes(0.1));
             }
+            if (UseWarmCache)
+            {
+                Cache = new ValidatedSchemaCache();
+                SnapshotReader.Capture(Source, Cache);
+                Source.HeaderReads = 0;
+            }
         }
 
         internal void Put(int at, int value) { WriteBytes(at, BitConverter.GetBytes(value)); }
         internal void WriteBytes(int at, byte[] value) { Array.Copy(value, 0, Source.Bytes, at, value.Length); }
         internal void Set(int buffer, string name, byte[] value) { WriteBytes(BufferOffsets[buffer] + FieldOffsets[name], value); }
-        internal Dictionary<string, object> Capture() { return SnapshotReader.Capture(Source); }
+        internal Dictionary<string, object> Capture() { return SnapshotReader.Capture(Source, Cache); }
     }
 
     internal static class ReaderTests
@@ -113,6 +122,20 @@ namespace Aeis.CrewChiefReader.Tests
             if (args.Length == 1 && args[0] == "--emit-snapshot")
             {
                 Console.Out.WriteLine(Program.SerializeResponse(new Fixture().Capture()));
+                return 0;
+            }
+            if (args.Length == 1 && args[0] == "--emit-cached-snapshots")
+            {
+                var fixture = new Fixture();
+                var cache = new ValidatedSchemaCache();
+                Console.Out.WriteLine(Program.SerializeResponse(SnapshotReader.Capture(fixture.Source)));
+                Console.Out.WriteLine(Program.SerializeResponse(SnapshotReader.Capture(fixture.Source, cache)));
+                Console.Out.WriteLine(Program.SerializeResponse(SnapshotReader.Capture(fixture.Source, cache)));
+                return 0;
+            }
+            if (args.Length == 1 && args[0] == "--benchmark-cache")
+            {
+                BenchmarkCache();
                 return 0;
             }
             if (args.Length != 0) return 2;
@@ -140,13 +163,30 @@ namespace Aeis.CrewChiefReader.Tests
             Run("exception messages are not serialized", TestErrorPrivacy);
             Run("UTF8 byte output limit is enforced", TestOutputLimit);
             Run("bounded requests CRLF EOF and continuation", TestRequests);
+            Run("cached and uncached protocol bytes are identical", TestCacheEquivalence);
+            Run("same-counter schema content changes rebuild cache", TestCacheSchemaChanges);
+            Run("all schema layout key facts invalidate reuse", TestCacheLayoutKey);
+            Run("schema cache retains only one immutable entry", TestCacheBoundedAndImmutable);
+            Run("failed snapshots clear previously warmed cache", TestCacheFailures);
+            Run("warm cache retains all per-frame safety reads", TestCacheSafetyReads);
+            Run("warm metadata never caches values or session bytes", TestCacheFreshValuesAndSession);
+            Run("shared serializer recovers and handles concurrency", TestSerializerReuse);
             Console.Out.WriteLine("PASS " + passed + " native synthetic test groups");
             return 0;
         }
 
         private static void Run(string name, Action test)
         {
-            try { test(); passed++; }
+            try
+            {
+                // Run every existing torn-read/bounds/value test both uncached
+                // and with the fixture's schema cache populated before mutation.
+                Fixture.UseWarmCache = false;
+                test(); passed++;
+                Fixture.UseWarmCache = true;
+                test(); passed++;
+                Fixture.UseWarmCache = false;
+            }
             catch (Exception error)
             {
                 Console.Error.WriteLine("FAIL " + name + ": " + error.GetType().Name);
@@ -177,9 +217,12 @@ namespace Aeis.CrewChiefReader.Tests
             Equal(true, ((bool[])values["CarIdxOnPitRoad"])[1]);
             Equal(3, ((int[])values["CarIdxLap"]).Length);
             Equal(2, ((double[])values["DoubleArray"]).Length);
-            var descriptors = (List<Dictionary<string, object>>)snapshot["descriptors"];
+            var descriptors = (System.Collections.IList)snapshot["descriptors"];
             Equal(values.Count, descriptors.Count);
-            Check(descriptors.Find(item => (string)item["name"] == "CarIdxLapDistPct")["count_as_time"].Equals(true));
+            bool timeCountFound = false;
+            foreach (IDictionary<string, object> item in descriptors)
+                if ((string)item["name"] == "CarIdxLapDistPct") timeCountFound = item["count_as_time"].Equals(true);
+            Check(timeCountFound);
             byte[] session = Convert.FromBase64String((string)snapshot["session_info_b64"]);
             Equal(512, session.Length);
             Equal(0, ((List<string>)snapshot["read_errors"]).Count);
@@ -450,6 +493,248 @@ namespace Aeis.CrewChiefReader.Tests
             Equal("snapshot", Program.ReadRequest(input, out tooLong));
             Check(!tooLong);
             Equal(null, Program.ReadRequest(input, out tooLong));
+        }
+
+        private static void TestCacheEquivalence()
+        {
+            var fixture = new Fixture();
+            var cache = new ValidatedSchemaCache();
+            string uncached = Program.SerializeResponse(SnapshotReader.Capture(fixture.Source));
+            var first = SnapshotReader.Capture(fixture.Source, cache);
+            var second = SnapshotReader.Capture(fixture.Source, cache);
+            Equal(uncached, Program.SerializeResponse(first));
+            Equal(uncached, Program.SerializeResponse(second));
+            Check(Object.ReferenceEquals(first["descriptors"], second["descriptors"]));
+            Check(!Object.ReferenceEquals(first["values"], second["values"]));
+        }
+
+        private static void TestCacheSchemaChanges()
+        {
+            var fixture = new Fixture();
+            var cache = new ValidatedSchemaCache();
+            var first = SnapshotReader.Capture(fixture.Source, cache);
+            fixture.Source.Bytes[Fixture.SchemaOffset + 48] = (byte)'X';
+            var changed = SnapshotReader.Capture(fixture.Source, cache);
+            Equal("ok", changed["status"]);
+            Equal(first["session_info_update"], changed["session_info_update"]);
+            Check(!Object.ReferenceEquals(first["descriptors"], changed["descriptors"]));
+            Equal(Program.SerializeResponse(SnapshotReader.Capture(fixture.Source)), Program.SerializeResponse(changed));
+            fixture.Put(Fixture.SchemaOffset, 6);
+            Equal("invalid_descriptors", SnapshotReader.Capture(fixture.Source, cache)["error_code"]);
+            Equal(0, cache.EntryCount);
+        }
+
+        private static void TestCacheLayoutKey()
+        {
+            var fixture = new Fixture();
+            Action<SdkLayout>[] changes = {
+                delegate(SdkLayout layout) { layout.Version++; },
+                delegate(SdkLayout layout) { layout.VariableOffset++; },
+                delegate(SdkLayout layout) { layout.BufferLength++; },
+                delegate(SdkLayout layout) { layout.BufferCount--; },
+                delegate(SdkLayout layout) { layout.BufferOffsets[0]++; }
+            };
+            foreach (Action<SdkLayout> change in changes)
+            {
+                var cache = new ValidatedSchemaCache();
+                SdkLayout original = SdkLayout.Read(fixture.Source);
+                var first = cache.GetOrBuild(original);
+                SdkLayout replacement = SdkLayout.Read(fixture.Source);
+                change(replacement);
+                Check(!Object.ReferenceEquals(first, cache.GetOrBuild(replacement)));
+                Equal(1, cache.EntryCount);
+            }
+            var invalidCountCache = new ValidatedSchemaCache();
+            SdkLayout invalidCount = SdkLayout.Read(fixture.Source);
+            invalidCountCache.GetOrBuild(invalidCount);
+            invalidCount.VariableCount--;
+            bool rejected = false;
+            try { invalidCountCache.GetOrBuild(invalidCount); }
+            catch (SnapshotException) { rejected = true; }
+            Check(rejected);
+            Equal(0, invalidCountCache.EntryCount);
+        }
+
+        private static void TestCacheBoundedAndImmutable()
+        {
+            var fixture = new Fixture();
+            var cache = new ValidatedSchemaCache();
+            for (int i = 0; i < 20; i++)
+            {
+                fixture.Source.Bytes[Fixture.SchemaOffset + 48] = (byte)('A' + i);
+                Equal("ok", SnapshotReader.Capture(fixture.Source, cache)["status"]);
+                Equal(1, cache.EntryCount);
+            }
+            var snapshot = SnapshotReader.Capture(fixture.Source, cache);
+            var descriptors = (System.Collections.IList)snapshot["descriptors"];
+            bool blockedList = false, blockedEntry = false;
+            try { descriptors.Clear(); }
+            catch (NotSupportedException) { blockedList = true; }
+            try { ((IDictionary<string, object>)descriptors[0])["count"] = 999; }
+            catch (NotSupportedException) { blockedEntry = true; }
+            Check(blockedList && blockedEntry);
+            Equal(Program.SerializeResponse(snapshot), Program.SerializeResponse(SnapshotReader.Capture(fixture.Source, cache)));
+            cache.Clear();
+            Equal(0, cache.EntryCount);
+        }
+
+        private static void TestCacheFailures()
+        {
+            Action<Fixture>[] failures = {
+                delegate(Fixture fixture) { fixture.Put(4, 0); },
+                delegate(Fixture fixture) { fixture.Put(16, 0); },
+                delegate(Fixture fixture) { fixture.Put(Fixture.SchemaOffset + 8, 0); },
+                delegate(Fixture fixture) {
+                    fixture.Source.OverrideRead = delegate(long at, int count) { throw new IOException("synthetic_failure"); };
+                },
+                delegate(Fixture fixture) {
+                    fixture.Source.AfterRead = delegate(MemorySource source, long at, int count) {
+                        if (at == fixture.SessionOffset) source.Bytes[fixture.SessionOffset] ^= 1;
+                    };
+                }
+            };
+            foreach (Action<Fixture> failure in failures)
+            {
+                var fixture = new Fixture();
+                var cache = new ValidatedSchemaCache();
+                var before = SnapshotReader.Capture(fixture.Source, cache);
+                failure(fixture);
+                Check((string)SnapshotReader.Capture(fixture.Source, cache)["status"] != "ok");
+                Equal(0, cache.EntryCount);
+                var recovered = SnapshotReader.Capture(new Fixture().Source, cache);
+                Equal("ok", recovered["status"]);
+                Check(!Object.ReferenceEquals(before["descriptors"], recovered["descriptors"]));
+            }
+        }
+
+        private static void TestCacheSafetyReads()
+        {
+            var fixture = new Fixture();
+            var cache = new ValidatedSchemaCache();
+            SnapshotReader.Capture(fixture.Source, cache);
+            int headers = 0, schemas = 0, sessions = 0, buffers = 0;
+            fixture.Source.AfterRead = delegate(MemorySource source, long at, int count)
+            {
+                if (at == 0) headers++;
+                if (at == Fixture.SchemaOffset) schemas++;
+                if (at == fixture.SessionOffset) sessions++;
+                if (at == fixture.BufferOffsets[1]) buffers++;
+            };
+            Equal("ok", SnapshotReader.Capture(fixture.Source, cache)["status"]);
+            Equal(3, headers); Equal(3, schemas); Equal(2, sessions); Equal(1, buffers);
+        }
+
+        private static void TestCacheFreshValuesAndSession()
+        {
+            var fixture = new Fixture();
+            var cache = new ValidatedSchemaCache();
+            var first = SnapshotReader.Capture(fixture.Source, cache);
+            fixture.Set(1, "FuelLevel", BitConverter.GetBytes(41.0f));
+            fixture.Source.Bytes[fixture.SessionOffset + 3] = (byte)'\r';
+            var changed = SnapshotReader.Capture(fixture.Source, cache);
+            Equal(41.0, Values(changed)["FuelLevel"]);
+            Check(!Object.Equals(first["session_info_b64"], changed["session_info_b64"]));
+            Equal(first["session_info_update"], changed["session_info_update"]);
+            Check(Object.ReferenceEquals(first["descriptors"], changed["descriptors"]));
+            fixture.Set(1, "FuelLevel", BitConverter.GetBytes(Single.NaN));
+            var invalid = SnapshotReader.Capture(fixture.Source, cache);
+            Check(((List<string>)invalid["read_errors"]).Contains("FuelLevel"));
+            fixture.Set(1, "FuelLevel", BitConverter.GetBytes(40.0f));
+            var recovered = SnapshotReader.Capture(fixture.Source, cache);
+            Equal(40.0, Values(recovered)["FuelLevel"]);
+            Equal(0, ((List<string>)recovered["read_errors"]).Count);
+        }
+
+        private static void TestSerializerReuse()
+        {
+            var packet = new Fixture().Capture();
+            string expected = Program.SerializeResponse(packet);
+            var oversized = new Dictionary<string, object> { { "text", new string('a', Program.MaximumOutputBytes) } };
+            Check(Program.SerializeResponse(oversized).Contains("output_limit"));
+            Equal(expected, Program.SerializeResponse(packet));
+            System.Threading.Tasks.Parallel.For(0, 20, delegate(int index)
+            {
+                Equal(expected, Program.SerializeResponse(packet));
+            });
+        }
+
+        private static MemorySource BenchmarkSource()
+        {
+            const int variableCount = 335;
+            int sessionOffset = Fixture.SchemaOffset + variableCount * CrewChiefSdkReader.VarHeaderSize;
+            const int sessionLength = 16384;
+            int bufferOffset = sessionOffset + sessionLength;
+            const int bufferLength = variableCount * 4;
+            var source = new MemorySource(new byte[bufferOffset + bufferLength]);
+            Action<int, int> put = delegate(int at, int value) {
+                Array.Copy(BitConverter.GetBytes(value), 0, source.Bytes, at, 4);
+            };
+            put(0, 2); put(4, 1); put(8, 60); put(12, 7); put(16, sessionLength);
+            put(20, sessionOffset); put(24, variableCount); put(28, Fixture.SchemaOffset);
+            put(32, 1); put(36, bufferLength); put(48, 30); put(52, bufferOffset); put(56, 30);
+            byte[] session = Encoding.ASCII.GetBytes("---\nWeekendInfo:\n SimMode: full\n TrackName: synthetic_benchmark\n");
+            Array.Copy(session, 0, source.Bytes, sessionOffset, session.Length);
+            for (int i = 0; i < variableCount; i++)
+            {
+                int descriptor = Fixture.SchemaOffset + i * CrewChiefSdkReader.VarHeaderSize;
+                put(descriptor, 4); put(descriptor + 4, i * 4); put(descriptor + 8, 1);
+                byte[] name = Encoding.ASCII.GetBytes("SyntheticMetric" + i);
+                Array.Copy(name, 0, source.Bytes, descriptor + 16, name.Length);
+                Array.Copy(BitConverter.GetBytes(0.1f + i), 0, source.Bytes, bufferOffset + i * 4, 4);
+            }
+            return source;
+        }
+
+        private static double Measure(MemorySource source, ValidatedSchemaCache cache, bool serialize, int iterations)
+        {
+            var timer = Stopwatch.StartNew();
+            for (int i = 0; i < iterations; i++)
+            {
+                var response = SnapshotReader.Capture(source, cache);
+                if (serialize) Program.SerializeResponse(response);
+            }
+            timer.Stop();
+            return timer.Elapsed.TotalMilliseconds / iterations;
+        }
+
+        private static void BenchmarkCache()
+        {
+            const int iterations = 80;
+            var source = BenchmarkSource();
+            var cache = new ValidatedSchemaCache();
+            for (int i = 0; i < 12; i++)
+            {
+                Program.SerializeResponse(SnapshotReader.Capture(source));
+                Program.SerializeResponse(SnapshotReader.Capture(source, cache));
+            }
+            var result = new Dictionary<string, object>
+            {
+                { "evidence", "SYNTHETIC_OFFLINE_ONLY" }, { "variables", 335 },
+                { "session_bytes", 16384 }, { "iterations_per_batch", iterations }
+            };
+            foreach (bool serialize in new bool[] { false, true })
+            {
+                var cold = new double[3];
+                var warm = new double[3];
+                for (int repeat = 0; repeat < 3; repeat++)
+                {
+                    if (repeat % 2 == 0)
+                    {
+                        cold[repeat] = Measure(source, null, serialize, iterations);
+                        warm[repeat] = Measure(source, cache, serialize, iterations);
+                    }
+                    else
+                    {
+                        warm[repeat] = Measure(source, cache, serialize, iterations);
+                        cold[repeat] = Measure(source, null, serialize, iterations);
+                    }
+                }
+                Array.Sort(cold); Array.Sort(warm);
+                string suffix = serialize ? "capture_and_json_ms" : "capture_ms";
+                result["uncached_" + suffix] = cold[1];
+                result["cached_" + suffix] = warm[1];
+            }
+            Console.Out.WriteLine(Program.SerializeResponse(result));
         }
     }
 }

@@ -20,7 +20,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +52,10 @@ _DESCRIPTOR_KEYS = {
     "name", "type_code", "dtype", "offset", "count", "count_as_time", "unit",
     "description",
 }
+_DESCRIPTOR_FIELD_TYPES = (
+    ("name", str), ("type_code", int), ("dtype", str), ("offset", int),
+    ("count", int), ("count_as_time", bool), ("unit", str), ("description", str),
+)
 
 
 class _ReaderUnavailable(SdkProbeUnavailable):
@@ -175,7 +179,44 @@ class _Snapshot:
     session_info: Mapping[str, object]
 
 
-def _decode_snapshot(line: bytes, *, captured_monotonic_s: float) -> _Snapshot:
+@dataclass(slots=True)
+class _MetadataCache:
+    """One validated schema and one exact SessionInfo payload per transport."""
+
+    schema_key: tuple[tuple[object, ...], ...] | None = None
+    descriptors: tuple[VariableDescriptor, ...] = ()
+    session_b64: str | None = None
+    session_info: Mapping[str, object] | None = None
+
+    def clear(self) -> None:
+        self.schema_key = None
+        self.descriptors = ()
+        self.session_b64 = None
+        self.session_info = None
+
+
+def _descriptor_key(rows: list[object]) -> tuple[tuple[object, ...], ...]:
+    # Check exact types *before* comparing keys: True == 1 == 1.0 must never
+    # turn a malformed incoming descriptor into a previously validated schema.
+    key: list[tuple[object, ...]] = []
+    for row in rows:
+        if type(row) is not dict or set(row) != _DESCRIPTOR_KEYS:
+            raise _invalid("CREWCHIEF_SCHEMA_INVALID")
+        values: list[object] = []
+        for name, expected_type in _DESCRIPTOR_FIELD_TYPES:
+            value = row[name]
+            if type(value) is not expected_type:
+                raise _invalid("CREWCHIEF_SCHEMA_INVALID")
+            values.append(value)
+        key.append(tuple(values))
+    return tuple(key)
+
+
+def _decode_snapshot(
+    line: bytes, *, captured_monotonic_s: float, _cache: _MetadataCache | None = None,
+) -> _Snapshot:
+    # Standalone protocol callers remain stateless. Only a transport supplies
+    # its own bounded cache; no untrusted packet can populate a global cache.
     if type(line) is not bytes or len(line) > MAX_RESPONSE_BYTES or not line.endswith(b"\n"):
         raise _invalid()
     try:
@@ -221,16 +262,15 @@ def _decode_snapshot(line: bytes, *, captured_monotonic_s: float) -> _Snapshot:
     raw_descriptors = packet["descriptors"]
     if type(raw_descriptors) is not list or len(raw_descriptors) != meta.variable_count:
         raise _invalid("CREWCHIEF_SCHEMA_INVALID")
-    descriptors: list[VariableDescriptor] = []
-    for row in raw_descriptors:
-        if type(row) is not dict or set(row) != _DESCRIPTOR_KEYS:
-            raise _invalid("CREWCHIEF_SCHEMA_INVALID")
-        descriptors.append(VariableDescriptor(**row))
-    schema = tuple(descriptors)
-    try:
-        validate_variable_descriptors(schema)
-    except (CollectorConsistencyError, TypeError, ValueError, UnicodeError):
-        raise _invalid("CREWCHIEF_SCHEMA_INVALID") from None
+    schema_key = _descriptor_key(raw_descriptors)
+    if _cache is not None and _cache.schema_key == schema_key:
+        schema = _cache.descriptors
+    else:
+        schema = tuple(VariableDescriptor(**row) for row in raw_descriptors)
+        try:
+            validate_variable_descriptors(schema)
+        except (CollectorConsistencyError, TypeError, ValueError, UnicodeError):
+            raise _invalid("CREWCHIEF_SCHEMA_INVALID") from None
     if any(
         item.offset + SDK_TYPE_SIZES[item.type_code] * item.count > meta.buffer_len
         or item.count > 4096
@@ -256,7 +296,14 @@ def _decode_snapshot(line: bytes, *, captured_monotonic_s: float) -> _Snapshot:
             raise _invalid("CREWCHIEF_MISSING_FIELD")
         decoded[name] = _value(values[name], descriptor)
     update = _integer(packet["session_info_update"], 0, 2**31 - 1)
-    session_info = _session_info(packet["session_info_b64"])
+    session_b64 = packet["session_info_b64"]
+    if (
+        _cache is not None and type(session_b64) is str
+        and session_b64 == _cache.session_b64 and _cache.session_info is not None
+    ):
+        session_info = _cache.session_info
+    else:
+        session_info = _session_info(session_b64)
     weekend = session_info.get("WeekendInfo")
     sim_mode = weekend.get("SimMode") if isinstance(weekend, Mapping) else None
     frame = RawSdkFrame(
@@ -264,6 +311,14 @@ def _decode_snapshot(line: bytes, *, captured_monotonic_s: float) -> _Snapshot:
         session_info_update=update, values=decoded, read_errors=tuple(errors),
         sim_mode_raw=sim_mode, captured_monotonic_s=captured_monotonic_s,
     )
+    if _cache is not None:
+        # Commit only after the entire packet is valid. Exact original base64
+        # also detects changed YAML with an unchanged update counter; changed
+        # counters with identical YAML still bind to the current frame below.
+        _cache.schema_key = schema_key
+        _cache.descriptors = schema
+        _cache.session_b64 = session_b64
+        _cache.session_info = session_info
     return _Snapshot(meta, schema, frame, session_info)
 
 
@@ -374,6 +429,7 @@ class WindowsCrewChiefTransport:
         self._reader_path = reader_path
         self._test_exchange = _exchange
         self._reader: _ReaderProcess | None = None
+        self._metadata_cache = _MetadataCache()
         self._startup_snapshot: _Snapshot | None = None
         self._latest: _Snapshot | None = None
         self._initial_pending = False
@@ -391,13 +447,16 @@ class WindowsCrewChiefTransport:
                     self._reader = _ReaderProcess(self._reader_path)
                 line = self._reader.exchange(timeout_s)
             captured_at = time.monotonic()
-            return _decode_snapshot(line, captured_monotonic_s=captured_at)
+            return _decode_snapshot(
+                line, captured_monotonic_s=captured_at, _cache=self._metadata_cache,
+            )
         except SdkProbeConsistencyError:
             self.close()
             raise
         except SdkProbeUnavailable:
             self._connected = False
             self._latest = None
+            self._metadata_cache.clear()
             raise
         except Exception:
             self.close()
@@ -441,13 +500,19 @@ class WindowsCrewChiefTransport:
             self._initial_pending = self._connected = True
             return snapshot.connection
 
-    def descriptors(self) -> tuple[VariableDescriptor, ...]:
+    def _active_schema(self) -> tuple[VariableDescriptor, ...]:
         if self._startup_snapshot is None or self._closed:
             raise _invalid("CREWCHIEF_READER_NOT_INITIALIZED")
         return self._startup_snapshot.descriptors
 
+    def descriptors(self) -> tuple[VariableDescriptor, ...]:
+        # Frozen dataclasses still have mutable __dict__ objects and permit
+        # object.__setattr__. Do not expose descriptors shared by startup and
+        # the cache. Internal reads avoid making these public copies per tick.
+        return tuple(replace(item) for item in self._active_schema())
+
     def read_frozen(self, fields: tuple[str, ...]) -> RawSdkFrame:
-        schema = self.descriptors()
+        schema = self._active_schema()
         if (
             type(fields) is not tuple or any(type(name) is not str for name in fields)
             or len(fields) != len(set(fields))
@@ -477,13 +542,17 @@ class WindowsCrewChiefTransport:
             buffer_tick=frame.buffer_tick, session_info_update=frame.session_info_update,
             values={name: frame.values[name] for name in fields if name in frame.values},
             read_errors=tuple(name for name in frame.read_errors if name in fields),
-            sim_mode_raw=frame.sim_mode_raw, captured_monotonic_s=frame.captured_monotonic_s,
+            sim_mode_raw=copy.deepcopy(frame.sim_mode_raw),
+            captured_monotonic_s=frame.captured_monotonic_s,
         )
 
     def sim_mode(self) -> tuple[Any, int | None]:
         if self._latest is None or self._closed:
             return None, None
-        return self._latest.frame.sim_mode_raw, self._latest.frame.session_info_update
+        return (
+            copy.deepcopy(self._latest.frame.sim_mode_raw),
+            self._latest.frame.session_info_update,
+        )
 
     def session_info_snapshot(self) -> tuple[Mapping[str, object] | None, int | None]:
         if self._latest is None or self._closed:
@@ -501,6 +570,9 @@ class WindowsCrewChiefTransport:
         self._closed = True
         self._connected = False
         self._latest = None
+        self._startup_snapshot = None
+        self._initial_pending = False
+        self._metadata_cache.clear()
         if self._reader is not None:
             self._reader.close()
 

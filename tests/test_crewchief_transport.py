@@ -388,3 +388,246 @@ def test_read_does_not_expose_mutable_cache() -> None:
     frame.values["FuelLevel"] = 0
     assert transport._latest.frame.values["FuelLevel"] == 42.5
     transport.close()
+
+
+def _metadata_call_counts(monkeypatch) -> dict[str, int]:
+    calls = {"schema": 0, "session": 0}
+    original_validate = module.validate_variable_descriptors
+    original_session = module._session_info
+
+    def validate(descriptors):
+        calls["schema"] += 1
+        return original_validate(descriptors)
+
+    def session(encoded):
+        calls["session"] += 1
+        return original_session(encoded)
+
+    monkeypatch.setattr(module, "validate_variable_descriptors", validate)
+    monkeypatch.setattr(module, "_session_info", session)
+    return calls
+
+
+def test_metadata_cache_reuses_exact_content_but_not_frame_or_update(monkeypatch) -> None:
+    packets = [_packet(tick=100 + i, update=7 + i) for i in range(3)]
+    expected = [
+        module._decode_snapshot(_line(packet), captured_monotonic_s=10.0 + i)
+        for i, packet in enumerate(packets)
+    ]
+    calls = _metadata_call_counts(monkeypatch)
+    clock = [10.0]
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    transport = _transport(*packets)
+    transport.startup(0)
+    schema = transport.descriptors()
+    fields = tuple(item.name for item in schema)
+    for i, snapshot in enumerate(expected):
+        clock[0] = 10.0 + i
+        assert transport.read_frozen(fields) == snapshot.frame
+        assert transport.session_info_snapshot() == (snapshot.session_info, 7 + i)
+        assert transport._latest.descriptors == schema
+        assert transport._latest.descriptors is transport._metadata_cache.descriptors
+        assert transport.sim_mode() == ("full", 7 + i)
+    assert calls == {"schema": 1, "session": 1}
+    transport.close()
+    assert transport._metadata_cache == module._MetadataCache()
+    assert transport._startup_snapshot is None
+
+
+def test_session_cache_is_exact_content_single_entry_not_update_counter(monkeypatch) -> None:
+    calls = _metadata_call_counts(monkeypatch)
+    # Same counter and tick can carry changed metadata; this must not be hidden.
+    packets = [_packet(), _packet(mode="replay"), _packet()]
+    transport = _transport(*packets)
+    transport.startup(0)
+    for packet, mode in zip(packets, ("full", "replay", "full"), strict=True):
+        frame = transport.read_frozen(("SessionTick",))
+        assert frame.buffer_tick == 100 and frame.session_info_update == 7
+        assert transport.sim_mode() == (mode, 7)
+        assert transport._metadata_cache.session_b64 == packet["session_info_b64"]
+    # A -> B -> A parses three times; there is no historical payload cache.
+    assert calls == {"schema": 1, "session": 3}
+    transport.close()
+
+
+def test_returned_session_mutations_cannot_poison_later_cache_hits(monkeypatch) -> None:
+    calls = _metadata_call_counts(monkeypatch)
+    transport = _transport(_packet(), _packet(tick=101))
+    transport.startup(0)
+    transport.read_frozen(("SessionTick",))
+    metadata, _ = transport.session_info_snapshot()
+    metadata["WeekendInfo"]["SimMode"] = "replay"
+    metadata["DriverInfo"]["Drivers"][0]["UserName"] = "changed"
+    metadata["DriverInfo"]["Drivers"].clear()
+    transport.read_frozen(("SessionTick",))
+    current, _ = transport.session_info_snapshot()
+    assert current["WeekendInfo"]["SimMode"] == "full"
+    assert current["DriverInfo"]["Drivers"][0]["UserName"] == "synthetic-private-name"
+    assert calls == {"schema": 1, "session": 1}
+    transport.close()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("type_code", True), ("type_code", 1.0),
+        ("count", True), ("count", 1.0),
+        ("offset", 20.0), ("count_as_time", 0), ("count_as_time", 0.0),
+        ("unit", []), ("description", {}),
+    ],
+)
+def test_warm_schema_cache_cannot_hide_type_confusion(field, value) -> None:
+    changed = _packet(tick=101)
+    # IsOnTrackCar has type_code=1/count=1/count_as_time=False: equal Python
+    # values with different JSON types must still fail after warming the cache.
+    descriptor = changed["descriptors"][4]
+    if field == "offset":
+        value = float(descriptor["offset"])
+    descriptor[field] = value
+    transport = _transport(_packet(), changed)
+    transport.startup(0)
+    transport.read_frozen(("SessionTick",))
+    with pytest.raises(SdkProbeConsistencyError, match="CREWCHIEF_SCHEMA_INVALID"):
+        transport.read_frozen(("SessionTick",))
+    assert transport._metadata_cache == module._MetadataCache()
+    assert transport._startup_snapshot is None
+    assert not transport.connected
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda p: p["values"].update(SessionTick=True),
+        lambda p: p["values"].update(FuelLevel=1e39),
+        lambda p: p["values"].update(CarIdxLapCompleted=[1]),
+        lambda p: p["values"].pop("FuelLevel"),
+        lambda p: p.update(read_errors=["FuelLevel"]),
+        lambda p: p.update(buffer_tick=True),
+        lambda p: p.update(session_info_update=True),
+        lambda p: p["connection"].update(buffer_len=1),
+        lambda p: p["connection"].update(header_version=2.0),
+        lambda p: p["connection"].update(raw_header_status=0),
+        lambda p: p.update(session_info_b64=None),
+        lambda p: p.update(session_info_b64="not base64"),
+        lambda p: p.update(session_info_b64=base64.b64encode(b"x: .nan").decode()),
+    ],
+)
+def test_warm_metadata_cache_keeps_per_packet_fail_closed_checks(mutate) -> None:
+    changed = _packet(tick=101)
+    mutate(changed)
+    transport = _transport(_packet(), changed)
+    transport.startup(0)
+    transport.read_frozen(("SessionTick",))
+    with pytest.raises((SdkProbeConsistencyError, SdkProbeUnavailable)):
+        transport.read_frozen(("SessionTick",))
+    assert transport._metadata_cache == module._MetadataCache()
+    assert not transport.connected
+
+
+def test_cache_is_transport_local_and_stateless_decode_stays_stateless(monkeypatch) -> None:
+    calls = _metadata_call_counts(monkeypatch)
+    for _ in range(2):
+        decoded = module._decode_snapshot(_line(_packet()), captured_monotonic_s=1.0)
+        decoded.session_info["WeekendInfo"]["SimMode"] = "changed"
+    assert calls == {"schema": 2, "session": 2}
+    for _ in range(2):
+        transport = _transport(_packet())
+        transport.startup(0)
+        assert transport.sim_mode() == ("full", 7)
+        transport.close()
+    assert calls == {"schema": 4, "session": 4}
+
+
+def test_unavailable_read_clears_cache_before_startup_retry(monkeypatch) -> None:
+    calls = _metadata_call_counts(monkeypatch)
+    transport = _transport(_packet(), {
+        "protocol": module.PROTOCOL_VERSION, "status": "unavailable",
+        "error_code": "mapping_unavailable",
+    }, _packet())
+    transport._read(0.5)
+    assert calls == {"schema": 1, "session": 1}
+    with pytest.raises(SdkProbeUnavailable):
+        transport._read(0.5)
+    assert transport._metadata_cache == module._MetadataCache()
+    transport.startup(0)
+    assert calls == {"schema": 2, "session": 2}
+    transport.close()
+
+
+def test_session_cache_compares_original_bytes_not_only_parsed_meaning(monkeypatch) -> None:
+    calls = _metadata_call_counts(monkeypatch)
+    changed = _packet(tick=101)
+    original = base64.b64decode(changed["session_info_b64"])
+    changed["session_info_b64"] = base64.b64encode(original + b"\n").decode()
+    transport = _transport(_packet(), changed)
+    transport.startup(0)
+    transport.read_frozen(("SessionTick",))
+    before, _ = transport.session_info_snapshot()
+    transport.read_frozen(("SessionTick",))
+    assert transport.session_info_snapshot() == (before, 7)
+    assert calls == {"schema": 1, "session": 2}
+    transport.close()
+
+
+def test_schema_cache_ignores_object_key_order_but_not_typed_content(monkeypatch) -> None:
+    calls = _metadata_call_counts(monkeypatch)
+    changed = _packet(tick=101)
+    changed["descriptors"] = [dict(reversed(row.items())) for row in changed["descriptors"]]
+    transport = _transport(_packet(), changed)
+    transport.startup(0)
+    schema = transport.descriptors()
+    transport.read_frozen(("SessionTick",))
+    assert transport.read_frozen(("SessionTick",)).values == {"SessionTick": 101}
+    assert transport._latest.descriptors == schema
+    assert transport._latest.descriptors is transport._metadata_cache.descriptors
+    assert calls == {"schema": 1, "session": 1}
+    transport.close()
+
+
+def test_unknown_mutable_sim_mode_cannot_expose_metadata_cache() -> None:
+    packet = _packet()
+    packet["session_info_b64"] = base64.b64encode(
+        b"WeekendInfo:\n SimMode: [unrecognized]\n"
+    ).decode()
+    transport = _transport(packet, packet)
+    transport.startup(0)
+    frame = transport.read_frozen(("SessionTick",))
+    frame.sim_mode_raw.append("from frame")
+    mode, _ = transport.sim_mode()
+    mode.append("from getter")
+    assert transport.read_frozen(("SessionTick",)).sim_mode_raw == ["unrecognized"]
+    assert transport.session_info_snapshot()[0]["WeekendInfo"]["SimMode"] == ["unrecognized"]
+    transport.close()
+
+
+@pytest.mark.parametrize(
+    "field,value,through_dict",
+    [
+        ("type_code", 2, False), ("type_code", True, False),
+        ("count", 2, True), ("count", True, True),
+        ("offset", 0, False), ("description", "changed", True),
+    ],
+)
+def test_public_descriptor_mutation_cannot_poison_warm_schema_cache(
+    monkeypatch, field, value, through_dict,
+) -> None:
+    calls = _metadata_call_counts(monkeypatch)
+    transport = _transport(_packet(), _packet(tick=101))
+    transport.startup(0)
+    original = transport.descriptors()
+    exposed = transport.descriptors()
+    assert original == exposed
+    assert all(a is not b for a, b in zip(original, exposed, strict=True))
+    if through_dict:
+        exposed[4].__dict__[field] = value
+    else:
+        object.__setattr__(exposed[4], field, value)
+    # Public mutation must affect neither the startup frame nor a cache hit.
+    for tick in (100, 101):
+        frame = transport.read_frozen(("SessionTick", "IsOnTrackCar"))
+        assert frame.values == {"SessionTick": tick, "IsOnTrackCar": True}
+        assert transport.descriptors() == original
+        assert type(transport.descriptors()[4].type_code) is int
+        assert type(transport.descriptors()[4].count) is int
+    assert calls == {"schema": 1, "session": 1}
+    transport.close()

@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from dataclasses import replace
+from contextlib import ExitStack
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import iracing_ai_engineer.collector as collector_module
 from iracing_ai_engineer.collector import (
     COLLECTOR_CONTRACT_VERSION,
     R8_MAX_CAPTURE_BYTES,
@@ -26,7 +28,7 @@ from iracing_ai_engineer.collector import (
     validate_collector_sample,
     validate_variable_descriptors,
 )
-from iracing_ai_engineer.sdk_probe import RawSdkFrame, VariableDescriptor
+from iracing_ai_engineer.sdk_probe import RawSdkFrame, VariableDescriptor, schema_sha256
 from iracing_ai_engineer.telemetry import SourceKind
 
 RUN_IDENTITY = {"source_id": "test-source", "session_id": "test-session"}
@@ -953,3 +955,286 @@ def test_transport_close_failure_is_added_as_note_to_primary_error(tmp_path: Pat
     assert raised.value.__notes__ == [
         "transport.close() also failed: RuntimeError: simulated close failure"
     ]
+
+
+def test_schema_cache_validates_and_encodes_equal_primitive_schema_once(monkeypatch):
+    validations = []
+    payloads = []
+    validate = collector_module.validate_variable_descriptors
+    schema_payload = collector_module._schema_payload
+
+    def counted_validation(schema):
+        validations.append(schema)
+        return validate(schema)
+
+    def counted_payload(schema):
+        payloads.append(schema)
+        return schema_payload(schema)
+
+    monkeypatch.setattr(collector_module, "validate_variable_descriptors", counted_validation)
+    monkeypatch.setattr(collector_module, "_schema_payload", counted_payload)
+    writer = MemoryWriter()
+    observations = (
+        sample(tick, capture_s=tick / 60, descriptors=tuple(replace(d) for d in BASE_SCHEMA))
+        for tick in range(1, 5)
+    )
+    receipt = collect_samples(observations, writer, **RUN_IDENTITY)
+
+    assert len(validations) == len(payloads) == 1
+    assert receipt.schema_record_count == 1
+    schema_record = next(record for record in writer.records if record["record_type"] == "schema")
+    assert schema_record["schema_sha256"] == schema_sha256(BASE_SCHEMA)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("offset", False), ("offset", 0.0), ("count", True), ("count", 1.0),
+        ("type_code", 4.0), ("count_as_time", 0), ("count_as_time", 0.0),
+    ],
+)
+def test_warm_schema_cache_rejects_equal_but_wrong_primitive_type(field, value):
+    schema = tuple(replace(item) for item in BASE_SCHEMA)
+    writer = MemoryWriter()
+    collector = LiveCollector(writer, **RUN_IDENTITY)
+    collector.ingest(sample(1, capture_s=0.0, descriptors=schema))
+    records_before = len(writer.records)
+    # Even an illicit in-place mutation of a frozen descriptor cannot bypass
+    # validation by comparing equal to the previous integer/Boolean value.
+    object.__setattr__(schema[0], field, value)
+
+    with pytest.raises(CollectorConsistencyError):
+        collector.ingest(sample(2, capture_s=0.1, descriptors=schema))
+
+    assert len(writer.records) == records_before
+
+
+def test_schema_cache_observes_in_place_primitive_mutation_and_order_independent_hash():
+    schema = tuple(replace(item) for item in BASE_SCHEMA)
+    writer = MemoryWriter()
+    collector = LiveCollector(writer, **RUN_IDENTITY)
+    collector.ingest(sample(1, capture_s=0.0, descriptors=schema))
+    object.__setattr__(schema[0], "description", "updated metadata")
+    collector.ingest(sample(2, capture_s=0.1, descriptors=schema))
+    collector.ingest(sample(3, capture_s=0.2, descriptors=tuple(reversed(schema))))
+    receipt = collector.finish()
+
+    schemas = [record for record in writer.records if record["record_type"] == "schema"]
+    assert receipt.schema_change_count == 1
+    assert len(schemas) == 2
+    assert schemas[0]["schema_sha256"] != schemas[1]["schema_sha256"]
+    assert schemas[1]["schema_sha256"] == schema_sha256(schema)
+
+
+def test_descriptor_subclasses_keep_full_schema_validation_and_extra_fields(monkeypatch):
+    @dataclass(frozen=True)
+    class ExtendedDescriptor(VariableDescriptor):
+        extra: str = "extension"
+
+    schema = (ExtendedDescriptor(**asdict(BASE_SCHEMA[0])), *BASE_SCHEMA[1:])
+    validations = []
+    validate = collector_module.validate_variable_descriptors
+
+    def counted_validation(descriptors):
+        validations.append(descriptors)
+        return validate(descriptors)
+
+    monkeypatch.setattr(collector_module, "validate_variable_descriptors", counted_validation)
+    writer = MemoryWriter()
+    collect_samples(
+        (
+            sample(1, capture_s=0.0, descriptors=schema),
+            sample(2, capture_s=0.1, descriptors=schema),
+        ),
+        writer, **RUN_IDENTITY,
+    )
+
+    assert len(validations) == 2
+    record = next(record for record in writer.records if record["record_type"] == "schema")
+    assert record["schema_sha256"] == schema_sha256(schema)
+    extended = next(row for row in record["variables"] if row["name"] == "SessionNum")
+    assert extended["extra"] == "extension"
+
+
+def test_cached_schema_payload_is_not_mutable_through_custom_writer():
+    class MutatingWriter(MemoryWriter):
+        def write(self, record):
+            super().write(record)
+            if record["record_type"] == "schema" and record["schema_epoch"] == 0:
+                record["variables"][0]["description"] = "writer-local mutation"
+
+    writer = MutatingWriter()
+    collect_samples(
+        (sample(1, capture_s=0.0), replace(sample(2, capture_s=0.1), tick_rate_hz=120)),
+        writer, **RUN_IDENTITY,
+    )
+    schemas = [record for record in writer.records if record["record_type"] == "schema"]
+    assert len(schemas) == 2
+    assert schemas[0]["variables"][0]["description"] == "writer-local mutation"
+    assert schemas[1]["variables"][0]["description"] != "writer-local mutation"
+    assert schemas[0]["schema_sha256"] == schemas[1]["schema_sha256"]
+
+
+def test_schema_cache_does_not_skip_same_counter_session_or_duplicate_tick_checks():
+    private_info = {
+        "WeekendInfo": {"TrackName": "first"},
+        "DriverInfo": {"UserName": "Private Person"},
+    }
+    writer = MemoryWriter()
+    collector = LiveCollector(writer, **RUN_IDENTITY)
+    collector.ingest(sample(1, capture_s=0.0, session_info=private_info))
+    collector.ingest(sample(1, capture_s=0.1, session_info=private_info))
+    private_info["WeekendInfo"]["TrackName"] = "second"
+    changed = sample(1, capture_s=0.2, session_info=private_info)
+    changed.frame.values["Speed"] = 51.0
+    collector.ingest(changed)
+    receipt = collector.finish()
+
+    assert receipt.session_info_record_count == 2
+    assert receipt.duplicate_sample_count == 2
+    assert receipt.duplicate_conflict_count == 1
+    assert any(
+        record.get("event_kind") == "session_info_changed_without_update"
+        for record in writer.records
+    )
+    assert "Private Person" not in json.dumps(writer.records)
+
+
+def _open_test_writer(stack, writer_class, path):
+    if issubclass(writer_class, JsonlHandleWriter):
+        handle = stack.enter_context(path.open("x+b", buffering=0))
+        return stack.enter_context(writer_class(handle))
+    return stack.enter_context(writer_class(path))
+
+
+@pytest.mark.parametrize("writer_class", [JsonlAppendWriter, JsonlHandleWriter])
+def test_builtin_writer_encodes_records_once_with_identical_bytes_and_fsync(
+    tmp_path, monkeypatch, writer_class,
+):
+    observations = (
+        sample(1, capture_s=0.0, session_info={"Track": "Café", "DriverInfo": {"name": "private"}}),
+        sample(1, capture_s=0.1),
+        sample(3, capture_s=0.2),
+        sample(4, capture_s=0.3, descriptors=EXTENDED_SCHEMA),
+    )
+    reference = MemoryWriter()
+    expected_receipt = collect_samples(observations, reference, **RUN_IDENTITY)
+    expected_bytes = b"".join(canonical_json(record) + b"\n" for record in reference.records)
+    encodings = []
+    fsyncs = []
+    canonical = collector_module._canonical_json
+
+    def counted_canonical(value):
+        if type(value) is dict and "record_type" in value:
+            encodings.append(value["record_type"])
+        return canonical(value)
+
+    monkeypatch.setattr(collector_module, "_canonical_json", counted_canonical)
+    monkeypatch.setattr(collector_module.os, "fsync", fsyncs.append)
+    path = tmp_path / "encoded.jsonl"
+    with ExitStack() as stack:
+        writer = _open_test_writer(stack, writer_class, path)
+        actual_receipt = collect_samples(observations, writer, **RUN_IDENTITY)
+        if writer_class is JsonlHandleWriter:
+            assert writer.byte_size == len(expected_bytes)
+            assert writer.capture_sha256 == hashlib.sha256(expected_bytes).hexdigest()
+
+    assert actual_receipt == expected_receipt
+    assert path.read_bytes() == expected_bytes
+    assert encodings == [record["record_type"] for record in reference.records]
+    assert len(fsyncs) == len(reference.records) + (writer_class is JsonlHandleWriter)
+
+
+@pytest.mark.parametrize("writer_class", [JsonlAppendWriter, JsonlHandleWriter])
+@pytest.mark.parametrize("override", ["subclass", "instance", "class"])
+def test_encoded_fast_path_never_bypasses_public_write_overrides(
+    tmp_path, monkeypatch, writer_class, override,
+):
+    writes = []
+    original = writer_class.write
+
+    def overridden(self, record):
+        writes.append(record["record_type"])
+        original(self, record)
+
+    actual_class = writer_class
+    if override == "subclass":
+        actual_class = type("ObservingWriter", (writer_class,), {"write": overridden})
+    elif override == "class":
+        monkeypatch.setattr(writer_class, "write", overridden)
+    path = tmp_path / "overridden.jsonl"
+    with ExitStack() as stack:
+        writer = _open_test_writer(stack, actual_class, path)
+        if override == "instance":
+            monkeypatch.setattr(writer, "write", lambda record: overridden(writer, record))
+        receipt = collect_samples((sample(1, capture_s=0.0),), writer, **RUN_IDENTITY)
+
+    assert writes == ["run", "schema", "session_info", "frame", "collector_receipt"]
+    assert receipt.semantic_record_count == 4
+
+
+def test_custom_writer_with_encoded_method_still_uses_mapping_protocol():
+    class CustomWriter(MemoryWriter):
+        def _write_encoded(self, encoded):
+            raise AssertionError("custom writer must not opt in implicitly")
+
+    writer = CustomWriter()
+    collect_samples((sample(1, capture_s=0.0),), writer, **RUN_IDENTITY)
+    assert len(writer.records) == 5
+
+
+@pytest.mark.parametrize("writer_class", [JsonlAppendWriter, JsonlHandleWriter])
+def test_bound_write_delegation_to_another_builtin_writer_is_preserved(tmp_path, writer_class):
+    first_path, second_path = tmp_path / "first.jsonl", tmp_path / "second.jsonl"
+    with ExitStack() as stack:
+        first = _open_test_writer(stack, writer_class, first_path)
+        second = _open_test_writer(stack, writer_class, second_path)
+        first.write = second.write
+        collect_samples((sample(1, capture_s=0.0),), first, **RUN_IDENTITY)
+
+    assert first_path.read_bytes() == b""
+    assert len(second_path.read_bytes().splitlines()) == 5
+
+
+@pytest.mark.parametrize("writer_class", [JsonlAppendWriter, JsonlHandleWriter])
+def test_encoded_write_fsync_failure_does_not_advance_collector_digest_or_receipt(
+    tmp_path, monkeypatch, writer_class,
+):
+    def fail_fsync(_descriptor):
+        raise OSError("simulated fsync failure")
+
+    monkeypatch.setattr(collector_module.os, "fsync", fail_fsync)
+    path = tmp_path / "fsync-failure.jsonl"
+    with pytest.raises(OSError, match="simulated fsync failure"), ExitStack() as stack:
+        writer = _open_test_writer(stack, writer_class, path)
+        collector = LiveCollector(writer, **RUN_IDENTITY)
+        collector.ingest(sample(1, capture_s=0.0))
+
+    assert collector._sequence == 0
+    assert collector._digest.hexdigest() == hashlib.sha256().hexdigest()
+    assert collector._receipt is None
+    if writer_class is JsonlHandleWriter:
+        assert writer.byte_size == 0
+        assert writer.capture_sha256 == hashlib.sha256().hexdigest()
+    assert all(
+        json.loads(line)["record_type"] != "collector_receipt"
+        for line in path.read_bytes().splitlines()
+    )
+
+
+def test_encoded_short_write_does_not_advance_collector_digest():
+    class ShortHandle:
+        def write(self, payload):
+            return len(payload) - 1
+
+        def flush(self):
+            raise AssertionError("a short write must fail before flush")
+
+    writer = JsonlAppendWriter("unused.jsonl", fsync_each_record=False)
+    writer._handle = ShortHandle()
+    collector = LiveCollector(writer, **RUN_IDENTITY)
+    with pytest.raises(OSError, match="short JSONL write"):
+        collector.ingest(sample(1, capture_s=0.0))
+    assert collector._sequence == 0
+    assert collector._digest.hexdigest() == hashlib.sha256().hexdigest()
+    assert collector._receipt is None
