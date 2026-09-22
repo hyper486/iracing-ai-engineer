@@ -59,6 +59,29 @@ def wait_answer(service):
     raise AssertionError("synthetic service did not finish")
 
 
+@pytest.mark.parametrize("used", [-1, 501, True, 1.5, "1", None])
+def test_initial_request_count_rejects_invalid_values(used):
+    with pytest.raises(ValueError):
+        EngineerService(ready_state().snapshot, initial_requests_used=used)
+
+
+def test_initial_request_count_preserves_exhausted_budget_without_provider_call():
+    planner = Planner()
+    service = EngineerService(
+        ready_state().snapshot, EngineerConfig(provider="deepseek"),
+        environ={"DEEPSEEK_API_KEY": "SYNTHETIC_TEST_KEY"}, client=planner,
+        initial_requests_used=60,
+    )
+    try:
+        assert service.submit("fuel")[0] == 202
+        result = wait_answer(service)
+        assert result["requests_used"] == 60
+        assert result["answer"]["origin"] == "local_fallback"
+        assert planner.calls == []
+    finally:
+        service.close()
+
+
 class Planner:
     def __init__(self):
         self.calls = []

@@ -39,6 +39,8 @@ state/
 # Generated packages and local build output.
 build/
 dist/
+# Public speech weights are downloaded at a pinned revision, never committed.
+models/
 *.whl
 *.zip
 

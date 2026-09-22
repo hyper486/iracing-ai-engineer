@@ -23,10 +23,70 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Local fuel dashboard | Experimental; offline/synthetic checks | Whole-lap fuel learning, freshness/driver guards and optional bounded private recording are implemented. This is not a multi-stop, traffic, tire or driving-guidance release. |
 | Local practice speech | Opt-in browser prototype | Only local English voices in confirmed Practice; Race speech is disabled. A hidden tab auto-mutes, so game-background playback is not guaranteed. |
 | DeepSeek engineer framework | Implemented; constrained evidence selection | Opt-in asynchronous questions, local grounding/rendering, bounded attempts and safe fallback; validated historical receipt context is separate from live fuel. Real provider/account and in-car acceptance remain unverified. |
+| Native Windows EXE | Experimental native Tk/ttk app | Standalone windowed binary, direct Python service calls, masked/optional DPAPI key storage and private recording. No HTML/WebView/server. |
+| Native VR voice | Implemented; hardware/race acceptance pending | Opt-in background PTT, input/output selectors or refreshed Windows defaults, local Whisper STT and Windows TTS, interruption and optional guarded low-fuel facts. No continuous listening or raw-audio upload. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Native Windows desktop milestone
+
+The September 22 desktop milestone replaces the browser as the primary local
+interface with an independently runnable `AEIS-Engineer.exe`. Native controls
+show live fuel/quality, ask constrained engineering questions, import validated
+historical session reports and configure DeepSeek locally. The legacy web UI
+remains an optional separate entry, not the implementation of the new window.
+Build and Chinese operating instructions are in [the desktop guide](WINDOWS_DESKTOP.md).
+
+The unsigned one-file x64 build includes Python, Tcl/Tk and the read-only SDK
+adapter. Its frozen self-test runs with a system-only PATH and without Python,
+Tcl, Conda or provider-key overrides. It checks GUI creation, local fallback and
+the actual close protocol without starting the SDK or calling a provider.
+Earlier visible native-window checks covered three tabs, a local fuel question and
+window closure. These are packaging/UI checks, not authentic driving evidence.
+
+Cloud use remains off by default. Current-user Windows DPAPI persistence is
+optional, keys are never prefilled or logged, and provider attempt counts survive
+model/history reconfiguration. A failed key decryption does not reset recording
+preferences. Unsafe capture paths disable recording without disabling read-only
+monitoring. Shutdown waits for both reader and configuration work to really end;
+it does not declare successful closure just because a timeout elapsed.
+
+The fourth tab adds opt-in VR voice. Input and output can be chosen independently;
+unset selections resolve the current Windows default before each operation.
+Explicit unavailable/ambiguous devices never silently fall back. PTT uses F9
+(F8-F12 selectable) or a bound joystick button; it neither grabs focus nor injects
+game input. Recording is capped at 12 seconds and kept in memory. Local-only,
+commit-pinned Whisper medium CPU int8 recognition runs in a bounded, killable child;
+Windows renders Chinese speech in memory, then PortAudio routes it to the chosen
+output. Audio never goes to DeepSeek. Only the accepted question text follows
+the existing opt-in, bounded and grounded cloud path.
+
+Windows dictation and smaller Whisper models were rejected as the default after
+poor synthetic Chinese round-trip results. The selected medium model preserved
+intent and key words in eight predefined TTS-generated questions (punctuation
+may differ); this tiny, synthetic sample is not an accuracy claim for human speech.
+A successful API invocation alone was not treated as speech acceptance.
+Automated tests cover device/default changes, background input edge
+handling, disconnect/cancellation, pending-disable and close races, stale-answer
+withdrawal and memory-only diagnostics. Real microphone, headset output, wheel
+button, recognition in racing noise and VR frame-time impact still require a
+human-driven hardware check. Synthetic tests do not promote those gates.
+
+Optional low-fuel speech is off by default, uses only guarded fresh in-car facts,
+and does not call a model or issue a pit instruction. Real DeepSeek account/network
+behavior, in-car fuel validation, multi-stop/traffic/tire tactics, repeated-corner
+coaching and reliable race audio remain unaccepted. No game/control command is issued.
+
+Native/VR regression: the full suite completed with **2,148 passed, 46 skipped**.
+Two wheel-build checks skipped because `uv` was not on PATH were rerun with the
+tool explicitly available: **2 passed**. The other 44 skips remain documented
+data, platform, private-deployment or opt-in boundaries. Ruff, public-safety
+scanning including history and staged diff checks passed. The frozen one-file
+EXE passed all **8** synthetic self-tests, including exact model hashes and real
+in-memory Chinese TTS-to-STT, with a system-only PATH. No microphone, speaker,
+simulator or provider was accessed by those frozen checks.
 
 ## DeepSeek framework integration
 
@@ -47,7 +107,8 @@ traffic, tire-service, corner-coaching or background race-audio gaps.
 
 See [the DeepSeek guide](DEEPSEEK_ENGINEER.md) for local-only key entry, limits,
 privacy, historical input and the synthetic loopback rehearsal. No real provider
-call has been validated for this milestone because a local key is not configured.
+call has been validated by the synthetic framework checks; account configuration
+is private and is not part of public acceptance evidence.
 Synthetic/mock checks are not `SDK_LIVE` acceptance.
 
 The end-to-end historical receipt check also found and fixed a producer-side
@@ -57,7 +118,7 @@ validator. The producer now clamps its own bounds; validator tolerance and
 driving-promotion rules are unchanged. A complete synthetic multi-lap receipt is
 built and independently revalidated in the regression test.
 
-Full regression: **1,726 passed, 43 skipped**. Ruff, public-safety scanning
+Earlier DeepSeek-only regression: **1,726 passed, 43 skipped**. Ruff, public-safety scanning
 including history, and staged diff checks passed. The skips remain explicit
 missing-data, private-deployment or platform-only cases, not live passes.
 The standalone loopback rehearsal passed all five scenario groups without SDK

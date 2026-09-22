@@ -139,7 +139,10 @@ class EngineerService:
         client: Any = None,
         clock: Callable[[], float] = monotonic_now,
         environ: Mapping[str, str] | None = None,
+        initial_requests_used: int = 0,
     ) -> None:
+        if type(initial_requests_used) is not int or not 0 <= initial_requests_used <= 500:
+            raise ValueError("invalid initial request count")
         self.config = config or EngineerConfig()
         self._source, self._clock = snapshot, clock
         self._lock = threading.Lock()
@@ -162,7 +165,7 @@ class EngineerService:
                 )
             except LLMError:
                 self._configuration_error = "MODEL_CONFIGURATION_INVALID"
-        self._requests = 0
+        self._requests = initial_requests_used
         self._last_request = -math.inf
         self._busy = False
         self._answer: dict | None = None
@@ -302,9 +305,9 @@ class EngineerService:
                 self._busy = False
             self._jobs.task_done()
 
-    def close(self) -> None:
+    def close(self, *, wait: bool = False) -> None:
         self._closed.set()
-        self._worker.join(timeout=0.3)
+        self._worker.join(timeout=None if wait else 0.3)
 
 
 __all__ = ["EngineerConfig", "EngineerService", "fallback_plan", "render_plan", "validate_plan"]

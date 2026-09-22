@@ -23,6 +23,8 @@ practice opportunity.
 - Distance-aligned corner evidence and repeated-loss diagnosis.
 - Advisor timelines, shadow speech policy and deterministic session reports.
 - A privacy-safe JSONL live-state bridge for future overlays and speech consumers.
+- A native Windows desktop EXE with real-time fuel status, constrained DeepSeek
+  questions, VR push-to-talk and selectable audio devices; no browser or WebView needed.
 - An experimental local fuel dashboard with private recording and opt-in local
   practice speech; race speech stays disabled.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
@@ -41,6 +43,33 @@ policy. Reliable race-audio delivery, full live tactical advice and broader
 coaching still require work; the fuel dashboard below does not promote those gates.
 
 ## Quick start
+
+### Native Windows app (no HTML)
+
+Double-click a locally built `AEIS-Engineer.exe`. Python, a browser and a local
+web server are not required on the target computer. In **模型与本地设置**, cloud
+questions are off by default; enter your DeepSeek key locally and explicitly
+enable them if desired. Without a key, local explanations still work.
+
+From a source checkout on Windows, build the standalone executable with:
+
+```powershell
+uv run python scripts/fetch_voice_model.py --download
+.\scripts\build_desktop.ps1
+.\dist\AEIS-Engineer.exe
+```
+
+The build requires Python 3.12 x64, Tcl/Tk and `uv`; its dependency group is
+locked. The binary is an **unsigned experimental build**, not an installer or
+an accepted race-engineering release. Native voice is opt-in: choose input/output
+in **语音与 VR**, or leave either on Windows system default; hold F9 or bind a
+wheel button to speak, release to ask. Local Whisper recognizes speech, DeepSeek
+optionally selects grounded facts, and local Windows TTS speaks through the
+selected output. Audio is not uploaded. Actual racing/VR reliability is pending.
+See [the native desktop guide](docs/WINDOWS_DESKTOP.md) for setup, private
+recording, encrypted key storage, self-tests and current limits.
+
+### Source and offline pipeline
 
 Requirements:
 
@@ -78,7 +107,7 @@ uv run python scripts/run_local_cli.py offline-demo \
 If the raw fixture is absent or evidence is insufficient, the correct result
 is an explicit `WAIT_*` state—not fabricated strategy or coaching.
 
-### Experimental Windows fuel dashboard
+### Legacy experimental browser dashboard (optional)
 
 From PowerShell in the repository root, with the Python environment prepared:
 
@@ -105,8 +134,9 @@ This milestone does not establish new authentic `SDK_LIVE` driving acceptance.
 
 The [DeepSeek framework](docs/DEEPSEEK_ENGINEER.md) adds typed questions, quick
 topics, constrained fact selection, local rendering and failure fallback. Use
-`start_live_engineer.ps1 -DeepSeek` after configuring a key locally; without a
-key it still offers local explanations. No model call happens automatically.
+the native app's settings to enable it, or `start_live_engineer.ps1 -DeepSeek`
+for the legacy browser version after configuring a key locally; without a key
+it still offers local explanations. No model call happens automatically.
 Historical validated session receipts can be explained separately from live
 fuel, without promoting old or synthetic evidence into current race advice.
 Run `uv run python scripts/rehearse_llm.py` for the no-key, no-game synthetic
