@@ -45,6 +45,7 @@ from .collector import (
 )
 from .driving_model_replay import build_driving_model_replay
 from .events import process_telemetry_events
+from .runtime_clock import monotonic_now
 from .sdk_probe import SdkProbeUnavailable, WindowsPyirsdkTransport
 from .telemetry import Presence, SourceKind, TelemetryField, TelemetrySample
 
@@ -985,7 +986,7 @@ def _run_core(
     poll_seconds: float,
     stale_after_s: float,
     max_reads: int | None = None,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] = monotonic_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     path = _validate_capture_path(capture_path)
@@ -1060,7 +1061,7 @@ def _run_core_handle(
     duration_s: float,
     poll_seconds: float,
     stale_after_s: float,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] = monotonic_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     """Production-only preflight over one supervisor-owned binary handle."""
@@ -1134,7 +1135,7 @@ def run_live_preflight_transport(
     poll_seconds: float = 0.01,
     stale_after_s: float = 0.5,
     max_reads: int | None = None,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] = monotonic_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> dict[str, object]:
     """Exercise an injected fixture, always as ``SYNTHETIC_TEST_ONLY``."""

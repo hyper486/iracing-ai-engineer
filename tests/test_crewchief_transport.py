@@ -75,7 +75,7 @@ def test_startup_first_frame_and_session_cache_are_the_same_packet(monkeypatch) 
     calls = []
     responses = iter([_line(_packet()), _line(_packet(tick=101, update=8, mode="replay"))])
     clock = [10.0]
-    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module, "monotonic_now", lambda: clock[0])
 
     def exchange(timeout: float) -> bytes:
         calls.append(timeout)
@@ -416,7 +416,7 @@ def test_metadata_cache_reuses_exact_content_but_not_frame_or_update(monkeypatch
     ]
     calls = _metadata_call_counts(monkeypatch)
     clock = [10.0]
-    monkeypatch.setattr(module.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(module, "monotonic_now", lambda: clock[0])
     transport = _transport(*packets)
     transport.startup(0)
     schema = transport.descriptors()

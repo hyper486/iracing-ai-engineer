@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from .collector import CollectorConsistencyError, validate_variable_descriptors
+from .runtime_clock import monotonic_now
 from .sdk_probe import (
     SDK_TYPE_SIZES,
     SUPPORTED_PYIRSDK_VERSION,
@@ -446,7 +447,7 @@ class WindowsCrewChiefTransport:
                 if self._reader is None:
                     self._reader = _ReaderProcess(self._reader_path)
                 line = self._reader.exchange(timeout_s)
-            captured_at = time.monotonic()
+            captured_at = monotonic_now()
             return _decode_snapshot(
                 line, captured_monotonic_s=captured_at, _cache=self._metadata_cache,
             )
@@ -470,14 +471,14 @@ class WindowsCrewChiefTransport:
             raise ValueError("timeout_s must be finite and non-negative")
         if self._startup_snapshot is not None:
             raise _invalid("CREWCHIEF_READER_ALREADY_STARTED")
-        deadline = time.monotonic() + timeout_s
+        deadline = monotonic_now() + timeout_s
         first_attempt = True
         while True:
-            if not first_attempt and time.monotonic() >= deadline:
+            if not first_attempt and monotonic_now() >= deadline:
                 self.close()
                 raise SdkProbeUnavailable("CREWCHIEF_SDK_CONNECTION_TIMEOUT")
             first_attempt = False
-            remaining = max(0.0, deadline - time.monotonic())
+            remaining = max(0.0, deadline - monotonic_now())
             try:
                 # Zero means one bounded attempt, not a 50 ms cold-start budget.
                 request_timeout = READ_TIMEOUT_S if timeout_s == 0 else min(
@@ -491,10 +492,10 @@ class WindowsCrewChiefTransport:
                 self.close()
                 raise
             except SdkProbeUnavailable:
-                if time.monotonic() >= deadline:
+                if monotonic_now() >= deadline:
                     self.close()
                     raise SdkProbeUnavailable("CREWCHIEF_SDK_CONNECTION_TIMEOUT") from None
-                time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+                time.sleep(min(0.05, max(0.0, deadline - monotonic_now())))
                 continue
             self._startup_snapshot = self._latest = snapshot
             self._initial_pending = self._connected = True

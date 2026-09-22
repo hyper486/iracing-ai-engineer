@@ -10,7 +10,7 @@ from urllib import error as urlerror
 import irsdk
 import pytest
 
-from iracing_ai_engineer import cli
+from iracing_ai_engineer import cli, sdk_probe
 from iracing_ai_engineer.sdk_probe import (
     DRIVING_CONTROL_FIELDS,
     ENVIRONMENT_FIELDS,
@@ -853,6 +853,204 @@ def test_frozen_read_always_unfreezes_when_copy_raises():
     assert client.unfreeze_calls == 1
 
 
+def _frozen_read_transport(monkeypatch, updates, *, rows=None, completed_at=None):
+    """Synthetic read attempts only; never open an SDK map or simulator."""
+
+    clock = [0.0]
+    monkeypatch.setattr(sdk_probe, "monotonic_now", lambda: clock[0])
+
+    class Client:
+        var_headers_names = ("Speed", "FuelLevel")
+
+        def __init__(self):
+            self.updates = iter(value for pair in updates for value in pair)
+            self.freeze_calls = 0
+            self.unfreeze_calls = 0
+            self.schema_calls = 0
+
+        @property
+        def session_info_update(self):
+            return next(self.updates)
+
+        def __getitem__(self, name):
+            values = rows[self.freeze_calls - 1] if rows is not None else {
+                "Speed": 10.0 + self.freeze_calls,
+                "FuelLevel": 40.0,
+            }
+            value = values[name]
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        def unfreeze_var_buffer_latest(self):
+            self.unfreeze_calls += 1
+
+    client = Client()
+    transport = object.__new__(WindowsPyirsdkTransport)
+    transport._client = client
+
+    def freeze():
+        index = client.freeze_calls
+        client.freeze_calls += 1
+        clock[0] = completed_at[index] if completed_at is not None else 0.01 * (index + 1)
+        return object(), 100 + index
+
+    def schema():
+        client.schema_calls += 1
+
+    transport._freeze_stable_latest = freeze
+    transport._assert_schema_current = schema
+    return transport, client, clock
+
+
+def test_frozen_read_retries_increasing_metadata_and_discards_failed_attempt(monkeypatch):
+    transport, client, _ = _frozen_read_transport(
+        monkeypatch, [(7, 8), (8, 8)],
+        rows=[
+            {"Speed": 11.0, "FuelLevel": KeyError("synthetic unreadable field")},
+            {"Speed": 22.0, "FuelLevel": 41.0},
+        ],
+    )
+
+    result = transport.read_frozen(("Speed", "FuelLevel"))
+
+    assert client.freeze_calls == client.unfreeze_calls == 2
+    assert client.schema_calls == 4
+    assert result.buffer_tick == 101
+    assert result.session_info_update == 8
+    assert result.values == {"Speed": 22.0, "FuelLevel": 41.0}
+    assert result.read_errors == ()
+    assert result.captured_monotonic_s == 0.02
+
+
+def test_frozen_read_can_succeed_on_last_bounded_attempt(monkeypatch):
+    transport, client, _ = _frozen_read_transport(monkeypatch, [(7, 8), (8, 9), (9, 9)])
+
+    result = transport.read_frozen(("Speed",))
+
+    assert result.buffer_tick == 102 and result.session_info_update == 9
+    assert result.values == {"Speed": 13.0}
+    assert client.freeze_calls == client.unfreeze_calls == sdk_probe.SDK_FROZEN_READ_ATTEMPTS
+
+
+def test_frozen_read_continuous_metadata_changes_exhaust_attempts(monkeypatch):
+    transport, client, _ = _frozen_read_transport(monkeypatch, [(7, 8), (8, 9), (9, 10)])
+
+    with pytest.raises(SdkProbeConsistencyError, match="bounded retry exhausted"):
+        transport.read_frozen(("Speed",))
+
+    assert client.freeze_calls == client.unfreeze_calls == sdk_probe.SDK_FROZEN_READ_ATTEMPTS
+    assert client.schema_calls == 2 * sdk_probe.SDK_FROZEN_READ_ATTEMPTS
+
+
+@pytest.mark.parametrize("over_budget", [False, True])
+def test_frozen_read_stops_before_new_attempt_at_retry_deadline(monkeypatch, over_budget):
+    budget = sdk_probe.SDK_SESSION_INFO_RETRY_BUDGET_S
+    exhausted = math.nextafter(budget, math.inf) if over_budget else budget
+    transport, client, _ = _frozen_read_transport(
+        monkeypatch, [(7, 8), (8, 8)], completed_at=[exhausted],
+    )
+
+    with pytest.raises(SdkProbeConsistencyError, match="bounded retry exhausted"):
+        transport.read_frozen(("Speed",))
+
+    assert client.freeze_calls == client.unfreeze_calls == 1
+
+
+@pytest.mark.parametrize("at_boundary", [False, True])
+def test_frozen_read_checks_retry_completion_budget_boundary(monkeypatch, at_boundary):
+    budget = sdk_probe.SDK_SESSION_INFO_RETRY_BUDGET_S
+    completed = budget if at_boundary else math.nextafter(budget, 0.0)
+    transport, client, _ = _frozen_read_transport(
+        monkeypatch, [(7, 8), (8, 8)], completed_at=[0.01, completed],
+    )
+
+    if at_boundary:
+        with pytest.raises(SdkProbeConsistencyError, match="bounded retry exhausted"):
+            transport.read_frozen(("Speed",))
+    else:
+        assert transport.read_frozen(("Speed",)).captured_monotonic_s == completed
+    assert client.freeze_calls == client.unfreeze_calls == 2
+
+
+def test_frozen_read_stable_first_attempt_keeps_original_wait_semantics(monkeypatch):
+    transport, client, _ = _frozen_read_transport(
+        monkeypatch, [(7, 7)], completed_at=[sdk_probe.SDK_SESSION_INFO_RETRY_BUDGET_S + 1.0],
+    )
+
+    result = transport.read_frozen(("Speed",))
+
+    assert result.session_info_update == 7
+    assert client.freeze_calls == client.unfreeze_calls == 1
+
+
+@pytest.mark.parametrize(
+    "updates,freezes,unfreezes",
+    [
+        ([(8, 7)], 1, 1),
+        ([(7, 8), (7, 7)], 1, 2),
+        ([(7, 8), (8, 9), (8, 8)], 2, 3),
+    ],
+)
+def test_frozen_read_rejects_counter_regression_within_or_between_attempts(
+    monkeypatch, updates, freezes, unfreezes,
+):
+    transport, client, _ = _frozen_read_transport(monkeypatch, updates)
+
+    with pytest.raises(SdkProbeConsistencyError, match="counter regressed"):
+        transport.read_frozen(("Speed",))
+
+    assert client.freeze_calls == freezes
+    assert client.unfreeze_calls == unfreezes
+
+
+@pytest.mark.parametrize("invalid", [True, 7.0, -1, None])
+@pytest.mark.parametrize("before", [False, True])
+def test_frozen_read_rejects_invalid_counter_without_retry(monkeypatch, invalid, before):
+    updates = [(invalid, 7)] if before else [(7, invalid)]
+    transport, client, _ = _frozen_read_transport(monkeypatch, updates)
+
+    with pytest.raises(SdkProbeConsistencyError, match="invalid SessionInfo update counter"):
+        transport.read_frozen(("Speed",))
+
+    assert client.freeze_calls == (0 if before else 1)
+    assert client.unfreeze_calls == 1
+
+
+@pytest.mark.parametrize("where", ["freeze", "schema_before", "schema_after"])
+@pytest.mark.parametrize("after_update", [False, True])
+def test_frozen_read_does_not_retry_buffer_or_schema_failures(monkeypatch, where, after_update):
+    updates = [(7, 8), (8, 8)] if after_update else [(7, 7)]
+    transport, client, _ = _frozen_read_transport(monkeypatch, updates)
+    original_freeze = transport._freeze_stable_latest
+    original_schema = transport._assert_schema_current
+    target_attempt = 2 if after_update else 1
+    error = SdkProbeConsistencyError(
+        "stable SDK buffer" if where == "freeze" else "SDK schema changed"
+    )
+
+    def freeze():
+        if where == "freeze" and client.freeze_calls + 1 == target_attempt:
+            client.freeze_calls += 1
+            raise error
+        return original_freeze()
+
+    def schema():
+        original_schema()
+        phase = 1 if where == "schema_before" else 0
+        if client.freeze_calls == target_attempt and client.schema_calls % 2 == phase:
+            raise error
+
+    transport._freeze_stable_latest = freeze
+    if where != "freeze":
+        transport._assert_schema_current = schema
+    with pytest.raises(SdkProbeConsistencyError) as raised:
+        transport.read_frozen(("Speed",))
+
+    assert raised.value is error
+    assert client.freeze_calls == client.unfreeze_calls == target_attempt
+
+
 def test_stable_copy_rejects_writer_update_during_every_copy():
     class UpdatingCandidate:
         def __init__(self) -> None:
@@ -898,7 +1096,7 @@ def test_startup_retries_attach_until_shared_memory_is_ready(monkeypatch):
 
     clock = [0.0]
     monkeypatch.setattr(
-        "iracing_ai_engineer.sdk_probe.time.monotonic", lambda: clock[0]
+        "iracing_ai_engineer.sdk_probe.monotonic_now", lambda: clock[0]
     )
     monkeypatch.setattr(
         "iracing_ai_engineer.sdk_probe.time.sleep",

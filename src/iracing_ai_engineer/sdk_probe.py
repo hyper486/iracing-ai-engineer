@@ -18,6 +18,7 @@ from urllib import error as urlerror
 from urllib import request as urlrequest
 
 from .contracts import SDK_PROBE_CONTRACT_VERSION
+from .runtime_clock import monotonic_now
 
 SDK_TYPE_NAMES = {
     0: "char",
@@ -35,6 +36,8 @@ SDK_BUFFER_HEADER_SIZE = 16
 SDK_HEADER_REGION_SIZE = SDK_FIXED_HEADER_SIZE + SDK_MAX_BUFFERS * SDK_BUFFER_HEADER_SIZE
 SDK_VARIABLE_HEADER_SIZE = 144
 SDK_SESSION_INFO_SNAPSHOT_ATTEMPTS = 3
+SDK_FROZEN_READ_ATTEMPTS = 3
+SDK_SESSION_INFO_RETRY_BUDGET_S = 0.1
 
 REPLAY_FIELDS = (
     "IsReplayPlaying",
@@ -1127,12 +1130,12 @@ class WindowsPyirsdkTransport:
     def startup(self, timeout_s: float) -> ConnectionMeta:
         if not math.isfinite(timeout_s) or timeout_s < 0:
             raise ValueError("timeout_s must be finite and non-negative")
-        deadline = time.monotonic() + timeout_s
+        deadline = monotonic_now() + timeout_s
         first_attempt = True
         last_layout_error: SdkProbeConsistencyError | None = None
-        while first_attempt or time.monotonic() < deadline:
+        while first_attempt or monotonic_now() < deadline:
             first_attempt = False
-            remaining = max(0.0, deadline - time.monotonic())
+            remaining = max(0.0, deadline - monotonic_now())
             request_timeout = max(0.05, min(0.5, remaining or 0.05))
             try:
                 with urlrequest.urlopen(
@@ -1169,11 +1172,11 @@ class WindowsPyirsdkTransport:
                 except SdkProbeUnavailable:
                     if candidate is not None:
                         self._close_client(candidate)
-            if time.monotonic() >= deadline:
+            if monotonic_now() >= deadline:
                 if last_layout_error is not None:
                     raise last_layout_error
                 raise SdkProbeUnavailable("iRacing simulator SDK connection timed out")
-            time.sleep(min(0.25, max(0.0, deadline - time.monotonic())))
+            time.sleep(min(0.25, max(0.0, deadline - monotonic_now())))
         if last_layout_error is not None:
             raise last_layout_error
         raise SdkProbeUnavailable("iRacing simulator SDK connection timed out")
@@ -1372,35 +1375,59 @@ class WindowsPyirsdkTransport:
         raise SdkProbeConsistencyError("could not copy a stable SDK buffer")
 
     def read_frozen(self, fields: tuple[str, ...]) -> RawSdkFrame:
-        try:
-            session_info_update_before = self._client.session_info_update
-            _, buffer_tick = self._freeze_stable_latest()
-            self._assert_schema_current()
-            values: dict[str, Any] = {}
-            errors: list[str] = []
-            available = set(self._client.var_headers_names)
-            for field in fields:
-                if field not in available:
+        # Metadata updates are asynchronous. Discard a whole attempt on a
+        # strictly increasing update counter, never combine its values/errors
+        # with a later frame. The deadline bounds retries, not an otherwise
+        # successful first SDK wait; synchronous SDK waits are not preemptible.
+        deadline = monotonic_now() + SDK_SESSION_INFO_RETRY_BUDGET_S
+        previous_update: int | None = None
+        for attempt in range(SDK_FROZEN_READ_ATTEMPTS):
+            if attempt and monotonic_now() >= deadline:
+                break
+            try:
+                session_info_update_before = self._client.session_info_update
+                if type(session_info_update_before) is not int or session_info_update_before < 0:
+                    raise SdkProbeConsistencyError("invalid SessionInfo update counter")
+                if previous_update is not None and session_info_update_before < previous_update:
+                    raise SdkProbeConsistencyError("SessionInfo update counter regressed")
+                _, buffer_tick = self._freeze_stable_latest()
+                self._assert_schema_current()
+                values: dict[str, Any] = {}
+                errors: list[str] = []
+                available = set(self._client.var_headers_names)
+                for field in fields:
+                    if field not in available:
+                        continue
+                    try:
+                        values[field] = self._client[field]
+                    except (
+                        IndexError, KeyError, RuntimeError, struct.error, TypeError, ValueError,
+                    ):
+                        errors.append(field)
+                self._assert_schema_current()
+                session_info_update_after = self._client.session_info_update
+                if type(session_info_update_after) is not int or session_info_update_after < 0:
+                    raise SdkProbeConsistencyError("invalid SessionInfo update counter")
+                if session_info_update_after < session_info_update_before:
+                    raise SdkProbeConsistencyError("SessionInfo update counter regressed")
+                if session_info_update_before != session_info_update_after:
+                    previous_update = session_info_update_after
                     continue
-                try:
-                    values[field] = self._client[field]
-                except (IndexError, KeyError, RuntimeError, struct.error, TypeError, ValueError):
-                    errors.append(field)
-            self._assert_schema_current()
-            session_info_update_after = self._client.session_info_update
-            if session_info_update_before != session_info_update_after:
-                raise SdkProbeConsistencyError(
-                    "SessionInfo changed during frozen telemetry read"
+                captured_at = monotonic_now()
+                if attempt and captured_at >= deadline:
+                    break
+                return RawSdkFrame(
+                    buffer_tick=buffer_tick,
+                    session_info_update=session_info_update_after,
+                    values=values,
+                    read_errors=tuple(errors),
+                    captured_monotonic_s=captured_at,
                 )
-            return RawSdkFrame(
-                buffer_tick=buffer_tick,
-                session_info_update=session_info_update_after,
-                values=values,
-                read_errors=tuple(errors),
-                captured_monotonic_s=time.monotonic(),
-            )
-        finally:
-            self._client.unfreeze_var_buffer_latest()
+            finally:
+                self._client.unfreeze_var_buffer_latest()
+        raise SdkProbeConsistencyError(
+            "SessionInfo changed during frozen telemetry read; bounded retry exhausted"
+        )
 
     @property
     def connected(self) -> bool:
@@ -1443,9 +1470,9 @@ def probe_live_sdk(
         fields = tuple(item.name for item in descriptors if item.name in TARGET_FIELDS)
         frames: list[RawSdkFrame] = []
         seen_ticks: set[int] = set()
-        sample_started = time.monotonic()
+        sample_started = monotonic_now()
         deadline = sample_started + sample_seconds
-        while time.monotonic() < deadline and transport.connected:
+        while monotonic_now() < deadline and transport.connected:
             frame = transport.read_frozen(fields)
             frame_sim_mode, frame_sim_mode_update = transport.sim_mode()
             frame = _bind_frame_sim_mode(
@@ -1454,10 +1481,10 @@ def probe_live_sdk(
             if frame.buffer_tick not in seen_ticks:
                 frames.append(frame)
                 seen_ticks.add(frame.buffer_tick)
-            remaining = deadline - time.monotonic()
+            remaining = deadline - monotonic_now()
             if remaining > 0:
                 time.sleep(min(poll_seconds, remaining))
-        probe_end = time.monotonic()
+        probe_end = monotonic_now()
         ended_connected = transport.connected
         elapsed = probe_end - sample_started
         return build_probe_report(

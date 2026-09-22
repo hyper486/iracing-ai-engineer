@@ -19,13 +19,25 @@ and can produce evidence-backed corner coaching and a post-session report.
 | Tire reasoning | Implemented as a performance belief | The project does not claim direct physical tire wear without a supported source. |
 | Corner diagnosis | Implemented for repeated comparable evidence | Curb/risk claims remain blocked without trusted labels. |
 | Deterministic reports | Implemented | JSON and script-free HTML outputs preserve provenance and limitations. |
-| Privacy-safe live state bridge | Implemented; live field check pending | Tick-level normalization feeds bounded JSONL snapshots for future overlay/speech consumers without raw telemetry or control. |
+| Privacy-safe live state bridge | Implemented; spectator-only field check | Tick-level normalization feeds bounded JSONL snapshots; spectator guard stayed WAIT_CAR. In-car validation remains pending. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
 ## Review corrections
+
+The September 22 clock/retry follow-up unifies capture, freshness observations
+and deadlines on a high-resolution monotonic clock. The pyirsdk reader retries
+normal increasing SessionInfo update races with at most three whole-frame
+attempts and a 100 ms retry budget; failed attempts are discarded and released.
+Persistent churn, counter regression, schema changes and unstable buffers still
+fail closed. A new complete spectator capture had no equal/decreasing capture
+timestamps and no capture-clock regression rejections. Its one quality rejection
+was a measured 751 ms gap, which remains rejected correctly. The default backend,
+advisor-only restrictions and live product acceptance are unchanged.
+Full regression: **1,196 passed, 43 skipped**. The skips remain explicit
+missing-data, private-deployment or platform-only cases; they are not live passes.
 
 The September 22 follow-up reduces repeated schema validation, unchanged
 SessionInfo parsing and collector JSON encoding, while preserving per-frame
@@ -35,8 +47,8 @@ live throughput. Full regression: 1,154 passed, 43 skipped. A later real
 spectator comparison confirmed sampled field parity but insufficient sustained
 coverage, SessionInfo-race interruptions and a spectator player-class identity
 rejection. Fifteen normalized false-stale rejections were also traced to the
-Windows runtime's coarse monotonic clock; high-resolution clock unification
-remains open. Neither the default backend nor deployment is changed.
+Windows runtime's coarse monotonic clock; the later clock/retry follow-up above
+addresses that cause. Neither the default backend nor deployment is changed.
 
 The September 21 acquisition prototype reuses Crew Chief's low-level SDK source
 without its UI, speech, MQTT or strategy. It adds an opt-in `collect-live`
@@ -62,7 +74,19 @@ control, promote unsupported driving advice, or make the product live-accepted.
 
 ## Last recorded live boundary
 
-The latest tests used a real online spectator session, with four complete
+The latest clock/retry retest completed one 60-second pyirsdk spectator capture:
+3,460 frames, 335 fields, 57.66 Hz and 96.11% tick coverage. Strict replay admission
+passed; 3,459 frames normalized as DEGRADED and one as REJECTED for a genuine
+751 ms capture gap. There were no equal/decreasing capture timestamps, read
+errors, schema changes or session resets. Four SessionInfo records were
+captured without interruption; retry counts were not instrumented, so this does
+not prove a live metadata race was exercised. The Crew Chief repeat stopped
+after 834 frames when the SDK became unavailable; the simulator process was
+then absent. That incomplete prefix was correctly NOT_ADMITTED. The subsequent
+monitor check could not connect and produced no completion receipt. Nothing was
+restarted and all raw evidence stays private.
+
+The preceding comparison used a real online spectator session, with four complete
 60-second collector files plus one interrupted prefix. Only three complete
 files passed strict replay admission: the remaining file failed player-class
 identity consistency despite having a completion receipt. Sampled cross-backend
@@ -99,8 +123,9 @@ A separate `monitor-live` command now normalizes every distinct tick while
 emitting only a bounded, privacy-safe state snapshot at a default 2 Hz. It is a
 state bridge rather than a recommendation engine: `READY` means the bridge is
 usable, not that strategy or driving evidence has passed. Its deterministic,
-privacy, stale, cadence and CLI behavior are covered offline; a field check of
-the new command remains pending the next simulator session.
+privacy, stale, cadence and CLI behavior are covered offline. A prior spectator
+field check stayed `WAIT_CAR`; the latest post-clock-change attempt found the
+SDK unavailable. In-car and post-change live-monitor verification remain pending.
 
 The next live-validation prerequisite is human-driven evidence: configure the
 physical driving inputs, enter the car, then record a sufficiently long clean

@@ -23,6 +23,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import Any, Protocol, Self
 
+from .runtime_clock import monotonic_now
 from .sdk_probe import (
     SDK_TYPE_NAMES,
     SDK_TYPE_SIZES,
@@ -1317,7 +1318,7 @@ def _collect_transport_to_writer(
     stale_after_s: float = DEFAULT_STALE_AFTER_S,
     include_driver_info: bool = False,
     max_reads: int | None = None,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] = monotonic_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> CollectorReceipt:
     """Collect from a read-only transport into one prepared writer context."""
@@ -1424,7 +1425,7 @@ def collect_transport_to_jsonl(
     include_driver_info: bool = False,
     fsync_each_record: bool = True,
     max_reads: int | None = None,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] = monotonic_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> CollectorReceipt:
     """Collect from a read-only transport into one exclusively created path."""
@@ -1463,7 +1464,7 @@ def collect_transport_to_jsonl_handle(
     fsync_each_record: bool = True,
     max_output_bytes: int = R8_MAX_CAPTURE_BYTES,
     max_reads: int | None = None,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] = monotonic_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> CollectorReceipt:
     """Collect into one caller-owned CreateNew handle and leave it open."""

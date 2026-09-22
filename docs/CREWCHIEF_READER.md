@@ -227,13 +227,64 @@ confirmed false rejection from coarse clock sampling, not JSON microsecond
 rounding or actual source freezing. The monitor's three warnings were not
 individually retained/diagnosed and are not independently proven to share it.
 
-Remaining work is to reduce Crew Chief full-pipeline latency, make normal
-SessionInfo update races recoverable within a bounded retry without accepting
+At that milestone, remaining work was to reduce Crew Chief full-pipeline latency,
+make normal SessionInfo update races recoverable within a bounded retry without accepting
 torn snapshots, unify capture and freshness logic on a high-resolution clock
 domain, and distinguish spectator identity changes from corrupted in-car
-identity. These are open issues, not fixed or waived by this milestone.
+identity. That comparison did not fix or waive these issues; the clock and
+SessionInfo retry follow-up is described below.
 The default remains pyirsdk. No simulator, camera or vehicle commands were sent;
 all raw captures, diagnostics and incomplete files remain private.
+
+### High-resolution clock and bounded metadata retry follow-up
+
+Live captures from both transports, monitor observations, probe sampling and
+collector/preflight deadlines now share `runtime_clock.monotonic_now()`, backed
+by `time.perf_counter()`. On the tested Windows runtime this is monotonic QPC,
+not the coarse GetTickCount64 clock. No synthetic timestamp increments are
+inserted: actual nonpositive capture deltas and frozen source ticks still fail
+the existing freshness checks. Injected offline clocks remain supported.
+The clock origin is unspecified; do not combine timestamps across processes,
+boots, old recordings or transports using different clock implementations.
+Previously recorded evidence is not rewritten or retroactively admitted.
+
+The pyirsdk transport retries the entire frozen read only when the SessionInfo
+update counter increases during that attempt. It releases each frozen buffer
+and discards all values/read errors from the unsuccessful attempt. There are
+at most three attempts within a 100 ms retry budget; no new retry starts at or
+after the deadline, and an overdue retry result is rejected. This budget does
+not preempt a synchronous SDK wait or cap an otherwise successful first read.
+Invalid/regressing counters, changed schemas and unstable-buffer failures are
+still terminal. Persistent metadata churn remains a consistency error, not a
+partially accepted frame or a completed capture.
+
+A subsequent real spectator retest completed a fresh 60-second pyirsdk file
+with 3,460 frames across 59.988459 seconds (57.66 Hz, 96.11% tick coverage),
+335 fields and four SessionInfo records. Strict replay admission passed.
+There were zero equal/decreasing capture timestamps and zero
+`CAPTURE_TIME_REGRESSION` rejections. Of 3,460 normalized samples, 3,459 were
+DEGRADED and one was REJECTED: that sample followed an actual 751,284 microsecond
+capture gap (45 SDK ticks). The real-stale guard was preserved, not waived.
+There were 140 accounted missing ticks and no read errors, schema changes or
+session resets. No retry counter was instrumented; successful metadata updates
+do not by themselves prove that a real retry race occurred. Synthetic tests
+exercise transient recovery, persistent churn and both budget boundaries.
+
+The planned Crew Chief repeat ended with `SDK_UNAVAILABLE` after an 834-frame,
+21.793126-second prefix. The simulator process was subsequently absent; no
+restart was attempted. The prefix has no completion receipt and strict admission
+rejects it. Its persisted frame timestamps had no equal/decreasing pairs, but that diagnostic
+does not admit the incomplete file or establish sustained throughput. A later
+15-second monitor attempt failed at connection and produced no terminal receipt.
+Thus post-change live-monitor verification and a complete second-backend repeat
+remain pending. All observed frames were out of car; no driving, fuel, pit or
+strategy acceptance is claimed. Full-pipeline Crew Chief latency and spectator
+player-class identity semantics are still open issues.
+
+Follow-up regression: **1,196 passed, 43 skipped**, with lint, whitespace and
+history-inclusive public-safety checks passing. This adds 42 offline cases
+covering shared clock behavior and bounded retry boundaries; unchanged skips
+require absent datasets, private deployment artifacts or another platform.
 
 This is an optional acquisition prototype, not a replacement proven superior
 to the default reader. Sustained acquisition quality and recovery behavior

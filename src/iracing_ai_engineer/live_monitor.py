@@ -21,6 +21,7 @@ from typing import Any
 
 from .collector import ReadOnlySdkTransport, validate_variable_descriptors
 from .events import EventKind, TelemetryEvent, TelemetryEventPipeline, TelemetryEventReceipt
+from .runtime_clock import monotonic_now
 from .sdk_probe import (
     OPPONENT_ARRAY_FIELDS,
     TARGET_FIELDS,
@@ -626,7 +627,7 @@ def monitor_live_transport(
     snapshot_seconds: float = 0.5,
     stale_after_s: float = 0.5,
     max_reads: int | None = None,
-    monotonic: Callable[[], float] = time.monotonic,
+    monotonic: Callable[[], float] = monotonic_now,
     sleep: Callable[[float], None] = time.sleep,
 ) -> LiveMonitorReceipt:
     """Run a finite read-only monitor session and stream bounded snapshots."""
