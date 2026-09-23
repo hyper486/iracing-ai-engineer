@@ -66,8 +66,9 @@ def test_native_voice_delegates_without_recursive_snapshot_or_key_access(
     finished = threading.Event()
 
     class Voice:
-        def __init__(self, source, submit, store, *, clock):
+        def __init__(self, source, submit, store, *, clock, spotter_source):
             self.source = source
+            self.spotter_source = spotter_source
             self.submit = submit
 
         def start(self):
@@ -75,6 +76,8 @@ def test_native_voice_delegates_without_recursive_snapshot_or_key_access(
 
         def snapshot(self):
             assert "voice" not in self.source()
+            assert "engineer" not in self.spotter_source()
+            assert "fuel" not in self.spotter_source()
             return {"status": "SYNTHETIC_VOICE"}
 
         def close(self):

@@ -106,6 +106,10 @@ class Audio:
 
     def play(self, wav, stop, **kwargs):
         self.plays.append((wav, stop, kwargs))
+        if stop.is_set() or not kwargs.get("start_guard", lambda: True)():
+            stop.set()
+            return
+        kwargs.get("on_started", lambda: None)()
         if wav == b"SYNTHETIC_SPEECH" and self.block_speech:
             self.speaking.set()
             stop.wait(2)
@@ -151,6 +155,145 @@ def test_start_only_probes_devices_and_never_opens_audio(rig):
     voice, audio, speech, _, _, submitted = rig
     assert voice.snapshot()["status"] == "READY"
     assert audio.records == audio.plays == speech.recognitions == submitted == []
+
+
+def proximity(code=1, sequence=1):
+    from iracing_ai_engineer.spotter import SPOTTER_CONTRACT_VERSION
+
+    return {
+        "lifecycle": "RUNNING", "connection": "CONNECTED", "source_mode": "LIVE",
+        "generation": 1,
+        "spotter": {"contract_version": SPOTTER_CONTRACT_VERSION,
+                    "status": "READY", "epoch": 0, "updated_age_s": 0.01,
+                    "car_left_right": code, "advisor_only": True,
+                    "candidate": None if code == 1 else {
+                        "sequence": sequence, "epoch": 0, "state": code,
+                        "kind": "CAR_LEFT", "expires_in_s": 0.75,
+                    }},
+    }
+
+
+@pytest.mark.parametrize("phase", ["recording", "recognition", "model", "synthesis", "playback"])
+def test_proximity_is_not_blocked_by_any_phase_of_the_question_pipeline(phase):
+    audio, speech, store, current, near = Audio(), Speech(), Store(True), state(), proximity()
+    store.value["spotter_enabled"] = True
+    blocked, proceed = threading.Event(), threading.Event()
+    submitted = []
+    cache_speech = Speech()
+    cache_speech.synthesize = lambda *_args, **_kwargs: cue_wave(900)
+
+    if phase == "recognition":
+        def recognize(*_args, **_kwargs):
+            blocked.set()
+            assert proceed.wait(3)
+            return {"text": "当前燃油还能跑几圈", "confidence": 0.9}
+
+        speech.recognize = recognize
+    elif phase == "synthesis":
+        def synthesize(*_args, **_kwargs):
+            blocked.set()
+            assert proceed.wait(3)
+            return b"SYNTHETIC_SPEECH"
+
+        speech.synthesize = synthesize
+    elif phase == "playback":
+        audio.block_speech = True
+
+    def submit(text, scope):
+        submitted.append((text, scope))
+        if phase == "model":
+            blocked.set()
+        else:
+            current["engineer"]["answer"] = answer()
+        return 202, {}
+
+    voice = VoiceService(lambda: copy.deepcopy(current), submit, store,
+                         audio=audio, speech=speech, input_factory=Input,
+                         spotter_source=lambda: copy.deepcopy(near), spotter_speech=cache_speech)
+    try:
+        voice.start()
+        wait_for(lambda: voice.snapshot()["spotter"]["status"] == "READY")
+        voice.press()
+        assert audio.entered.wait(1)
+        if phase != "recording":
+            voice.release()
+            assert (audio.speaking if phase == "playback" else blocked).wait(1)
+        near.update(proximity(2))
+        wait_for(lambda: voice.snapshot()["spotter"]["counts"].get("PLAYBACK_COMPLETED") == 1)
+        if phase == "recording":
+            wait_for(lambda: "取消" in voice.snapshot()["notice"])
+            voice.release()
+            assert speech.recognitions == submitted == []
+        if phase == "playback":
+            wait_for(lambda: "取消" in voice.snapshot()["notice"])
+        assert voice.snapshot()["spotter"]["heard"] is False
+    finally:
+        voice.stop()
+        proceed.set()
+        voice.close()
+
+
+def test_spotter_output_survives_disabled_ptt_and_failed_local_recognizer_probe():
+    audio, speech, store, near = Audio(), Speech(), Store(False), proximity()
+    store.value["spotter_enabled"] = True
+    cache_speech = Speech()
+    cache_speech.synthesize = lambda *_args, **_kwargs: cue_wave(900)
+
+    def unavailable():
+        raise ValueError("SYNTHETIC STT MODEL MISSING")
+
+    speech.probe = unavailable
+    voice = VoiceService(state, lambda *_: (409, {}), store, audio=audio, speech=speech,
+                         input_factory=Input, spotter_source=lambda: copy.deepcopy(near),
+                         spotter_speech=cache_speech)
+    try:
+        voice.start()
+        wait_for(lambda: voice.snapshot()["status"] == "ERROR")
+        wait_for(lambda: voice.snapshot()["spotter"]["status"] == "READY")
+        near.update(proximity(2))
+        wait_for(lambda: voice.snapshot()["spotter"]["counts"].get("PLAYBACK_COMPLETED") == 1)
+        assert audio.records == speech.recognitions == []
+        assert voice._input.starts == []
+    finally:
+        voice.close()
+
+
+def test_stop_during_pending_save_keeps_spotter_paused_until_a_new_apply():
+    audio, speech, store, near = Audio(), Speech(), Store(False), proximity()
+    cache_speech = Speech()
+    cache_speech.synthesize = lambda *_args, **_kwargs: cue_wave(900)
+    saving, finish_save = threading.Event(), threading.Event()
+    original_save = store.save_voice
+
+    def blocked_save(settings):
+        saving.set()
+        assert finish_save.wait(3)
+        original_save(settings)
+
+    voice = VoiceService(state, lambda *_: (409, {}), store, audio=audio, speech=speech,
+                         input_factory=Input, spotter_source=lambda: copy.deepcopy(near),
+                         spotter_speech=cache_speech)
+    try:
+        voice.start()
+        wait_for(lambda: voice.snapshot()["status"] == "OFF")
+        store.save_voice = blocked_save
+        settings = {**store.value, "spotter_enabled": True}
+        voice.configure(settings)
+        assert saving.wait(1)
+        voice.stop()
+        finish_save.set()
+        wait_for(lambda: not voice._pending_configurations)
+        assert voice.snapshot()["spotter"]["status"] == "PAUSED"
+        assert voice.snapshot()["spotter"]["cached_phrases"] == 0
+        assert audio.plays == []
+        store.save_voice = original_save
+        voice.configure(settings)
+        wait_for(lambda: voice.snapshot()["spotter"]["status"] == "READY")
+        near.update(proximity(2))
+        wait_for(lambda: voice.snapshot()["spotter"]["counts"].get("PLAYBACK_COMPLETED") == 1)
+    finally:
+        finish_save.set()
+        voice.close()
 
 
 def test_ptt_release_recognizes_locally_then_reads_grounded_answer(rig):

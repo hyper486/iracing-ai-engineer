@@ -75,7 +75,8 @@ class DesktopController:
         self._voice = None
         if voice_runtime:
             from .voice_service import VoiceService
-            self._voice = VoiceService(self._core_snapshot, self.submit, self._store, clock=clock)
+            self._voice = VoiceService(self._core_snapshot, self.submit, self._store, clock=clock,
+                                       spotter_source=self._spotter_snapshot)
 
     def _new_service(self, settings: DesktopSettings, key: str, path: Path | None, used: int):
         return self._factory(
@@ -179,6 +180,12 @@ class DesktopController:
         if self._voice is not None:
             value["voice"] = self._voice.snapshot()
         return value
+
+    def _spotter_snapshot(self) -> dict:
+        # Never enter EngineerService or copy its answers on the urgent path.
+        with self._lock:
+            lifecycle = self._lifecycle
+        return {**self._state.spotter_snapshot(), "lifecycle": lifecycle}
 
     def _voice_service(self):
         if self._voice is None or self._closing:

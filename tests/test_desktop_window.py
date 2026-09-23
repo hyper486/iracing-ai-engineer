@@ -55,7 +55,7 @@ def _snapshot() -> dict:
             "settings": {"enabled": False, "input_device": "default",
                          "output_device": "default", "volume": 0.7, "culture": "zh-CN",
                          "voice": "", "binding": {"kind": "keyboard", "key": "F9"},
-                         "auto_fuel": False},
+                         "auto_fuel": False, "spotter_enabled": False},
             "devices": {"inputs": [{"id": _MIC, "name": "Desktop microphone"}],
                         "outputs": [{"id": _HEADSET, "name": "VR headphones"}],
                         "recognizers": [{"culture": "zh-CN", "name": "中文识别"}],
@@ -87,6 +87,28 @@ def test_proximity_diagnostic_readiness_is_never_presented_as_working_audio():
     snapshot["telemetry"]["spotter"]["status"] = "STALE"
     view = DesktopPresenter().project(snapshot, now=10.0)
     assert "过期" in view.spotter
+
+
+@pytest.mark.parametrize("status,output,reason,expected", [
+    ("OFF", "UNTESTED", "DISABLED", "近车语音未启用"),
+    ("PREPARING", "UNTESTED", "PHRASE_CACHE", "正在预生成短语音"),
+    ("READY", "UNTESTED", "DETECTOR_READY", "设备尚未实际播放验证"),
+    ("READY", "STARTED_NOT_HEARING_CONFIRMED", "DETECTOR_READY", "未确认人耳听到"),
+    ("WAIT_DATA", "START_DEADLINE_MISSED", "NEED_FRESH_IN_CAR_DATA", "提示已丢弃"),
+    ("PAUSED", "UNTESTED", "ZERO_VOLUME", "音量为零"),
+    ("ERROR", "FAILED", "AUDIO_DEVICE_MISSING", "近车语音故障"),
+])
+def test_detector_and_audio_health_remain_separate_without_implying_hearing(
+    status, output, reason, expected,
+):
+    snapshot = _snapshot()
+    snapshot["telemetry"]["spotter"] = {"status": "READY"}
+    snapshot["voice"]["spotter"] = {
+        "status": status, "output_status": output, "reason": reason,
+    }
+    view = DesktopPresenter().project(snapshot, now=10.0)
+    assert "判定数据就绪" in view.spotter and expected in view.spotter
+    assert "音频尚未接入" not in view.spotter
 
 
 def test_voice_choices_keep_exact_ids_while_labels_are_unique_and_bounded() -> None:
@@ -391,7 +413,7 @@ def _native_voice_defaults_and_configuration(native_window) -> None:
     _, controller, window = native_window
     assert [window.notebook.tab(tab, "text") for tab in window.notebook.tabs()][-1] == "语音与 VR"
     assert not window.voice_enabled_var.get() and not window.voice_auto_fuel_var.get()
-    assert window._vars["voice_status"].get() == "语音已关闭"
+    assert window._vars["voice_status"].get() == "按住说话已关闭"
     assert window.voice_key_var.get() == "F9" and window.voice_volume_var.get() == 0.7
     assert controller.voice_calls == [] and controller.voice_configurations == []
     assert window.voice_test_button.instate(["disabled"])
@@ -417,6 +439,7 @@ def _native_voice_defaults_and_configuration(native_window) -> None:
         "enabled": True, "input_device": _MIC, "output_device": _HEADSET,
         "voice": "Synthetic Chinese voice", "culture": "zh-CN", "volume": 0.4,
         "binding": {"kind": "keyboard", "key": "F10"}, "auto_fuel": False,
+        "spotter_enabled": False,
     }]
     assert controller.voice_calls == []  # Applying never starts test audio or recording.
     controller.value["voice"]["settings"].update(controller.voice_configurations[-1])

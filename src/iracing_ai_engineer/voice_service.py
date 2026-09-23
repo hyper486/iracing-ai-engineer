@@ -17,7 +17,9 @@ import threading
 import wave
 from collections.abc import Callable, Mapping
 
+from .priority_audio import AudioPreempted, PriorityAudio
 from .runtime_clock import monotonic_now
+from .spotter_voice import SpotterVoice
 from .voice_settings import VoiceSettingsStore, default_voice_settings, validate_voice_settings
 
 
@@ -151,7 +153,8 @@ class VoiceService:
     """One bounded work queue; input/guard workers never run Tk operations."""
 
     def __init__(self, source: Callable[[], dict], submit: Callable, store,
-                 *, audio=None, speech=None, input_factory=None, clock=monotonic_now):
+                 *, audio=None, speech=None, input_factory=None, clock=monotonic_now,
+                 spotter_source=None, spotter_speech=None):
         if audio is None:
             from .voice_audio import AudioIO
             audio = AudioIO()
@@ -162,7 +165,14 @@ class VoiceService:
             from .voice_inputs import InputPoller
             input_factory = InputPoller
         self._source, self._submit, self._clock = source, submit, clock
-        self._audio, self._speech = audio, speech
+        self._audio, self._speech = PriorityAudio(audio, clock=clock), speech
+
+        def fallback_spotter_source():
+            value = source()
+            return {**_map(value.get("telemetry")), "lifecycle": value.get("lifecycle")}
+
+        self._spotter = SpotterVoice(spotter_source or fallback_spotter_source, self._audio,
+                                     speech=spotter_speech, clock=clock)
         self._store = store if isinstance(store, VoiceSettingsStore) else VoiceSettingsStore(store)
         self._lock = threading.RLock()
         self._close_lock = threading.Lock()
@@ -175,6 +185,7 @@ class VoiceService:
         self._release = threading.Event()
         self._epoch, self._held = 0, False
         self._pending_configurations = 0
+        self._spotter_paused = False
         self._binding_revision = 0
         self._binding_pending = None
         self._input_error_revision = 0
@@ -197,6 +208,7 @@ class VoiceService:
                 target=self._guard, name="vr-voice-guard", daemon=True,
             )
             self._jobs.put_nowait(("initialize", None))
+            self._spotter.start()
             self._worker.start()
             self._guard_worker.start()
 
@@ -209,6 +221,7 @@ class VoiceService:
                 "binding_active": self._binding_pending is not None,
             }
         value["binding_active"] |= self._input.snapshot().get("binding_active") is True
+        value["spotter"] = self._spotter.snapshot()
         return value
 
     def _put(self, action: str, payload=None):
@@ -236,6 +249,7 @@ class VoiceService:
     def _queue_configuration(self, value):
         """Caller holds the state lock; cancellation of inference happens outside."""
         self._invalidate()
+        self._spotter.suspend("CONFIGURING")
         self._binding_revision += 1
         self._binding_pending = None
         self._input.cancel_bind()
@@ -245,6 +259,7 @@ class VoiceService:
         except Exception:
             self._pending_configurations -= 1
             raise
+        self._spotter_paused = False
 
     def _cancel_speech(self):
         # LocalSpeech.cancel only signals its current inference. Reaping stays
@@ -359,6 +374,10 @@ class VoiceService:
 
     def stop(self):
         with self._lock:
+            # Linearize with _apply: an older queued/save-in-flight request
+            # must not undo the user's newer explicit stop.
+            self._spotter_paused = True
+            self._spotter.suspend()
             self._invalidate()
             if not self._shutdown.is_set() and self._status != "ERROR":
                 self._status = "READY" if self._settings["enabled"] else "OFF"
@@ -394,6 +413,10 @@ class VoiceService:
                 return
             error_revision = self._input_error_revision
             self._settings = copy.deepcopy(settings)
+            # Cache/rendering has its own worker. A missing STT model or broken
+            # microphone must not prevent output-only proximity operation.
+            if self._pending_configurations <= 1 and not self._spotter_paused:
+                self._spotter.configure(settings)
             if settings["enabled"]:
                 if self._poller_started:
                     self._input.set_binding(settings["binding"])
@@ -408,7 +431,7 @@ class VoiceService:
             if self._input_error_revision == error_revision:
                 self._set_status("READY" if settings["enabled"] else "OFF",
                                  "语音设置已应用。按住绑定按键，听到提示音后说话，松开后发送。"
-                                 if settings["enabled"] else "语音已关闭，麦克风不会打开。")
+                                 if settings["enabled"] else "按住说话已关闭，麦克风不会打开。")
 
     def _close_input(self):
         self._input.close()
@@ -578,9 +601,19 @@ class VoiceService:
                     self._listen(payload)
                 elif action == "test":
                     epoch, cancel, settings = payload
-                    self._say("无线电检查。工程师语音已连接。", settings, epoch, cancel)
+                    self._say("无线电检查。这是本地语音试听。", settings, epoch, cancel)
                 elif action == "auto":
                     self._auto()
+            except AudioPreempted:
+                if action in ("listen", "test", "auto"):
+                    self._invalidate()
+                    if action == "listen":
+                        self._spotter.interrupted_question()
+                    self._set_status("READY" if self._settings["enabled"] else "OFF",
+                                     "近车提示优先；本次提问或播报已取消，请松开按键后重新提问。")
+                elif action in ("initialize", "refresh"):
+                    self._set_status("READY" if self._settings["enabled"] else "OFF",
+                                     "近车提示正在使用音频设备；请稍后刷新设备列表。")
             except Exception:
                 cancelled = (action in ("listen", "test")
                              and not self._valid(payload[0], payload[1]))
@@ -624,6 +657,7 @@ class VoiceService:
                 self._binding_pending = None
                 self._set_status("STOPPING", "正在停止收音、播报与后台按键监听。")
             self._cancel_speech()
+            self._spotter.close()
             self._input.close()
             for worker in (self._worker, self._guard_worker):
                 if worker is not None and worker is not threading.current_thread():

@@ -279,7 +279,25 @@ class DesktopPresenter:
         proximity_text = proximity_labels.get(proximity_status, "尚未启动")
         if lifecycle != "RUNNING":
             proximity_text = "已停止" if lifecycle in ("STOPPED", "CLOSED") else "尚未就绪"
-        spotter = f"Spotter：{proximity_text} · 当前仅诊断，近车音频尚未接入"
+        audio = _mapping(_mapping(value.get("voice")).get("spotter"))
+        audio_labels = {
+            "OFF": "近车语音未启用", "PREPARING": "正在预生成短语音",
+            "WAIT_DATA": "语音已预备，等待驾驶数据", "READY": "近车语音已预备",
+            "PLAYING": "正在输出近车语音", "PAUSED": "近车语音已暂停，请重新应用设置",
+            "ERROR": "近车语音故障，请检查输出设备后重新应用设置",
+            "STOPPING": "正在停止近车语音", "CLOSED": "近车语音已关闭",
+        }
+        audio_text = audio_labels.get(audio.get("status"), "当前仅诊断，近车音频尚未接入")
+        if audio.get("status") in ("READY", "WAIT_DATA"):
+            audio_text += {
+                "UNTESTED": "（设备尚未实际播放验证）",
+                "STARTED_NOT_HEARING_CONFIRMED": "（已调用播放，未确认人耳听到）",
+                "START_DEADLINE_MISSED": "（最近一次音频启动超时，提示已丢弃）",
+                "FAILED": "（输出故障）",
+            }.get(audio.get("output_status"), "（输出状态未知）")
+        if audio.get("reason") == "ZERO_VOLUME":
+            audio_text = "音量为零，近车语音已暂停"
+        spotter = f"Spotter：{proximity_text} · {audio_text}"
         return DesktopView(
             lifecycle=lifecycle, connection=connection, source=source, context=context_label,
             quality="质量：" + _text(quality.get("status"), "未知"),
@@ -342,6 +360,7 @@ class DesktopWindow:
         self.action_var = tk.StringVar(root, "")
         self.voice_enabled_var = tk.BooleanVar(root, False)
         self.voice_auto_fuel_var = tk.BooleanVar(root, False)
+        self.voice_spotter_var = tk.BooleanVar(root, False)
         self.voice_volume_var = tk.DoubleVar(root, 0.7)
         self.voice_key_var = tk.StringVar(root, "F9")
         self.voice_action_var = tk.StringVar(root, "默认关闭；应用语音设置后才启用按住说话。")
@@ -456,9 +475,20 @@ class DesktopWindow:
             scrollregion=canvas.bbox("all")
         ))
         canvas.bind("<Configure>", lambda event: canvas.itemconfigure(window, width=event.width))
-        canvas.bind("<MouseWheel>", lambda event: canvas.yview_scroll(
-            -int(event.delta / 120), "units"
-        ))
+        def wheel(event):
+            # Wheel events target the frame/label under the pointer, not the
+            # covered canvas. Keep native scrolling inside text/selection inputs.
+            widget = event.widget
+            if widget.winfo_class() in ("Text", "TCombobox", "Listbox", "TEntry", "TScale"):
+                return None
+            while widget is not None:
+                if widget in (content, canvas):
+                    canvas.yview_scroll(-int(event.delta / 120), "units")
+                    return "break"
+                widget = getattr(widget, "master", None)
+            return None
+
+        parent.winfo_toplevel().bind("<MouseWheel>", wheel, add="+")
         return content
 
     def _build_live(self, parent) -> None:
@@ -577,10 +607,14 @@ class DesktopWindow:
                   "说完松开，等待处理与播报提示。无需切回本窗口。\n"
                   "Quest 头显与桌面麦克风可分开选择；未选择时使用系统默认输入 / 输出。",
                   wraplength=920, style="Muted.TLabel").pack(anchor="w", pady=5)
-        enabled = ttk.Checkbutton(parent, text="启用语音与后台 PTT（默认关闭，需点击应用）",
+        enabled = ttk.Checkbutton(parent, text="启用按住说话与后台 PTT（默认关闭，需点击应用）",
                                   variable=self.voice_enabled_var)
         enabled.pack(anchor="w", pady=5)
         self._voice_controls.append(enabled)
+        spotter = ttk.Checkbutton(parent, text="启用近车语音（本地优先播报，不依赖麦克风或模型）",
+                                  variable=self.voice_spotter_var)
+        spotter.pack(anchor="w", pady=3)
+        self._voice_controls.append(spotter)
         device_grid = ttk.Frame(parent)
         device_grid.pack(fill="x", pady=7)
         device_grid.columnconfigure(1, weight=1)
@@ -695,9 +729,11 @@ class DesktopWindow:
             getattr(self.controller, "voice_configure", None)
         )
         self._voice_enabled = settings.get("enabled") is True
+        self._spotter_enabled = settings.get("spotter_enabled") is True
         if settings and not self._initialized_voice and voice.get("status") != "STARTING":
             self.voice_enabled_var.set(self._voice_enabled)
             self.voice_auto_fuel_var.set(settings.get("auto_fuel") is True)
+            self.voice_spotter_var.set(settings.get("spotter_enabled") is True)
             volume = settings.get("volume")
             self.voice_volume_var.set(volume if _finite(volume) and volume <= 1 else 0.7)
             self._voice_volume_label()
@@ -735,7 +771,7 @@ class DesktopWindow:
             combo, variable = self._voice_menus[field]
             combo.configure(values=[label for label, _ in options])
             variable.set(next(label for label, identity in options if identity == selected))
-        statuses = {"OFF": "语音已关闭", "DISABLED": "语音已关闭",
+        statuses = {"OFF": "按住说话已关闭", "DISABLED": "按住说话已关闭",
                     "READY": "语音已就绪 · 等待按住说话",
                     "LISTENING": "正在收音 · 松开结束", "RECOGNIZING": "正在识别问题",
                     "WAITING_MODEL": "正在整理工程师回答", "SPEAKING": "正在播报",
@@ -754,8 +790,9 @@ class DesktopWindow:
             control.state(["disabled"] if disabled else ["!disabled"])
         if disabled or not self._voice_enabled or voice.get("binding_active") is True:
             self.voice_ptt_button.state(["disabled"])
-            self.voice_test_button.state(["disabled"])
             self._voice_release()
+        if disabled or not (self._voice_enabled or self._spotter_enabled):
+            self.voice_test_button.state(["disabled"])
 
     def _voice_configure(self) -> None:
         if self._closing or not self._voice_available or not self._initialized_voice:
@@ -769,16 +806,19 @@ class DesktopWindow:
                 **{field: self._voice_selection(field) for field in self._voice_menus},
                 "volume": volume, "binding": dict(self._voice_binding),
                 "auto_fuel": self.voice_auto_fuel_var.get(),
+                "spotter_enabled": self.voice_spotter_var.get(),
             })
         except Exception:
             self.voice_action_var.set("语音设置未能应用；请检查设备、语言与按键，不显示原始错误。")
         else:
-            self.voice_action_var.set("已提交语音设置，等待本地服务确认；不会自动试听或收音。")
+            self.voice_action_var.set("已提交设置；不会自动收音。近车语音启用后可自动播报赛况。")
 
     def _voice_call(self, method: str) -> bool:
         if self._closing or not self._voice_available or not self._initialized_voice:
             return False
-        if method in ("voice_press", "voice_test") and not self._voice_enabled:
+        if method == "voice_press" and not self._voice_enabled:
+            return False
+        if method == "voice_test" and not (self._voice_enabled or self._spotter_enabled):
             return False
         try:
             getattr(self.controller, method)()

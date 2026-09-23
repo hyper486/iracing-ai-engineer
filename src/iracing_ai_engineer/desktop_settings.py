@@ -404,7 +404,7 @@ class SettingsStore:
 
         value = validate_voice_settings(settings)
         payload = json.dumps(
-            {"version": "native-voice-v1", "settings": value},
+            {"version": "native-voice-v2", "settings": value},
             ensure_ascii=True, allow_nan=False, separators=(",", ":"),
         ).encode("utf-8")
         self._atomic_write("voice.json", payload, _MAX_SETTINGS_BYTES)

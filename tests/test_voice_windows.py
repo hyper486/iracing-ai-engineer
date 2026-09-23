@@ -110,6 +110,20 @@ def test_script_never_opens_audio_hardware_or_uses_user_code():
     assert "$stream.Position -eq $stream.Length" in module._SCRIPT
 
 
+@pytest.mark.parametrize("rate", [True, -11, 11, 3.0, "3"])
+def test_synthesis_rate_requires_a_bounded_integer(rate):
+    with pytest.raises(SpeechError, match="SPEECH_INPUT_INVALID"):
+        WindowsSpeech().synthesize("左侧有车", rate=rate)
+
+
+def test_nondefault_rate_is_data_on_stdin_not_executable_code(monkeypatch):
+    process, _ = _process(monkeypatch, json.dumps({
+        "wav": base64.b64encode(_wav()).decode(),
+    }).encode())
+    WindowsSpeech().synthesize("左侧有车", rate=3)
+    assert json.loads(process.stdin.payload)["rate"] == 3
+
+
 def test_timeout_kills_reaps_closes_and_sanitizes(monkeypatch):
     process, _ = _process(monkeypatch, b"", timeout=True)
     with pytest.raises(SpeechError, match="^SPEECH_TIMEOUT$") as failure:

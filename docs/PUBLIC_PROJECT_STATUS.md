@@ -30,13 +30,46 @@ required running dependency. The final goal remains active and unaccepted.
 | DeepSeek engineer framework | Implemented; constrained evidence selection | Opt-in asynchronous questions, local grounding/rendering, bounded attempts and safe fallback; validated historical receipt context is separate from live fuel. Real provider/account and in-car acceptance remain unverified. |
 | Native Windows EXE | Experimental native Tk/ttk app | Standalone windowed binary, direct Python service calls, masked/optional DPAPI key storage and private recording. No HTML/WebView/server. |
 | Native VR voice | Implemented; hardware/race acceptance pending | Opt-in background PTT, input/output selectors or refreshed Windows defaults, local Whisper STT and Windows TTS, interruption and optional guarded low-fuel facts. No continuous listening or raw-audio upload. |
-| Tick-level proximity | Detector and native diagnostics only | Freshness/context gates, lateral occupancy transitions and bounded audit run before slow display publication. Proximity audio is NOT_CONNECTED; no audible or in-car acceptance. |
+| Tick-level proximity | Detector plus opt-in native audio in source | Independent fixed-phrase cache, priority cancellation, fast snapshots and bounded playback diagnostics; synthetic/local-synthesis checks only, no hardware or in-car acceptance. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Proximity diagnostic milestone
+## Native proximity delivery milestone
+
+Stage B adds an independent, opt-in proximity audio worker and guard, fixed Chinese
+PCM cache, device warm-up, urgent output ownership, late-start rejection and
+mid-play cancellation. It does not wait for fuel learning, the slow display,
+local recognition, synthesis of a long answer or DeepSeek. Held PTT interrupted
+by a proximity event is discarded rather than transcribed/submitted as a prefix;
+an informational cancellation notice is deferred until clear conditions.
+
+Native preferences migrate from v1 to v2 with the new proximity switch off.
+The source UI reports detection separately from preparation/output health, zero
+volume, suspension and errors. A visible synthetic preview found and fixed
+wheel scrolling over child controls so the apply/test row remains reachable.
+Local memory-only synthesis verified all eleven cached phrases; proximity clips
+were about 0.80-1.16 seconds after rate/silence adjustments. This is clip length,
+not SDK-to-ear latency. No microphone or speaker was opened for that check.
+An accelerated detector-only check also processed 1,296,000 invented frames
+(six simulated hours) with the audit capped at 128 rows; it is not a hardware
+soak or full-pipeline endurance acceptance pass. Regression coverage includes a
+newer stop winning over an older in-flight settings save and a cancelled output
+still reporting device-close failure.
+
+Final complete regression: **2,288 passed, 44 skipped**. The skips remain explicit
+missing-data, platform, private-deployment or opt-in boundaries. Ruff, public-safety
+scanning including history and staged diff checks passed. Six concurrent
+question/stop scenarios also passed five repeated runs using fake devices.
+All new audio scenarios remain synthetic, not hearing or in-car evidence.
+
+No deployed EXE, Simulator Controller configuration or user credentials were
+changed. Actual selected-device hearing, real microphone/VR load, full
+reader/writer/analysis fault isolation and durable end-to-end replay remain open.
+See [the detector/audio contract](PROXIMITY_SPOTTER.md) and [the active plan](ACTIVE_GOAL.md).
+
+### Earlier Stage A diagnostic milestone
 
 The September 23 source change adds an independent, deterministic `CarLeftRight`
 state machine without requiring fuel learning or opponent lap-time arithmetic.
@@ -57,10 +90,11 @@ remain explicit missing-data, platform, private-deployment or opt-in boundaries.
 Ruff, public-safety scanning including history and staged diff checks passed.
 All new proximity scenarios are synthetic, not authentic in-car evidence.
 
-See [the detector contract](PROXIMITY_SPOTTER.md) for policy parameters and
-remaining work. Priority audio, full reader/writer/analysis fault isolation,
-end-to-end capture replay, selected-device hearing and real VR/in-car acceptance
-are still open. The new audit is not an audio receipt or a live acceptance pass.
+At that earlier diagnostic milestone, priority audio, full reader/writer/analysis
+fault isolation, end-to-end capture replay and hardware acceptance were open.
+The current Stage B source delivery above adds audio ownership and playback
+diagnostics; it does not promote hearing or live acceptance. See
+[the current contract](PROXIMITY_SPOTTER.md) for remaining boundaries.
 
 ## Native Windows desktop milestone
 

@@ -1,6 +1,7 @@
 """Voice preferences are separate from existing credentials and model settings."""
 
 import copy
+import json
 
 import pytest
 
@@ -64,3 +65,23 @@ def test_validation_returns_an_independent_binding_copy():
     assert original == default_voice_settings()
     original["binding"] = {"kind": "joystick", "guid": "a" * 32, "name": "Wheel", "button": 2}
     assert validate_voice_settings(original) == copy.deepcopy(original)
+
+
+def test_v1_migration_preserves_all_preferences_without_enabling_new_audio():
+    previous = {**default_voice_settings(), "enabled": True, "volume": 0.4}
+    previous.pop("spotter_enabled")
+    migrated = decode_voice_settings(json.dumps({
+        "version": "native-voice-v1", "settings": previous,
+    }).encode())
+    assert migrated == {**previous, "spotter_enabled": False}
+
+
+@pytest.mark.parametrize("version,spotter", [
+    ("native-voice-v1", True), ("native-voice-v2", "true"), ("native-voice-v2", 1),
+])
+def test_new_preference_cannot_be_smuggled_through_legacy_or_invalid_values(version, spotter):
+    with pytest.raises(ValueError):
+        decode_voice_settings(json.dumps({
+            "version": version,
+            "settings": {**default_voice_settings(), "spotter_enabled": spotter},
+        }).encode())

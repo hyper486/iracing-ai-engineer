@@ -15,13 +15,14 @@ def default_voice_settings() -> dict:
         "enabled": False, "input_device": "default", "output_device": "default",
         "volume": 0.7, "culture": "zh-CN", "voice": "",
         "binding": {"kind": "keyboard", "key": "F9"}, "auto_fuel": False,
+        "spotter_enabled": False,
     }
 
 
 def validate_voice_settings(value: object) -> dict:
     if type(value) is not dict or set(value) != set(default_voice_settings()):
         raise ValueError("VOICE_SETTINGS_INVALID")
-    if any(type(value[key]) is not bool for key in ("enabled", "auto_fuel")):
+    if any(type(value[key]) is not bool for key in ("enabled", "auto_fuel", "spotter_enabled")):
         raise ValueError("VOICE_SETTINGS_INVALID")
     volume = value["volume"]
     if type(volume) not in (int, float) or not 0 <= volume <= 1 or not math.isfinite(volume):
@@ -88,8 +89,14 @@ def decode_voice_settings(payload: bytes | None) -> dict:
     try:
         envelope = json.loads(payload.decode("utf-8"), object_pairs_hook=unique)
         if (type(envelope) is not dict or set(envelope) != {"version", "settings"}
-                or envelope["version"] != "native-voice-v1"):
+                or envelope["version"] not in ("native-voice-v1", "native-voice-v2")):
             raise ValueError("VOICE_SETTINGS_INVALID")
+        if envelope["version"] == "native-voice-v1":
+            old = envelope["settings"]
+            expected = set(default_voice_settings()) - {"spotter_enabled"}
+            if type(old) is not dict or set(old) != expected:
+                raise ValueError("VOICE_SETTINGS_INVALID")
+            envelope["settings"] = {**old, "spotter_enabled": False}
         return validate_voice_settings(envelope["settings"])
     except Exception:
         raise ValueError("VOICE_SETTINGS_INVALID") from None

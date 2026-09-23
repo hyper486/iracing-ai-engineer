@@ -105,6 +105,10 @@ try {
                 if ($chinese.Count -eq 0) { throw 'VOICE_UNAVAILABLE' }
                 $synth.SelectVoice($chinese[0].VoiceInfo.Name)
             }
+            $rate = 0
+            if ($null -ne $request.rate) { $rate = [int]$request.rate }
+            if ($rate -lt -10 -or $rate -gt 10) { throw 'RATE_LIMIT' }
+            $synth.Rate = $rate
             $stream = New-Object IO.MemoryStream
             $synth.SetOutputToWaveStream($stream)
             $synth.Speak($text)
@@ -320,10 +324,14 @@ class WindowsSpeech:
             raise SpeechError("SPEECH_RESPONSE_INVALID")
         return {"text": result["text"], "confidence": float(confidence)}
 
-    def synthesize(self, text: str, voice: str = "") -> bytes:
-        if not _text(text, MAX_TEXT_CHARS) or not _text(voice, 256, empty=True):
+    def synthesize(self, text: str, voice: str = "", *, rate: int = 0) -> bytes:
+        if (not _text(text, MAX_TEXT_CHARS) or not _text(voice, 256, empty=True)
+                or type(rate) is not int or not -10 <= rate <= 10):
             raise SpeechError("SPEECH_INPUT_INVALID")
-        result = self._call({"op": "synthesize", "text": text, "voice": voice})
+        request = {"op": "synthesize", "text": text, "voice": voice}
+        if rate:
+            request["rate"] = rate
+        result = self._call(request)
         code = None
         try:
             if set(result) != {"wav"} or type(result["wav"]) is not str:

@@ -136,6 +136,51 @@ def test_constructing_audio_does_not_import_backend_or_open_devices():
     assert audio._backend is None
 
 
+@pytest.mark.parametrize("after_open", [False, True])
+def test_race_call_is_revalidated_after_device_resolution_and_open(after_open):
+    backend, permitted = _Backend(), [True]
+    if after_open:
+        original = backend.RawOutputStream
+
+        def open_then_withdraw(**kwargs):
+            stream = original(**kwargs)
+            permitted[0] = False
+            return stream
+
+        backend.RawOutputStream = open_then_withdraw
+    else:
+        backend.on_refresh = lambda: permitted.__setitem__(0, False)
+    started = []
+    stop = threading.Event()
+    AudioIO(backend=backend).play(_wav(), stop, start_guard=lambda: permitted[0],
+                                  on_started=lambda: started.append(True))
+    assert stop.is_set() and started == []
+    assert all(stream.closed and not stream.output for stream in backend.streams)
+
+
+def test_start_receipt_only_follows_real_backend_start_call():
+    backend, started = _Backend(), []
+    AudioIO(backend=backend).play(
+        _wav(), threading.Event(),
+        on_started=lambda: started.append(bool(backend.streams[0].output)),
+    )
+    assert started == [True]
+
+
+def test_withdrawn_after_open_still_reports_cleanup_failure():
+    backend, started = _Backend(), []
+    backend.close_error = True
+    audio = AudioIO(backend=backend)
+    with pytest.raises(AudioError, match="^AUDIO_PLAY_FAILED$") as failure:
+        audio.play(_wav(), threading.Event(), start_guard=lambda: not backend.streams,
+                   on_started=lambda: started.append(True))
+    assert failure.value.__context__ is None and started == []
+    assert backend.streams[0].closed and not backend.streams[0].output
+    backend.close_error = False
+    audio.play(_wav(), threading.Event())  # Ownership was released despite the error.
+    assert backend.streams[-1].closed and backend.streams[-1].output
+
+
 def test_catalog_is_stable_across_device_and_host_reordering():
     backend = _Backend()
     audio = AudioIO(backend=backend)

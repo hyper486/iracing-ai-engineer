@@ -42,30 +42,33 @@ and user-confirmed hearing. A greeting or running process is not acceptance.
 
 Stage A is implemented as a source-level diagnostic slice; validation and current
 limits are tracked in [the public status](PUBLIC_PROJECT_STATUS.md) and
-[the detector contract](PROXIMITY_SPOTTER.md). B-E and the final endurance goal
-remain open. No proximity audio or newly deployed EXE is claimed by Stage A.
+[the detector contract](PROXIMITY_SPOTTER.md). Stage B's native opt-in audio lane,
+cache, priority ownership, cancellation and settings migration are now implemented
+in source. Synthetic backend, local memory-only synthesis and visible synthetic
+UI checks are not a real hearing/VR acceptance pass. No new EXE deployment is
+claimed. Stage B hardware acceptance, C-E and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.
 LLM use is opt-in, summary-only, for question interpretation and explanation.
 
-## Next implementation slice: reliable delivery
+## Delivery progress and next implementation slice
 
-- Give proximity delivery its own bounded worker and fresh detector snapshot;
-  do not enqueue it behind PTT recognition, model requests or 2 Hz display work.
-- Pre-render and validate a small phrase cache for the selected local voice.
-  Cache failure or a changed voice/output selection must remove audio readiness.
-- Add explicit output ownership and cancellation acknowledgment. The existing
-  `AudioIO` owns a process-wide PortAudio lock and refreshes its device catalog;
-  simply starting a second player would contend with recording and other speech.
-  Urgent proximity must cancel obsolete output without playing overlapping voices
-  or silently losing a held PTT request.
-- Bind delivery to connection generation, detector epoch and event sequence;
-  revalidate freshness before output and while playing. Expired events are dropped,
-  not replayed once the long answer or device operation finishes.
+- Implemented: independent proximity worker/guard, fast detector snapshots with
+  no EngineerService/fuel dependency, warmed device enumeration and fixed PCM cache.
+- Implemented: priority ownership with cancellation acknowledgment, partial-PTT
+  discard and deferred cancellation notice, generation/epoch/sequence binding,
+  start-by deadlines, mid-play state withdrawal and bounded playback diagnostics.
+- Implemented: synthetic scenarios for held PTT, blocked recognition/model/TTS,
+  long output, stale data, selected-output loss, reconfiguration and shutdown.
+  Device-default refresh behavior remains covered by the audio backend tests.
 - Separate noncritical analysis faults from acquisition. Decouple durable writes
   only with bounded buffering and explicit overflow/incomplete-capture accounting;
   never silently drop frames and still claim a complete recording.
-- Exercise blocked recognition, long answers, held PTT, stale data, device loss,
-  default-device changes and shutdown with fake backends before hardware checks.
+- Verify endurance-duration resource limits, implement the current fuel/strategy
+  and incremental corner loops, and connect private capture replay to the new
+  event/playback audit before claiming an integrated trial build.
+- Rebuild/package after those integrations, then check selected microphone and
+  headphones, wheel/PTT, actual proximity latency and VR performance in a
+  user-driven session. A local TTS duration is not output or end-to-end latency.
 
 For each major advance: update status, run Ruff and all pytest tests, scan public
 safety including history, review exact staged files/diff, commit with the configured

@@ -218,6 +218,15 @@ class AppState:
         with self._lock:
             return self._spotter.audit()
 
+    def spotter_snapshot(self) -> dict:
+        """Fast consumer contract: no fuel/display freshness or LLM dependency."""
+        with self._lock:
+            return {
+                "spotter": self._spotter.snapshot(now=self.clock()),
+                "generation": self._generation, "connection": self._value["connection"],
+                "source_mode": self._value["source_mode"],
+            }
+
     def recording(self, status: str, byte_count: int) -> None:
         with self._lock:
             self._value["recording"] = {"status": status, "bytes": byte_count}

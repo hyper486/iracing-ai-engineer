@@ -319,7 +319,8 @@ class AudioIO:
         return bytes(storage[:cursor])
 
     def play(
-        self, wav: bytes, stop: threading.Event, device: str = "default", volume: float = 0.7
+        self, wav: bytes, stop: threading.Event, device: str = "default", volume: float = 0.7,
+        *, start_guard=None, on_started=None,
     ) -> None:
         if not isinstance(stop, threading.Event) or not _number(volume, 1.0, zero=True):
             raise AudioError("AUDIO_INPUT_INVALID")
@@ -378,6 +379,8 @@ class AudioIO:
                     # Wait for finished_callback: final samples are still queued.
                     raise backend.CallbackStop
 
+            if start_guard is not None and not start_guard():
+                stop.set()
             if not stop.is_set():
                 stream = backend.RawOutputStream(
                     samplerate=rate,
@@ -389,14 +392,20 @@ class AudioIO:
                     finished_callback=done.set,
                     **options,
                 )
-                stream.start()
-                deadline = monotonic_now() + len(pcm) / (rate * channels * 2) + 2.0
-                while not done.is_set() and not stop.is_set():
-                    remaining = deadline - monotonic_now()
-                    if remaining <= 0:
-                        failures.append("AUDIO_TIMEOUT")
-                        break
-                    done.wait(min(0.02, remaining))
+                # Device open may block. Never start a now-obsolete race call.
+                if stop.is_set() or (start_guard is not None and not start_guard()):
+                    stop.set()
+                else:
+                    stream.start()
+                    if on_started is not None:
+                        on_started()
+                    deadline = monotonic_now() + len(pcm) / (rate * channels * 2) + 2.0
+                    while not done.is_set() and not stop.is_set():
+                        remaining = deadline - monotonic_now()
+                        if remaining <= 0:
+                            failures.append("AUDIO_TIMEOUT")
+                            break
+                        done.wait(min(0.02, remaining))
             if failures:
                 code = failures[0]
         except AudioError as error:
