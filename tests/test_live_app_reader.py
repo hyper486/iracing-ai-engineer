@@ -402,6 +402,37 @@ def test_out_of_car_never_learns_or_speaks_in_the_real_monitor_chain():
         assert row["speech"] is None
 
 
+def test_spotter_captures_a_short_pass_between_two_slow_display_snapshots():
+    state, _, _ = _run([{
+        "frame_count": 31,
+        "value_changes": {tick: {"CarLeftRight": 2} for tick in (10, 11, 12)},
+    }])
+    assert all(row["monitor"]["telemetry"]["car_left_right"] == 1
+               for row in state.publications)
+    assert all(row["fuel"]["status"] != "READY" for row in state.publications)
+    candidates = [row for row in state.spotter_audit() if row["decision"] == "CANDIDATE"]
+    assert [row["kind"] for row in candidates] == ["CAR_LEFT", "ALL_CLEAR"]
+    assert [row["tick"] for row in candidates] == [12, 22]
+    assert all(row["audible"] is False for row in candidates)
+    assert state.snapshot()["spotter"]["candidate"] is None
+
+
+def test_spotter_fault_is_latched_locally_without_stopping_fuel_analysis(monkeypatch):
+    attempts = []
+
+    def broken(*_args, **_kwargs):
+        attempts.append(1)
+        raise ValueError("SYNTHETIC PRIVATE ERROR")
+
+    monkeypatch.setattr(live_app.ProximitySpotter, "feed", broken)
+    state, _, _ = _run([{"frame_count": 1800}])
+    assert len(attempts) == 1
+    assert any(row["fuel"]["status"] == "READY" for row in state.publications)
+    assert all(row["spotter"]["status"] == "ERROR" for row in state.publications)
+    assert "SYNTHETIC PRIVATE ERROR" not in json.dumps(state.report())
+    assert "SYNTHETIC PRIVATE ERROR" not in json.dumps(state.spotter_audit())
+
+
 @pytest.mark.parametrize("fail_ingest", [True, False])
 def test_recorder_close_error_cannot_kill_reader_or_skip_sdk_teardown(
     tmp_path, monkeypatch, fail_ingest

@@ -34,6 +34,7 @@ from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
 from .llm_engineer import EngineerConfig, EngineerService
 from .runtime_clock import monotonic_now
 from .sdk_probe import SdkProbeUnavailable, WindowsPyirsdkTransport
+from .spotter import SPOTTER_FIELDS, ProximitySpotter
 from .telemetry import SourceKind
 
 FRESHNESS_S = 2.0
@@ -153,6 +154,8 @@ class AppState:
         self._updated: float | None = None
         self._generation = 0
         self._engineer_revision = 0
+        self._spotter = ProximitySpotter()
+        self._spotter_failed = False
         self._value: dict[str, Any] = {
             "contract_version": "experimental-live-fuel-app-v1",
             "connection": "WAIT_SIM",
@@ -186,6 +189,34 @@ class AppState:
             self._generation += 1
             if status == "CONNECTED":
                 self._summary["connections"] += 1
+            else:
+                self._spotter.unavailable(status, now=self.clock())
+
+    def start_spotter(self, tick_rate_hz: int) -> None:
+        with self._lock:
+            self._spotter = ProximitySpotter(tick_rate_hz=tick_rate_hz)
+            self._spotter_failed = False
+
+    def feed_spotter(self, frame) -> None:
+        """Fast, non-audible branch before recording and slower display analysis.
+
+        A detector fault latches its own error until reconnect. It must not stop
+        SDK capture, replace missing data with zero, or expose native errors.
+        """
+        with self._lock:
+            if self._spotter_failed:
+                return
+            try:
+                # A snapshot may advance the detector while this caller waits
+                # for the lock. Sample time here, not before acquiring it.
+                self._spotter.feed(frame, now=self.clock())
+            except Exception:
+                self._spotter_failed = True
+                self._spotter.unavailable("ERROR", now=self.clock())
+
+    def spotter_audit(self) -> list[dict]:
+        with self._lock:
+            return self._spotter.audit()
 
     def recording(self, status: str, byte_count: int) -> None:
         with self._lock:
@@ -229,6 +260,7 @@ class AppState:
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             value = copy.deepcopy(self._value)
+            value["spotter"] = self._spotter.snapshot(now=self.clock())
             age = None if self._updated is None else max(0.0, self.clock() - self._updated)
             value.update(updated_age_s=age, generation=self._generation,
                          engineer_revision=self._engineer_revision)
@@ -246,7 +278,8 @@ class AppState:
 
     def report(self) -> dict[str, Any]:
         with self._lock:
-            return {**self._summary, "limitations": list(LIMITATIONS)}
+            return {**self._summary, "limitations": list(LIMITATIONS),
+                    "spotter": self._spotter.snapshot(now=self.clock())}
 
 
 def _csp() -> str:
@@ -405,7 +438,9 @@ def run_reader(
             available = {item.name for item in descriptors}
             if not {"SessionNum", "SessionTime", "SessionTick"} <= available:
                 raise ValueError("missing core schema")
-            selected = tuple(name for name in LIVE_MONITOR_FIELDS if name in available)
+            selected = tuple(dict.fromkeys(
+                name for name in (*LIVE_MONITOR_FIELDS, *SPOTTER_FIELDS) if name in available
+            ))
             fields = (
                 tuple(item.name for item in descriptors) if not recording_disabled else selected
             )
@@ -433,6 +468,7 @@ def run_reader(
                     recording_disabled = True
                     state.recording("ERROR", recorded_bytes)
             state.connection("CONNECTED")
+            state.start_spotter(connection.tick_rate_hz)
             connected_once = True
             next_snapshot = clock()
             while not stop.is_set():
@@ -442,6 +478,7 @@ def run_reader(
                 frame = transport.read_frozen(fields)
                 frame, metadata, scope = _transport_session_info(transport, frame)
                 session_type = bound_session_type(metadata, frame.session_info_update, frame)
+                state.feed_spotter(frame)
                 if recorder is not None:
                     try:
                         # Leave headroom for a complete last metadata/sample group and receipt.

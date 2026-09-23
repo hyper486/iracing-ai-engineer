@@ -1,12 +1,17 @@
 # Public project status
 
-Snapshot: 2026-09-22 EDT
+Snapshot: 2026-09-23 EDT
 
 ## Product objective
 
 Deliver an advisor-only iRacing AI engineer for solo endurance racing that can
 reason about fuel, tires, stints, nearby traffic, pit timing and rejoin cost,
 and can produce evidence-backed corner coaching and a post-session report.
+
+The [active execution goal](ACTIVE_GOAL.md) retains this full objective and
+prioritizes three usable loops: local proximity calls, current fuel answers and
+one supported repeated-corner practice point. Simulator Controller is not a
+required running dependency. The final goal remains active and unaccepted.
 
 ## Current public milestone
 
@@ -25,10 +30,37 @@ and can produce evidence-backed corner coaching and a post-session report.
 | DeepSeek engineer framework | Implemented; constrained evidence selection | Opt-in asynchronous questions, local grounding/rendering, bounded attempts and safe fallback; validated historical receipt context is separate from live fuel. Real provider/account and in-car acceptance remain unverified. |
 | Native Windows EXE | Experimental native Tk/ttk app | Standalone windowed binary, direct Python service calls, masked/optional DPAPI key storage and private recording. No HTML/WebView/server. |
 | Native VR voice | Implemented; hardware/race acceptance pending | Opt-in background PTT, input/output selectors or refreshed Windows defaults, local Whisper STT and Windows TTS, interruption and optional guarded low-fuel facts. No continuous listening or raw-audio upload. |
+| Tick-level proximity | Detector and native diagnostics only | Freshness/context gates, lateral occupancy transitions and bounded audit run before slow display publication. Proximity audio is NOT_CONNECTED; no audible or in-car acceptance. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Proximity diagnostic milestone
+
+The September 23 source change adds an independent, deterministic `CarLeftRight`
+state machine without requiring fuel learning or opponent lap-time arithmetic.
+It rejects missing/invalid/stale data and replay/out-of-car context, confirms
+occupancy and clear transitions, withdraws obsolete candidates and records a
+bounded nonsecret audit. Detector faults remain local to that detector.
+
+The native source window distinguishes waiting, ready, stale and failed detection
+while explicitly showing that proximity audio is not connected. No installed
+EXE was rebuilt or replaced, and no Simulator Controller configuration was changed.
+The no-game rehearsal validates left/both/right/clear transitions on 300 invented
+frames. Integration tests capture a short pass wholly between two slow display
+updates and keep fuel analysis running through a detector fault.
+
+Full regression completed with **2,215 passed, 44 skipped**. The final lock-clock
+follow-up was separately verified with **122 focused tests passed**. The skips
+remain explicit missing-data, platform, private-deployment or opt-in boundaries.
+Ruff, public-safety scanning including history and staged diff checks passed.
+All new proximity scenarios are synthetic, not authentic in-car evidence.
+
+See [the detector contract](PROXIMITY_SPOTTER.md) for policy parameters and
+remaining work. Priority audio, full reader/writer/analysis fault isolation,
+end-to-end capture replay, selected-device hearing and real VR/in-car acceptance
+are still open. The new audit is not an audio receipt or a live acceptance pass.
 
 ## Native Windows desktop milestone
 

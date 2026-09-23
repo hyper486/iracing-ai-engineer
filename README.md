@@ -25,6 +25,8 @@ practice opportunity.
 - A privacy-safe JSONL live-state bridge for future overlays and speech consumers.
 - A native Windows desktop EXE with real-time fuel status, constrained DeepSeek
   questions, VR push-to-talk and selectable audio devices; no browser or WebView needed.
+- Tick-level proximity detection and native readiness diagnostics, independent of
+  fuel learning; detector-only at present, with no connected proximity audio.
 - An experimental local fuel dashboard with private recording and opt-in local
   practice speech; race speech stays disabled.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
@@ -34,6 +36,11 @@ simulator's shared memory and completes a sealed collection. End-to-end
 acceptance is still pending a human-driven, on-track run with enough laps and
 pit evidence for strategy and driving advice. See
 [the public project status](docs/PUBLIC_PROJECT_STATUS.md).
+
+The [active execution goal](docs/ACTIVE_GOAL.md) prioritizes local proximity
+audio, current fuel answers and supported corner coaching on the AEIS framework.
+Stage A adds [detector diagnostics and a no-game rehearsal](docs/PROXIMITY_SPOTTER.md);
+it does not upgrade an existing EXE or establish audible/in-car acceptance.
 
 The September 4 correctness/privacy review fixes are documented in
 [the review-fix record](docs/REVIEW_FIXES.md). Rejoin estimates now bind the

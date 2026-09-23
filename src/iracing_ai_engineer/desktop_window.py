@@ -103,6 +103,7 @@ class DesktopView:
     answer_header: str
     answer_text: str
     notice: str
+    spotter: str
 
 
 class DesktopPresenter:
@@ -266,6 +267,19 @@ class DesktopPresenter:
         if _finite(retry) and retry > 0:
             budget += f" · 再等 {math.ceil(retry)} 秒"
         header, answer = self._answer(engineer, fresh)
+        proximity = _mapping(telemetry.get("spotter"))
+        proximity_status = proximity.get("status")
+        proximity_labels = {
+            "WAIT_SIM": "等待模拟器", "ACQUIRING": "确认连续遥测中",
+            "WAIT_CAR": "等待本人上车并离开维修区", "READY": "近车判定数据就绪",
+            "STALE": "遥测已过期，判定暂停", "UNAVAILABLE": "必要字段不可用",
+            "DISCONNECTED": "连接已断开", "ERROR": "判定模块异常",
+            "STOPPED": "已停止",
+        }
+        proximity_text = proximity_labels.get(proximity_status, "尚未启动")
+        if lifecycle != "RUNNING":
+            proximity_text = "已停止" if lifecycle in ("STOPPED", "CLOSED") else "尚未就绪"
+        spotter = f"Spotter：{proximity_text} · 当前仅诊断，近车音频尚未接入"
         return DesktopView(
             lifecycle=lifecycle, connection=connection, source=source, context=context_label,
             quality="质量：" + _text(quality.get("status"), "未知"),
@@ -279,6 +293,7 @@ class DesktopPresenter:
             session_available=_mapping(engineer.get("capabilities")).get("session") is True,
             answer_header=header, answer_text=answer,
             notice=_text(value.get("notice"), limit=600),
+            spotter=spotter,
         )
 
 
@@ -409,6 +424,9 @@ class DesktopWindow:
         self.connection_label = self._label(connection_row, "connection", wraplength=600)
         self.connection_label.pack(side="left")
         self._label(connection_row, "lifecycle", style="Warn.TLabel").pack(side="right")
+        self._label(outer, "spotter", style="Warn.TLabel", wraplength=920).pack(
+            anchor="w", pady=3,
+        )
         self._label(outer, "source", style="Muted.TLabel").pack(anchor="w", pady=3)
         self._label(outer, "notice", style="Warn.TLabel", wraplength=980).pack(anchor="w", pady=4)
         ttk.Label(outer, textvariable=self.action_var, style="Warn.TLabel",
@@ -853,7 +871,7 @@ class DesktopWindow:
             "已配置密钥（不显示内容）" if settings.get("key_configured") is True
             else "尚未确认已配置密钥；无密钥时使用本地解读。"
         )
-        for key in ("connection", "source", "context", "advice", "learning", "recording",
+        for key in ("connection", "spotter", "source", "context", "advice", "learning", "recording",
                     "quality", "engineer_status", "engineer_error", "budget", "answer_header",
                     "notice"):
             self._vars[key].set(getattr(view, key))

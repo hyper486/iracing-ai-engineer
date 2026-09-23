@@ -78,6 +78,17 @@ def test_numeric_formatting_and_question_validation() -> None:
     assert validate_question("字" * 500) == "字" * 500
 
 
+def test_proximity_diagnostic_readiness_is_never_presented_as_working_audio():
+    snapshot = _snapshot()
+    snapshot["telemetry"]["spotter"] = {"status": "READY"}
+    view = DesktopPresenter().project(snapshot, now=10.0)
+    assert "判定数据就绪" in view.spotter
+    assert "仅诊断" in view.spotter and "音频尚未接入" in view.spotter
+    snapshot["telemetry"]["spotter"]["status"] = "STALE"
+    view = DesktopPresenter().project(snapshot, now=10.0)
+    assert "过期" in view.spotter
+
+
 def test_voice_choices_keep_exact_ids_while_labels_are_unique_and_bounded() -> None:
     choices = voice_choices([
         {"id": "mic-a", "name": "Microphone"}, {"id": "mic-b", "name": "Microphone"},
