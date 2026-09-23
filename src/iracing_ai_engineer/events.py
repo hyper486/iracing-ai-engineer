@@ -250,8 +250,14 @@ class TelemetryEventPipeline:
     _LAP_WRAP_HIGH = 0.8
     _LAP_WRAP_LOW = 0.2
 
-    def __init__(self) -> None:
+    def __init__(self, *, retain_history: bool = True) -> None:
+        if type(retain_history) is not bool:
+            raise ValueError("retain_history must be a boolean")
+        self._retain_history = retain_history
         self._events: list[TelemetryEvent] = []
+        self._event_count = 0
+        self._event_counts: Counter[str] = Counter()
+        self._event_hasher = hashlib.sha256(b"[")
         self._finished = False
         self._receipt: TelemetryEventReceipt | None = None
         self._sample_count = 0
@@ -280,6 +286,8 @@ class TelemetryEventPipeline:
 
     @property
     def events(self) -> tuple[TelemetryEvent, ...]:
+        if not self._retain_history:
+            raise RuntimeError("event history retention is disabled; consume feed results")
         return tuple(self._events)
 
     def _event(
@@ -298,7 +306,7 @@ class TelemetryEventPipeline:
         else:
             session_id, session_num = session_identity_override
         event = TelemetryEvent(
-            sequence=len(self._events),
+            sequence=self._event_count,
             kind=kind,
             source_epoch=max(0, self._source_epoch),
             session_epoch=self._session_epoch,
@@ -318,6 +326,11 @@ class TelemetryEventPipeline:
             ),
         )
         self._events.append(event)
+        if self._event_count:
+            self._event_hasher.update(b",")
+        self._event_hasher.update(_canonical_json(event.to_dict()))
+        self._event_count += 1
+        self._event_counts[event.kind.value] += 1
         return event
 
     def _clear_dynamic_state(self) -> None:
@@ -410,6 +423,8 @@ class TelemetryEventPipeline:
     def _feed_one(self, sample: TelemetrySample) -> tuple[TelemetryEvent, ...]:
         if not isinstance(sample, TelemetrySample):
             raise TypeError("event pipeline input must be a TelemetrySample")
+        if not self._retain_history:
+            self._events.clear()
         start_index = len(self._events)
         self._sample_count += 1
         source_id, source_kind, metadata_issues = self._source_metadata(sample)
@@ -745,8 +760,9 @@ class TelemetryEventPipeline:
         if self._receipt is not None:
             return self._receipt
         self._finished = True
-        event_payload = [event.to_dict() for event in self._events]
-        events_sha256 = hashlib.sha256(_canonical_json(event_payload)).hexdigest()
+        event_hasher = self._event_hasher.copy()
+        event_hasher.update(b"]")
+        events_sha256 = event_hasher.hexdigest()
         config = {
             "contract_version": EVENT_CONTRACT_VERSION,
             "lap_wrap_high_ppm": round(self._LAP_WRAP_HIGH * 1_000_000),
@@ -754,14 +770,12 @@ class TelemetryEventPipeline:
             "mode": "streaming-fail-closed-v1",
         }
         config_sha256 = hashlib.sha256(_canonical_json(config)).hexdigest()
-        counts = tuple(
-            sorted(Counter(event.kind.value for event in self._events).items())
-        )
+        counts = tuple(sorted(self._event_counts.items()))
         payload = {
             "accepted_sample_count": self._accepted_count,
             "config_sha256": config_sha256,
             "contract_version": EVENT_CONTRACT_VERSION,
-            "event_count": len(self._events),
+            "event_count": self._event_count,
             "event_kind_counts": dict(counts),
             "events_sha256": events_sha256,
             "rejected_sample_count": self._rejected_count,
@@ -777,7 +791,7 @@ class TelemetryEventPipeline:
             sample_count=self._sample_count,
             accepted_sample_count=self._accepted_count,
             rejected_sample_count=self._rejected_count,
-            event_count=len(self._events),
+            event_count=self._event_count,
             source_epoch_count=self._source_count,
             session_epoch_count=self._session_count,
             event_kind_counts=counts,

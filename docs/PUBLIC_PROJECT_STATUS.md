@@ -31,12 +31,54 @@ required running dependency. The final goal remains active and unaccepted.
 | Native Windows EXE | Experimental native Tk/ttk app | Standalone windowed binary, direct Python service calls, masked/optional DPAPI key storage and private recording. No HTML/WebView/server. |
 | Native VR voice | Implemented; hardware/race acceptance pending | Opt-in background PTT, input/output selectors or refreshed Windows defaults, local Whisper STT and Windows TTS, interruption and optional guarded low-fuel facts. No continuous listening or raw-audio upload. |
 | Tick-level proximity | Detector plus opt-in native audio in source | Independent fixed-phrase cache, priority cancellation, fast snapshots and bounded playback diagnostics; synthetic/local-synthesis checks only, no hardware or in-car acceptance. |
+| Reader / analysis / recording isolation | Bounded worker lanes in source | Recorder and analysis failures no longer synchronously block the SDK reader; explicit incomplete prefixes, generation guards and streaming event digests. Not GIL isolation or a hardware latency guarantee. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Native proximity delivery milestone
+## Bounded live-work isolation milestone
+
+The source reader now sends slow analysis and optional private recording to
+separate single-owner lanes, each bounded to 128 observations / 16 MiB of retained
+payload accounting including active work. Sink construction, writes, finalization,
+status access and close all remain on their owner. Overflow stops that lane with
+an explicit incomplete-capture reason; it cannot silently drop old frames and
+then mark the session complete. Original observation timestamps and connection
+generations prevent stale or late analysis from becoming fresh fuel facts.
+
+Synthetic fault injection keeps SDK reads and left/clear detection progressing
+through blocked recording initialization, ingestion and close, or blocked analysis.
+It also checks shutdown release acknowledgment, old-worker reconnect/recovery,
+failure callbacks, private-safe errors and unavailable current-recording labels.
+Only final application shutdown waits for slow lane owners after SDK closure;
+reconnection cannot accumulate replacement threads while old ones are alive.
+If a recorder is still alive when a new connection starts, recording is disabled
+until a deliberate restart and the UI says this connection is not being captured.
+
+Live event history is now streamed into the same canonical SHA-256 receipt and
+aggregate counts; offline event receipts retain byte compatibility. A synthetic
+50,100-observation rejection stress check exceeds the removed 50,000-event stop
+without race-long event retention. This is not a real-time endurance soak or an
+RSS measurement. Per-lane byte metrics are conservative queue estimates; recorded
+bytes are the last owner-observed committed count, not partial failed writes.
+
+Complete regression: **2,335 passed, 44 skipped**; focused regression: **154 passed**.
+The skips remain explicit missing-data, platform, private-deployment or opt-in
+boundaries. Seven blocking/reconnect cases also passed five repeated runs. A
+separate 60 Hz-paced synthetic check processed all 360 observations into 12
+snapshots with no rejected/discarded work and left/clear proximity candidates;
+its peak analysis queue was one observation. This used the unmodified production
+worker with an invented SDK, not a real SDK or speaker.
+
+Ruff, public-safety scanning including history and exact staged diff checks passed.
+No game, microphone, speaker, provider, installed EXE or Simulator Controller
+configuration was changed. SDK calls, metadata binding, input inspection and
+Python GIL contention remain outside this thread-level isolation.
+Hardware audio/VR acceptance, current strategy/corner integration and durable
+event-to-audio replay remain open. See [the contract](PROXIMITY_SPOTTER.md).
+
+## Earlier native proximity delivery milestone
 
 Stage B adds an independent, opt-in proximity audio worker and guard, fixed Chinese
 PCM cache, device warm-up, urgent output ownership, late-start rejection and
@@ -65,8 +107,9 @@ question/stop scenarios also passed five repeated runs using fake devices.
 All new audio scenarios remain synthetic, not hearing or in-car evidence.
 
 No deployed EXE, Simulator Controller configuration or user credentials were
-changed. Actual selected-device hearing, real microphone/VR load, full
-reader/writer/analysis fault isolation and durable end-to-end replay remain open.
+changed. Actual selected-device hearing, real microphone/VR load and durable
+end-to-end replay remain open. The later isolation milestone above separates
+slow recording/analysis work but does not establish hard real-time guarantees.
 See [the detector/audio contract](PROXIMITY_SPOTTER.md) and [the active plan](ACTIVE_GOAL.md).
 
 ### Earlier Stage A diagnostic milestone

@@ -15,7 +15,6 @@ import math
 import re
 import threading
 from collections.abc import Callable, Mapping
-from contextlib import suppress
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -23,7 +22,6 @@ from typing import Any
 from uuid import uuid4
 
 from .collector import (
-    CollectorConsistencyError,
     CollectorSample,
     _transport_session_info,
     validate_variable_descriptors,
@@ -31,6 +29,7 @@ from .collector import (
 from .dashboard_page import DASHBOARD_HTML
 from .live_fuel import LiveFuelConfig, LiveFuelEngineer
 from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
+from .live_worker import FrameWorker, payload_size
 from .llm_engineer import EngineerConfig, EngineerService
 from .runtime_clock import monotonic_now
 from .sdk_probe import SdkProbeUnavailable, WindowsPyirsdkTransport
@@ -38,7 +37,6 @@ from .spotter import SPOTTER_FIELDS, ProximitySpotter
 from .telemetry import SourceKind
 
 FRESHNESS_S = 2.0
-MAX_EVENTS_PER_CONNECTION = 50_000
 LIMITATIONS = [
     "实验燃油估计；不是完整进站策略，不考虑交通、轮胎、处罚或赛事规则。",
     "语音默认关闭，只支持练习中的本地英文声音；比赛保持静音。",
@@ -156,6 +154,8 @@ class AppState:
         self._engineer_revision = 0
         self._spotter = ProximitySpotter()
         self._spotter_failed = False
+        self._workers = {}
+        self._recording_base_bytes = 0
         self._value: dict[str, Any] = {
             "contract_version": "experimental-live-fuel-app-v1",
             "connection": "WAIT_SIM",
@@ -232,10 +232,61 @@ class AppState:
             self._value["recording"] = {"status": status, "bytes": byte_count}
             self._summary["recording_bytes"] = byte_count
 
+    @property
+    def generation(self):
+        with self._lock:
+            return self._generation
+
+    def attach_worker(self, name, worker, *, recording_base_bytes=0):
+        if name not in ("analysis", "recording"):
+            raise ValueError("INVALID_WORKER")
+        with self._lock:
+            self._workers[name] = (self._generation, worker)
+            if name == "recording":
+                self._recording_base_bytes = recording_base_bytes
+
+    def invalidate_analysis(self, generation):
+        with self._lock:
+            if generation == self._generation:
+                self._updated = None
+                self._engineer_revision += 1
+                self._value.update(monitor=None, fuel=None, speech=None)
+
+    def _worker_status(self):
+        # Never take a worker lock while holding the AppState lock. A worker's
+        # small publish/failure callback may itself need AppState.
+        with self._lock:
+            workers = dict(self._workers)
+            current, base = self._generation, self._recording_base_bytes
+            connected = self._value["connection"] == "CONNECTED"
+        rows = {name: {**worker.snapshot(), "generation": generation}
+                for name, (generation, worker) in workers.items()}
+        for name, row in rows.items():
+            if name == "analysis" and row["generation"] != current and not row["done"]:
+                row.update(status="WAIT_PREVIOUS", reason="PREVIOUS_SESSION_WORKER")
+        recorder = rows.get("recording")
+        recording = None
+        if recorder is not None:
+            status = {"STARTING": "STARTING", "RUNNING": "RECORDING",
+                      "DRAINING": "DRAINING", "COMPLETE": "COMPLETE",
+                      "INCOMPLETE": "WAIT_SIM", "ERROR": "ERROR"}[recorder["status"]]
+            if recorder["status"] == "COMPLETE" and recorder["reason"] == "LIMIT_REACHED":
+                status = "LIMIT_REACHED"
+            elif recorder["status"] == "COMPLETE" and recorder["processed_frames"] == 0:
+                status = "EMPTY"
+            if (connected and recorder["generation"] != current and not recorder["failed"]
+                    and recorder["reason"] != "LIMIT_REACHED"):
+                status = "RESTART_REQUIRED"
+            recording = {"status": status, "bytes": base + recorder["bytes"]}
+        return rows, recording
+
     def publish(
-        self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None
+        self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None,
+        *, observed_at=None, generation=None, allowed=lambda: True,
     ) -> None:
         with self._lock:
+            if (generation is not None and generation != self._generation) or not allowed():
+                return
             previous = self._value.get("monitor") or {}
             previous_fuel = self._value.get("fuel") or {}
             old_level, new_level = previous_fuel.get("current_fuel_l"), fuel.get("current_fuel_l")
@@ -250,7 +301,7 @@ class AppState:
                 or (_finite(old_level) and _finite(new_level) and new_level > old_level + 0.05)
             ):
                 self._engineer_revision += 1
-            self._updated = self.clock()
+            self._updated = self.clock() if observed_at is None else observed_at
             self._value.update(
                 connection="CONNECTED",
                 monitor=copy.deepcopy(monitor),
@@ -267,10 +318,22 @@ class AppState:
                 )
 
     def snapshot(self) -> dict[str, Any]:
+        workers, recording = self._worker_status()
         with self._lock:
             value = copy.deepcopy(self._value)
+            value["transport_connection"] = value["connection"]
+            value["workers"] = workers
+            if recording is not None:
+                value["recording"] = recording
             value["spotter"] = self._spotter.snapshot(now=self.clock())
             age = None if self._updated is None else max(0.0, self.clock() - self._updated)
+            analysis = workers.get("analysis")
+            if analysis is not None and (
+                analysis["failed"] or analysis["generation"] != self._generation
+            ):
+                # Defense in depth if a fault-notification callback could not run.
+                value.update(monitor=None, fuel=None, speech=None)
+                age = None
             value.update(updated_age_s=age, generation=self._generation,
                          engineer_revision=self._engineer_revision)
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
@@ -286,8 +349,12 @@ class AppState:
             return value
 
     def report(self) -> dict[str, Any]:
+        workers, recording = self._worker_status()
         with self._lock:
-            return {**self._summary, "limitations": list(LIMITATIONS),
+            return {**self._summary, "workers": workers,
+                    "recording_bytes": (self._summary["recording_bytes"] if recording is None
+                                        else recording["bytes"]),
+                    "limitations": list(LIMITATIONS),
                     "spotter": self._spotter.snapshot(now=self.clock())}
 
 
@@ -420,6 +487,75 @@ def make_server(
     return server
 
 
+class _LiveAnalysis:
+    """Single analysis owner; publishing remains source-generation/age bound."""
+
+    byte_count = 0
+
+    def __init__(self, state, config, *, identifier, tick_rate, car_count, generation, allowed):
+        self._state, self._generation, self._allowed = state, generation, allowed
+        self._monitor = LiveMonitor(
+            source_id="local-fuel-app", session_id=identifier, sdk_tick_rate_hz=tick_rate,
+            expected_source_kind=SourceKind.SDK_LIVE, expected_car_count=car_count,
+        )
+        self._fuel, self._speech = LiveFuelEngineer(config), PracticeFuelSpeech()
+        self._next_snapshot = -math.inf
+
+    def process(self, item):
+        frame, session_type, observed = item
+        self._monitor.feed(frame, observed_monotonic_s=observed)
+        self._monitor.advance_time(observed)
+        if observed >= self._next_snapshot and self._monitor.snapshot_pending:
+            snapshot = self._monitor.snapshot()
+            fuel = self._fuel.feed(snapshot, session_type=session_type)
+            intent = self._speech.update(snapshot, fuel, session_type, observed)
+            self._state.publish(snapshot, fuel, intent, session_type, observed_at=observed,
+                                generation=self._generation, allowed=self._allowed)
+            self._next_snapshot = observed + 0.5
+
+    def finish(self):
+        pass
+
+    def close(self):
+        pass
+
+
+class _RecordingSink:
+    def __init__(self, directory, *, identifier, max_bytes):
+        from .live_app_recording import AppRecorder
+
+        self._recorder = AppRecorder(directory, source_id="local-fuel-app",
+                                     session_id=identifier, max_bytes=max_bytes)
+
+    @property
+    def byte_count(self):
+        return self._recorder.byte_count
+
+    def process(self, sample):
+        self._recorder.ingest(sample)
+
+    def finish(self):
+        self._recorder.finish()
+
+    def close(self):
+        self._recorder.close()
+
+
+def _start_analysis(state, config, identifier, tick_rate, descriptors, worker_factory, clock):
+    generation, holder = state.generation, {}
+    car_count = _expected_car_count(descriptors)
+    worker = worker_factory(
+        lambda: _LiveAnalysis(state, config, identifier=identifier, tick_rate=tick_rate,
+                              car_count=car_count, generation=generation,
+                              allowed=lambda: holder["worker"].healthy),
+        name="live-analysis", clock=clock, max_age_s=0.5,
+        on_failure=lambda: state.invalidate_analysis(generation),
+    )
+    holder["worker"] = worker
+    state.attach_worker("analysis", worker)
+    return worker
+
+
 def run_reader(
     state: AppState,
     stop: threading.Event,
@@ -429,16 +565,25 @@ def run_reader(
     clock: Callable[[], float] = monotonic_now,
     record_directory: Path | None = None,
     record_max_bytes: int = 4 * 1024**3,
+    worker_factory: Callable = FrameWorker,
 ) -> None:
-    """One owned reader, fresh model on reconnect, fixed five-second retries."""
+    """One SDK owner and at most one worker per slow lane; never join in the loop.
+
+    Workers own all recorder/analysis startup, work and teardown. They preserve
+    order and fail explicitly on bounded queue overflow. Reconnection can keep
+    proximity alive even if an old slow worker has not returned. Only final app
+    shutdown joins those owners, after the SDK handle has already been closed.
+    """
     recording_disabled = record_directory is None
     recorded_bytes = 0
     connected_once = False
+    teardown_failed = False
+    analysis_worker = recording_worker = None
     if not recording_disabled:
         state.recording("WAIT_SIM", 0)
     while not stop.is_set():
-        transport = recorder = None
-        exhausted = False
+        transport = active_analysis = active_recording = None
+        orderly = False
         try:
             transport = transport_factory()
             connection = transport.startup(0)
@@ -450,114 +595,128 @@ def run_reader(
             selected = tuple(dict.fromkeys(
                 name for name in (*LIVE_MONITOR_FIELDS, *SPOTTER_FIELDS) if name in available
             ))
-            fields = (
-                tuple(item.name for item in descriptors) if not recording_disabled else selected
-            )
             identifier = uuid4().hex
-            monitor = LiveMonitor(
-                source_id="local-fuel-app",
-                session_id=identifier,
-                sdk_tick_rate_hz=connection.tick_rate_hz,
-                expected_source_kind=SourceKind.SDK_LIVE,
-                expected_car_count=_expected_car_count(descriptors),
-            )
-            fuel_engineer, speech = LiveFuelEngineer(config), PracticeFuelSpeech()
-            if not recording_disabled:
-                from .live_app_recording import AppRecorder
-
-                try:
-                    recorder = AppRecorder(
-                        record_directory,
-                        source_id="local-fuel-app",
-                        session_id=identifier,
-                        max_bytes=record_max_bytes - recorded_bytes,
-                    )
-                    state.recording("RECORDING", recorded_bytes)
-                except (OSError, ValueError, CollectorConsistencyError):
-                    recording_disabled = True
-                    state.recording("ERROR", recorded_bytes)
             state.connection("CONNECTED")
             state.start_spotter(connection.tick_rate_hz)
             connected_once = True
-            next_snapshot = clock()
+            if analysis_worker is None or analysis_worker.done:
+                active_analysis = analysis_worker = _start_analysis(
+                    state, config, identifier, connection.tick_rate_hz, descriptors,
+                    worker_factory, clock,
+                )
+            # An old blocked analysis owner is not replaced by another thread.
+            # Its stale generation can never publish into this new connection.
+            if not recording_disabled:
+                if recording_worker is not None:
+                    previous = recording_worker.snapshot()
+                    if not previous["done"] or previous["failed"]:
+                        recording_disabled = True
+                    else:
+                        recorded_bytes += previous["bytes"]
+                if not recording_disabled:
+                    active_recording = worker_factory(
+                        lambda identifier=identifier, remaining=record_max_bytes - recorded_bytes:
+                            _RecordingSink(record_directory, identifier=identifier,
+                                           max_bytes=remaining),
+                        name="private-recording", clock=clock,
+                    )
+                    recording_worker = active_recording
+                    state.attach_worker("recording", active_recording,
+                                        recording_base_bytes=recorded_bytes)
+            # Descriptor strings are immutable and shared, but conservatively
+            # account their retained footprint for every queued recording item.
+            descriptor_bytes = 0
+            if active_recording is not None:
+                try:
+                    descriptor_bytes = payload_size(tuple(
+                        (item.name, item.dtype, item.unit, item.description,
+                         item.count, item.offset)
+                        for item in descriptors
+                    ))
+                except ValueError:
+                    active_recording.fail_payload()
+                    recording_disabled = True
             while not stop.is_set():
                 if not transport.connected:
                     raise ConnectionError("SDK disconnected")
+                if active_analysis is None and analysis_worker is not None and analysis_worker.done:
+                    # A previous connection's blocked owner has finally exited.
+                    # Start a fresh model, never reuse its old laps or answers.
+                    active_analysis = analysis_worker = _start_analysis(
+                        state, config, identifier, connection.tick_rate_hz, descriptors,
+                        worker_factory, clock,
+                    )
                 began = clock()
+                fields = (tuple(item.name for item in descriptors)
+                          if active_recording is not None and not recording_disabled else selected)
                 frame = transport.read_frozen(fields)
                 frame, metadata, scope = _transport_session_info(transport, frame)
                 session_type = bound_session_type(metadata, frame.session_info_update, frame)
                 state.feed_spotter(frame)
-                if recorder is not None:
-                    try:
-                        # Leave headroom for a complete last metadata/sample group and receipt.
-                        if recorded_bytes + recorder.byte_count >= record_max_bytes - 16 * 1024**2:
-                            recorder.finish()
-                            recorded_bytes += recorder.byte_count
-                            recorder.close()
-                            recorder = None
-                            recording_disabled = True
-                            state.recording("LIMIT_REACHED", recorded_bytes)
-                        else:
-                            recorder.ingest(
-                                CollectorSample(
-                                    frame, descriptors, connection.tick_rate_hz, metadata, scope
-                                )
-                            )
-                            state.recording("RECORDING", recorded_bytes + recorder.byte_count)
-                    except Exception:
-                        recorded_bytes += recorder.byte_count
-                        failed_recorder = recorder
-                        recorder = None
+                observed = clock()
+                if active_recording is not None and not recording_disabled:
+                    info = active_recording.snapshot()
+                    if info["failed"]:
                         recording_disabled = True
-                        # Recording teardown must not terminate the SDK owner.
-                        with suppress(Exception):
-                            failed_recorder.close()
-                        state.recording("ERROR", recorded_bytes)
-                projected = replace(
-                    frame,
-                    values={name: frame.values[name] for name in selected if name in frame.values},
-                    read_errors=tuple(name for name in frame.read_errors if name in selected),
-                )
-                monitor.feed(projected, observed_monotonic_s=clock())
-                monitor.advance_time(clock())
-                if monitor.event_count >= MAX_EVENTS_PER_CONNECTION:
-                    exhausted = True
-                    raise RuntimeError("event budget exhausted")
-                if clock() >= next_snapshot and monitor.snapshot_pending:
-                    snapshot = monitor.snapshot()
-                    fuel = fuel_engineer.feed(snapshot, session_type=session_type)
-                    intent = speech.update(snapshot, fuel, session_type, clock())
-                    state.publish(snapshot, fuel, intent, session_type)
-                    next_snapshot = clock() + 0.5
+                    elif (recorded_bytes + info["bytes"] + info["buffered_bytes"]
+                          >= record_max_bytes - 16 * 1024**2):
+                        # Stop admitting frames first, then drain all admitted
+                        # work and seal exactly that prefix. No queue eviction.
+                        active_recording.close(complete=True, reason="LIMIT_REACHED")
+                        recording_disabled = True
+                if active_recording is not None and not recording_disabled:
+                    try:
+                        size = descriptor_bytes + payload_size(
+                            (frame.values, metadata, frame.read_errors, frame.sim_mode_raw))
+                    except ValueError:
+                        active_recording.fail_payload()
+                        recording_disabled = True
+                    else:
+                        if not active_recording.submit(
+                            CollectorSample(frame, descriptors, connection.tick_rate_hz,
+                                            metadata, scope), size=size, observed_at=observed,
+                        ):
+                            recording_disabled = True
+                if active_analysis is not None and active_analysis.healthy:
+                    projected = replace(
+                        frame, values={name: frame.values[name]
+                                       for name in selected if name in frame.values},
+                        read_errors=tuple(name for name in frame.read_errors if name in selected),
+                    )
+                    try:
+                        size = payload_size((projected.values, projected.read_errors,
+                                             projected.sim_mode_raw, session_type))
+                    except ValueError:
+                        active_analysis.fail_payload()
+                    else:
+                        active_analysis.submit((projected, session_type, observed),
+                                               size=size, observed_at=observed)
                 stop.wait(max(0.0, 0.01 - (clock() - began)))
-            if recorder is not None:
-                recorder.finish()
+            orderly = True
         except SdkProbeUnavailable:
             state.connection("DISCONNECTED" if connected_once else "WAIT_SIM")
         except Exception:
             # Never publish exception strings: native/SDK paths and metadata are private.
-            state.connection("ERROR" if exhausted else "DISCONNECTED")
+            state.connection("DISCONNECTED")
         finally:
-            if recorder is not None:
-                recorded_bytes += recorder.byte_count
-                try:
-                    recorder.close()
-                except Exception:
-                    recording_disabled = True
-                    state.recording("ERROR", recorded_bytes)
-                else:
-                    state.recording("WAIT_SIM", recorded_bytes)
+            for worker in (active_analysis, active_recording):
+                if worker is not None:
+                    worker.close(complete=orderly)
             if transport is not None:
                 try:
                     transport.close()
                 except Exception:
                     state.connection("ERROR")
-        if exhausted:
-            return
+                    teardown_failed = True
+        if teardown_failed:
+            break  # Do not accumulate SDK owners whose release was not acknowledged.
         if not stop.is_set():
             stop.wait(5)
-    state.connection("STOPPED")
+    if not teardown_failed:
+        state.connection("STOPPED")
+    for worker in (analysis_worker, recording_worker):
+        if worker is not None:
+            worker.join()
 
 
 def run_live_app(

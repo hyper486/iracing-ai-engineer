@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import FrozenInstanceError, replace
 
@@ -73,6 +74,55 @@ def normalize_stream(
 
 def kinds(events) -> list[EventKind]:
     return [event.kind for event in events]
+
+
+@pytest.mark.parametrize("chunk_size", [1, 17, 1000])
+def test_streaming_retention_preserves_original_event_sequence_and_exact_receipt(chunk_size):
+    samples = normalize_stream([
+        frame(tick=tick, session_time=tick / 60, flags=1 + tick % 2,
+              on_pit_road=tick % 7 == 0)
+        for tick in range(1, 301)
+    ])
+    expected, receipt = process_telemetry_events(samples)
+    digest = hashlib.sha256(json.dumps(
+        [event.to_dict() for event in expected], sort_keys=True,
+        separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+    ).encode()).hexdigest()
+    assert receipt.events_sha256 == digest
+    streaming, emitted = TelemetryEventPipeline(retain_history=False), []
+    for start in range(0, len(samples), chunk_size):
+        emitted.extend(streaming.feed(samples[start:start + chunk_size]))
+        assert len(streaming._events) < 10
+    assert tuple(emitted) == expected and streaming.finish() == receipt
+    with pytest.raises(RuntimeError, match="retention is disabled"):
+        _ = streaming.events
+
+
+def test_empty_stream_has_identical_receipt_in_either_retention_mode():
+    assert (TelemetryEventPipeline().finish()
+            == TelemetryEventPipeline(retain_history=False).finish())
+
+
+def test_streaming_state_exceeds_old_live_event_budget_without_history_growth():
+    # Invent repeated rejected observations to stress the event-heavy case.
+    # This is not a real-time or authentic SDK endurance acceptance check.
+    from iracing_ai_engineer.telemetry import Provenance, QualityStatus
+
+    sample = normalize_stream([frame(tick=1, session_time=1.0)])[0]
+    sample = replace(sample, quality=replace(
+        sample.quality,
+        status=TelemetryField.present(QualityStatus.REJECTED, Provenance.DERIVED),
+    ))
+    pipeline = TelemetryEventPipeline(retain_history=False)
+    last_sequence = -1
+    for _ in range(50_100):
+        for event in pipeline.feed(sample):
+            assert event.sequence == last_sequence + 1
+            last_sequence = event.sequence
+        assert len(pipeline._events) < 10
+    receipt = pipeline.finish()
+    assert receipt.event_count > 50_000
+    assert receipt.rejected_sample_count == 50_100
 
 
 def test_detects_lap_pit_stall_and_flag_transitions():

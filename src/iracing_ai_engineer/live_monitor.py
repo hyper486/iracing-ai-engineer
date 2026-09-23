@@ -250,7 +250,9 @@ class LiveMonitor:
         self._binding_sha256 = _sha256(
             {"session_id": session_id, "source_id": source_id}
         )
-        self._events = TelemetryEventPipeline()
+        # Live consumers drain each feed result. Preserve the exact receipt hash
+        # without retaining a race-long duplicate of every emitted event.
+        self._events = TelemetryEventPipeline(retain_history=False)
         self._pending_events: list[TelemetryEvent] = []
         self._interval_invalid_for_fuel: set[str] = set()
         self._interval_unsafe_for_speech: set[str] = set()

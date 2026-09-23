@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import math
+import threading
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -11,6 +13,7 @@ import pytest
 from iracing_ai_engineer import live_app, live_app_recording
 from iracing_ai_engineer.collector import CollectorConsistencyError, CollectorSample
 from iracing_ai_engineer.live_fuel import LiveFuelConfig
+from iracing_ai_engineer.live_worker import FrameWorker
 from iracing_ai_engineer.sdk_probe import SDK_TYPE_NAMES, RawSdkFrame, VariableDescriptor
 
 MIB = 1024**2
@@ -47,8 +50,8 @@ class ObservedState(live_app.AppState):
         self.transitions = []
         self.recording_states = []
 
-    def publish(self, monitor, fuel, speech, session_type):
-        super().publish(monitor, fuel, speech, session_type)
+    def publish(self, monitor, fuel, speech, session_type, **kwargs):
+        super().publish(monitor, fuel, speech, session_type, **kwargs)
         self.publications.append(self.snapshot())
 
     def connection(self, status):
@@ -180,6 +183,23 @@ class FakeSdk:
         self.closed = True
 
 
+class PacedWorker(FrameWorker):
+    """Synchronize synthetic clock advancement, still using the real worker.
+
+    These numeric frame fixtures run faster than wall time. Async latency/fault
+    tests separately use real Events and the unmodified production worker.
+    """
+
+    def submit(self, *args, **kwargs):
+        result = super().submit(*args, **kwargs)
+        assert self.wait_idle(3)
+        return result
+
+    def close(self, **kwargs):
+        super().close(**kwargs)
+        assert self.join(3)
+
+
 def _run(specs, *, record_directory=None, record_max_bytes=32 * MIB):
     clock, stop = Clock(), Stop()
     state = ObservedState(clock)
@@ -192,6 +212,7 @@ def _run(specs, *, record_directory=None, record_max_bytes=32 * MIB):
         state, stop, LiveFuelConfig(minimum_valid_laps=2),
         transport_factory=lambda: next(pending), clock=clock,
         record_directory=record_directory, record_max_bytes=record_max_bytes,
+        worker_factory=PacedWorker,
     )
     assert all(transport.closed for transport in transports)
     assert state.snapshot()["connection"] == "STOPPED"
@@ -464,3 +485,232 @@ def test_recorder_close_error_cannot_kill_reader_or_skip_sdk_teardown(
     assert len(state.publications) >= 4
     assert state.snapshot()["recording"]["status"] == "ERROR"
     assert stop.retries == [5]
+
+
+def _eventually(predicate):
+    deadline = time.perf_counter() + 3
+    while not predicate():
+        if time.perf_counter() > deadline:
+            raise AssertionError("SYNTHETIC_THREAD_TIMEOUT")
+        time.sleep(0.005)
+
+
+class GatedSdk(FakeSdk):
+    """Admit the first worker call, then race synthetic ticks past that blocker."""
+
+    def __init__(self, clock, stop, blocked):
+        super().__init__(clock, stop, 151, stop_on_last=True,
+                         value_changes={tick: {"CarLeftRight": 2} for tick in range(10, 31)})
+        self.blocked = blocked
+        self.at_tail, self.finish = threading.Event(), threading.Event()
+
+    def read_frozen(self, fields):
+        if self.read_count == 1:
+            assert self.blocked.wait(3)
+        if self.read_count == 150:
+            self.at_tail.set()
+            assert self.finish.wait(3)
+        return super().read_frozen(fields)
+
+
+@pytest.mark.parametrize("phase", ["startup", "ingest", "close"])
+def test_blocked_recording_lane_keeps_sdk_proximity_and_fuel_running(
+    tmp_path, monkeypatch, phase,
+):
+    blocked, release = threading.Event(), threading.Event()
+    instances = []
+
+    class BlockingRecorder:
+        def __init__(self, *_args, **_kwargs):
+            self.byte_count = 0
+            self.finished = self.closed = False
+            instances.append(self)
+            if phase == "startup":
+                blocked.set()
+                assert release.wait(5)
+
+        def ingest(self, _sample):
+            if phase == "ingest":
+                blocked.set()
+                assert release.wait(5)
+            if phase == "close":
+                raise OSError("SYNTHETIC PRIVATE WRITE FAILURE")
+            self.byte_count += 10
+
+        def finish(self):
+            self.finished = True
+
+        def close(self):
+            if phase == "close":
+                blocked.set()
+                assert release.wait(5)
+            self.closed = True
+
+    monkeypatch.setattr(live_app_recording, "AppRecorder", BlockingRecorder)
+    clock, stop = Clock(), Stop()
+    state = ObservedState(clock)
+    sdk = GatedSdk(clock, stop, blocked)
+
+    def factory(*args, **kwargs):
+        cls = PacedWorker if kwargs["name"] == "live-analysis" else FrameWorker
+        return cls(*args, **kwargs)
+
+    reader = threading.Thread(target=live_app.run_reader, args=(state, stop, LiveFuelConfig()),
+                              kwargs={"transport_factory": lambda: sdk, "clock": clock,
+                                      "record_directory": tmp_path, "worker_factory": factory})
+    reader.start()
+    try:
+        assert sdk.at_tail.wait(3)
+        assert sdk.read_count == 150 and state.spotter_snapshot()["connection"] == "CONNECTED"
+        assert len(state.publications) >= 4
+        candidates = [row["kind"] for row in state.spotter_audit()
+                      if row["decision"] == "CANDIDATE"]
+        assert candidates == ["CAR_LEFT", "ALL_CLEAR"]
+        health = state.snapshot()["workers"]["recording"]
+        assert health["status"] == "ERROR" and not health["done"]
+        assert health["reason"] == ("PROCESSING_FAILED" if phase == "close" else "QUEUE_OVERFLOW")
+        assert health["buffered_bytes"] <= health["max_bytes"]
+        assert health["buffered_frames"] <= health["max_frames"]
+        assert 0 < health["peak_buffered_bytes"] <= health["max_bytes"]
+        assert 0 < health["peak_buffered_frames"] <= health["max_frames"]
+        sdk.finish.set()
+        _eventually(lambda: sdk.closed)
+        assert reader.is_alive()  # SDK closed, still truthfully waiting for the sink.
+    finally:
+        sdk.finish.set()
+        release.set()
+        reader.join(3)
+    assert not reader.is_alive() and instances[0].closed and not instances[0].finished
+    assert len(instances) == 1
+
+
+@pytest.mark.parametrize("release_before_stop", [False, True])
+def test_blocked_analysis_expires_locally_without_stopping_proximity_or_late_publication(
+    monkeypatch, release_before_stop,
+):
+    blocked, release = threading.Event(), threading.Event()
+    original = live_app.LiveMonitor.feed
+
+    def blocked_feed(self, *args, **kwargs):
+        blocked.set()
+        assert release.wait(5)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(live_app.LiveMonitor, "feed", blocked_feed)
+    clock, stop = Clock(), Stop()
+    state = live_app.AppState(clock=clock)
+    sdk = GatedSdk(clock, stop, blocked)
+    reader = threading.Thread(target=live_app.run_reader, args=(state, stop, LiveFuelConfig()),
+                              kwargs={"transport_factory": lambda: sdk, "clock": clock})
+    reader.start()
+    try:
+        assert sdk.at_tail.wait(3)
+        assert sdk.read_count == 150
+        health = state.snapshot()["workers"]["analysis"]
+        assert health["status"] == "ERROR" and health["reason"] == "QUEUE_STALE"
+        assert state.spotter_snapshot()["connection"] == "CONNECTED"
+        assert state.spotter_snapshot()["spotter"]["status"] == "READY"
+        assert state.snapshot()["fuel"] is None
+        if release_before_stop:
+            release.set()
+            _eventually(lambda: state.snapshot()["workers"]["analysis"]["done"])
+            assert state.spotter_snapshot()["connection"] == "CONNECTED"
+            assert state.snapshot()["monitor"] is None  # Same-generation fault stays withdrawn.
+        sdk.finish.set()
+        _eventually(lambda: sdk.closed)
+        if not release_before_stop:
+            assert reader.is_alive()
+    finally:
+        sdk.finish.set()
+        release.set()
+        reader.join(3)
+    assert not reader.is_alive()
+    assert state.snapshot()["fuel"] is None and state.snapshot()["monitor"] is None
+    assert state.snapshot()["connection"] == "STOPPED"
+
+
+@pytest.mark.parametrize("recover", [False, True])
+def test_reconnect_does_not_wait_for_or_duplicate_old_analysis_owner(monkeypatch, recover):
+    blocked, release = threading.Event(), threading.Event()
+    original = live_app.LiveMonitor.feed
+    feeds = []
+
+    def blocked_feed(self, *args, **kwargs):
+        feeds.append(1)
+        blocked.set()
+        assert release.wait(5)
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(live_app.LiveMonitor, "feed", blocked_feed)
+    clock, stop = Clock(), Stop()
+    state = ObservedState(clock)
+    first = FakeSdk(clock, stop, 1)
+    second = GatedSdk(clock, stop, blocked)
+    transports, workers = iter((first, second)), []
+
+    def factory(*args, **kwargs):
+        cls = PacedWorker if workers else FrameWorker
+        worker = cls(*args, **kwargs)
+        workers.append(worker)
+        return worker
+
+    # Make the initial frame reach its owner before the next synthetic connection.
+    original_close = first.close
+
+    def first_close():
+        assert blocked.wait(3)
+        original_close()
+
+    first.close = first_close
+    reader = threading.Thread(target=live_app.run_reader, args=(state, stop, LiveFuelConfig()),
+                              kwargs={"transport_factory": lambda: next(transports),
+                                      "clock": clock, "worker_factory": factory})
+    reader.start()
+    try:
+        assert second.at_tail.wait(3)
+        assert first.closed and second.read_count == 150 and len(workers) == 1
+        assert state.spotter_snapshot()["connection"] == "CONNECTED"
+        assert state.spotter_snapshot()["spotter"]["status"] == "READY"
+        assert state.snapshot()["workers"]["analysis"]["status"] == "WAIT_PREVIOUS"
+        release.set()
+        assert workers[0].join(3)
+        assert state.snapshot()["monitor"] is None  # The old generation cannot republish.
+        if recover:
+            # Continue beyond the tail gate so the reader sees the old owner's
+            # actual exit and starts precisely one fresh model on this session.
+            second.frame_count = 182
+    finally:
+        release.set()
+        second.finish.set()
+        reader.join(3)
+    assert not reader.is_alive() and second.closed
+    assert stop.retries == [5]
+    assert len(workers) == (2 if recover else 1)
+    if recover:
+        current = [row for row in state.publications if row["monitor"] is not None]
+        assert current and all(row["generation"] == state.generation - 1 for row in current)
+        assert all(row["fuel"]["valid_laps"] == 0 for row in current)
+    else:
+        assert feeds == [1]
+
+
+def test_failed_sdk_release_is_not_reported_as_clean_stop_or_restarted():
+    clock, stop = Clock(), Stop()
+    state = live_app.AppState(clock=clock)
+    sdk = FakeSdk(clock, stop, 10, stop_on_last=True)
+    opened = []
+
+    def factory():
+        opened.append(1)
+        return sdk
+
+    def broken_close():
+        raise OSError("SYNTHETIC PRIVATE SDK CLOSE")
+
+    sdk.close = broken_close
+    live_app.run_reader(state, stop, LiveFuelConfig(), transport_factory=factory, clock=clock,
+                        worker_factory=PacedWorker)
+    assert opened == [1] and stop.retries == []
+    assert state.snapshot()["connection"] == "ERROR"
+    assert state.spotter_snapshot()["spotter"]["status"] == "ERROR"
+    assert "PRIVATE" not in str(state.report())

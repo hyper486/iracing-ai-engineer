@@ -71,6 +71,37 @@ def test_disconnect_clears_estimates_and_connect_uses_new_generation():
     assert state.snapshot()["monitor"] is None
 
 
+@pytest.mark.parametrize("status,reason,failed,expected", [
+    ("DRAINING", "SOURCE_ENDED", False, "RESTART_REQUIRED"),
+    ("INCOMPLETE", "SOURCE_ENDED", False, "RESTART_REQUIRED"),
+    ("COMPLETE", "LIMIT_REACHED", False, "LIMIT_REACHED"),
+    ("ERROR", "CLOSE_FAILED", True, "ERROR"),
+])
+def test_old_recorder_health_is_not_current_capture(status, reason, failed, expected):
+    state = live_app.AppState()
+    state.connection("CONNECTED")
+    row = {"status": status, "reason": reason, "failed": failed, "done": status != "DRAINING",
+           "bytes": 13, "processed_frames": 1}
+    state.attach_worker("recording", SimpleNamespace(snapshot=lambda: dict(row)),
+                        recording_base_bytes=100)
+    state.connection("DISCONNECTED")
+    state.connection("CONNECTED")
+    assert state.snapshot()["recording"] == {"status": expected, "bytes": 113}
+    assert state.report()["recording_bytes"] == 113
+
+
+def test_analysis_health_withdraws_existing_data_without_relying_on_failure_callback():
+    state = live_app.AppState()
+    state.connection("CONNECTED")
+    state.publish(_snapshot(), _fuel(), None, "Race")
+    row = {"status": "ERROR", "reason": "PROCESSING_FAILED", "failed": True, "done": False}
+    state.attach_worker("analysis", SimpleNamespace(snapshot=lambda: dict(row)))
+    result = state.snapshot()
+    assert result["transport_connection"] == "CONNECTED"
+    assert result["monitor"] is result["fuel"] is result["speech"] is None
+    assert result["updated_age_s"] is None and result["connection"] == "DISCONNECTED"
+
+
 def test_speech_is_practice_fact_only_safe_window_cooldown_and_no_queue():
     policy = live_app.PracticeFuelSpeech()
     monitor, fuel = _snapshot(), _fuel()

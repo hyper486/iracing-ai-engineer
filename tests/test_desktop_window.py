@@ -111,6 +111,43 @@ def test_detector_and_audio_health_remain_separate_without_implying_hearing(
     assert "音频尚未接入" not in view.spotter
 
 
+def test_analysis_failure_and_recording_overflow_are_not_presented_as_sdk_disconnection():
+    snapshot = _snapshot()
+    telemetry = snapshot["telemetry"]
+    telemetry.update(connection="DISCONNECTED", transport_connection="CONNECTED",
+                     monitor=None, fuel=None,
+                     workers={"analysis": {"status": "ERROR", "reason": "QUEUE_STALE"},
+                              "recording": {"status": "ERROR", "reason": "QUEUE_OVERFLOW"}},
+                     recording={"status": "ERROR", "bytes": 1000})
+    telemetry["spotter"] = {"status": "READY"}
+    view = DesktopPresenter().project(snapshot, now=10.0)
+    assert "采集已连接" in view.connection and "暂停" in view.quality
+    assert "积压" in view.quality and "本段不完整" in view.recording
+    assert "近车判定数据就绪" in view.spotter
+    assert set(view.metrics.values()) == {"—"}
+
+
+@pytest.mark.parametrize("status,expected", [
+    ("STARTING", "初始化"), ("DRAINING", "尚未完成"), ("EMPTY", "未录到数据"),
+    ("COMPLETE", "非驾驶验收"),
+])
+def test_recording_start_drain_empty_and_complete_have_distinct_labels(status, expected):
+    snapshot = _snapshot()
+    snapshot["telemetry"]["recording"] = {"status": status, "bytes": 0}
+    assert expected in DesktopPresenter().project(snapshot, now=10).recording
+
+
+@pytest.mark.parametrize("old_status", ["DRAINING", "INCOMPLETE"])
+def test_old_recording_owner_is_not_presented_as_recording_the_new_connection(old_status):
+    snapshot = _snapshot()
+    snapshot["telemetry"].update(
+        generation=3, recording={"status": "RESTART_REQUIRED", "bytes": 100},
+        workers={"recording": {"status": old_status, "generation": 1}},
+    )
+    text = DesktopPresenter().project(snapshot, now=10).recording
+    assert "本连接未录制" in text and "重启采集" in text
+
+
 def test_voice_choices_keep_exact_ids_while_labels_are_unique_and_bounded() -> None:
     choices = voice_choices([
         {"id": "mic-a", "name": "Microphone"}, {"id": "mic-b", "name": "Microphone"},

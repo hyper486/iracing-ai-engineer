@@ -41,8 +41,8 @@ Starting or recovering on a clear track is silent.
 
 ## Integration and diagnostics
 
-The live reader feeds the detector before synchronous recording and the slower
-fuel/display publication. AppState protects the detector with its state lock and
+The live reader feeds the detector before admitting work to independent bounded
+recording and analysis lanes. AppState protects the detector with its state lock and
 samples observation time while holding that lock. Snapshot polling can therefore
 expire stale state without creating a spurious clock regression in a waiting
 reader. Detector exceptions latch a separate error until reconnection; they do
@@ -89,14 +89,50 @@ nor a full reader/recorder/audio/VR endurance acceptance test.
 
 - The native audio lane below is implemented in source, but actual headphones,
   human speech, output latency, VR load and packaged integration remain unaccepted.
-- Transport, synchronous recording and broader analysis still share a reader
-  thread. A blocked writer can delay subsequent reads, and a non-spotter analysis
-  exception can still force reconnection. Full fault and latency isolation is
-  not established by this slice.
+- Recording and broader analysis now have separate worker threads as described
+  below. SDK reads, metadata binding and bounded input inspection still run on the
+  reader. Threads do not isolate CPU/GIL contention or a hung native SDK operation;
+  this is not hard real-time scheduling or measured VR latency isolation.
 - The raw private recorder exists, but deterministic reconstruction of this new
   event-to-audio chain from a complete captured session remains Stage E work.
 - No authentic in-car proximity, human hearing, VR frame-time or new packaged-EXE
   acceptance has been performed. Strategy and driving acceptance are unchanged.
+
+## Bounded capture and analysis lanes
+
+`FrameWorker` owns a sink's construction, processing, byte-count access, finish
+and close. The SDK producer queues frozen transport-owned objects and never waits
+for a slow sink inside its sampling loop. Each lane admits at most 128 observations
+and 16 MiB of conservative retained-payload accounting, including in-flight work;
+these are neither serialized-file size nor a total-process RSS guarantee. Queue
+entries may include duplicate SDK ticks. Status contains counts, fixed reason
+codes and the last owner-observed committed bytes, which can lag an active write.
+
+Overflow is a terminal lane error, not an oldest-frame eviction policy. It rejects
+the triggering observation, counts discarded pending work and preserves only the
+written prefix without appending a successful completion receipt. Recorder setup,
+write, finalization and close errors stay in that lane. A configured file-cap stop
+drains all admitted work and may seal that bounded prefix; it does not claim to
+have captured the rest of the session. Disconnect drains without marking complete.
+
+Analysis additionally rejects a queue whose oldest active/pending observation is
+more than 0.5 seconds old. Published fuel retains its original observation time;
+an errored lane withdraws it and cannot republish a late result. A connection
+generation prevents an old worker from publishing into a new session. Reconnection
+does not create replacement owners while predecessors are alive: proximity keeps
+running, analysis can resume once its old owner exits, and a recorder still alive
+at reconnection disables recording until a deliberate reader restart. Native
+status distinguishes this from currently recording or being disconnected.
+
+Live telemetry events use incremental canonical-array hashing and aggregate
+counts instead of a race-long duplicate event list. Event sequences and receipts
+are byte-compatible with the retaining offline pipeline. The live app no longer
+stops its SDK reader at 50,000 events. Test coverage includes 50,100 invented
+rejected observations, exact digest equivalence, blocked sinks, late analysis,
+reconnect/recovery and failed SDK release. These are synthetic fault checks, not
+hardware endurance evidence. A failed SDK release prevents another SDK owner.
+Final app shutdown closes the SDK before waiting for slow lane teardown; it
+truthfully remains pending if a sink never returns rather than claiming closure.
 
 ## Native voice consumer (Stage B source)
 

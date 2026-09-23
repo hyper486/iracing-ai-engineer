@@ -208,6 +208,19 @@ class DesktopPresenter:
         connection = "遥测已连接" if fresh else labels.get(
             telemetry.get("connection"), "数据过期 / 服务不可用"
         )
+        workers = _mapping(telemetry.get("workers"))
+        analysis_health = _mapping(workers.get("analysis"))
+        if not fresh and telemetry.get("transport_connection") == "CONNECTED":
+            connection = "采集已连接 · 分析暂无有效数据"
+        quality_text = "质量：" + _text(quality.get("status"), "未知")
+        analysis_labels = {
+            "STARTING": "分析正在初始化", "WAIT_PREVIOUS": "等待上一段分析退出，近车状态单独显示",
+            "DRAINING": "分析正在收尾", "ERROR": "分析已暂停，近车状态单独显示",
+        }
+        if analysis_health.get("status") in analysis_labels:
+            quality_text = analysis_labels[analysis_health["status"]]
+            if analysis_health.get("reason") in ("QUEUE_OVERFLOW", "QUEUE_STALE"):
+                quality_text += "（队列积压或数据过期）"
         context_label = "正在驾驶 · 实验燃油估计" if usable else (
             "观战 / 回放 / 未进入驾驶" if fresh and not in_car else "无可用实时建议"
         )
@@ -235,9 +248,23 @@ class DesktopPresenter:
                     metrics[key] = format_number(fuel.get(field), unit, digits)
         recording = _mapping(telemetry.get("recording"))
         record_labels = {"DISABLED": "记录未启用", "RECORDING": "正在仅向本机记录",
-                         "WAIT_SIM": "等待模拟器后自动记录", "ERROR": "记录因写入错误停止",
+                         "WAIT_SIM": "等待模拟器后自动记录", "ERROR": "记录异常停止，本段不完整",
+                         "STARTING": "正在初始化本机记录", "DRAINING": "记录正在收尾，尚未完成",
+                         "COMPLETE": "已完成本段记录，非驾驶验收",
+                         "EMPTY": "未录到数据",
+                         "RESTART_REQUIRED": "本连接未录制，请待上段结束后重启采集",
                          "LIMIT_REACHED": "已达记录容量上限"}
         record_text = record_labels.get(recording.get("status"), "记录状态未确认")
+        record_health = _mapping(workers.get("recording"))
+        if recording.get("status") == "RESTART_REQUIRED":
+            pass  # Do not disguise an old worker's cleanup as current recording.
+        elif record_health.get("reason") == "QUEUE_OVERFLOW":
+            record_text = "记录队列已满，本段不完整；采集仍可继续"
+        elif record_health.get("status") == "INCOMPLETE":
+            record_text = "上段记录未完成，保留已写入部分"
+        elif (record_health.get("status") == "DRAINING"
+              and record_health.get("generation") != telemetry.get("generation")):
+            record_text = "正在结束上一段记录，当前未录制"
         if _finite(recording.get("bytes")):
             record_text += f" · {recording['bytes'] / 1048576:.1f} MiB"
         reasons: list[str] = []
@@ -300,7 +327,7 @@ class DesktopPresenter:
         spotter = f"Spotter：{proximity_text} · {audio_text}"
         return DesktopView(
             lifecycle=lifecycle, connection=connection, source=source, context=context_label,
-            quality="质量：" + _text(quality.get("status"), "未知"),
+            quality=quality_text,
             tone="good" if usable else "warn" if fresh else "bad", advice=advice,
             metrics=metrics, learning=learning, progress=progress, recording=record_text,
             issues=issue_text, engineer_status=engineer_labels.get(status, "问答服务未连接"),

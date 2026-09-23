@@ -60,9 +60,17 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
 - Implemented: synthetic scenarios for held PTT, blocked recognition/model/TTS,
   long output, stale data, selected-output loss, reconfiguration and shutdown.
   Device-default refresh behavior remains covered by the audio backend tests.
-- Separate noncritical analysis faults from acquisition. Decouple durable writes
-  only with bounded buffering and explicit overflow/incomplete-capture accounting;
-  never silently drop frames and still claim a complete recording.
+- Implemented: separate single-owner analysis and private-recording lanes, with
+  bounded queues including active work, fixed failure reasons and incomplete
+  capture accounting. Slow startup/write/close/status access does not run on the
+  SDK owner. Overloaded analysis withdraws fuel without stopping proximity;
+  old-generation results cannot republish after reconnection.
+- Implemented: streaming event counts/digests with unchanged receipt bytes,
+  removing the live app's 50,000-event shutdown and race-long event list. Synthetic
+  checks exceeding that old threshold are not a full-duration hardware soak.
+- Remaining isolation boundary: SDK access, metadata binding and bounded input
+  inspection still run on the reader; Python threads do not isolate the GIL or
+  forcibly recover a hung native call. Final shutdown waits for actual release.
 - Verify endurance-duration resource limits, implement the current fuel/strategy
   and incremental corner loops, and connect private capture replay to the new
   event/playback audit before claiming an integrated trial build.

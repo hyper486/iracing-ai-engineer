@@ -27,6 +27,8 @@ practice opportunity.
   questions, VR push-to-talk and selectable audio devices; no browser or WebView needed.
 - Tick-level proximity detection plus opt-in cached Chinese proximity audio,
   independent of fuel/STT/LLM work, with priority cancellation and readiness diagnostics.
+- Bounded analysis/recording workers, explicit incomplete-capture failures and
+  streaming live-event digests; slow sinks are isolated from the SDK reader.
 - An experimental local fuel dashboard with private recording and opt-in local
   practice speech; race speech stays disabled.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
