@@ -29,6 +29,12 @@ from .collector import (
 from .dashboard_page import DASHBOARD_HTML
 from .live_fuel import LiveFuelConfig, LiveFuelEngineer
 from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
+from .live_traffic import (
+    bound_track_length_mm,
+    project_live_traffic,
+    situation_binding,
+    unavailable_traffic,
+)
 from .live_worker import FrameWorker, payload_size
 from .llm_engineer import EngineerConfig, EngineerService
 from .runtime_clock import monotonic_now
@@ -152,6 +158,7 @@ class AppState:
         self._updated: float | None = None
         self._generation = 0
         self._engineer_revision = 0
+        self._situation_revision = 0
         self._spotter = ProximitySpotter()
         self._spotter_failed = False
         self._workers = {}
@@ -161,6 +168,7 @@ class AppState:
             "connection": "WAIT_SIM",
             "monitor": None,
             "fuel": None,
+            "traffic": None,
             "speech": None,
             "source_mode": "LIVE",
             "session_type": None,
@@ -183,7 +191,8 @@ class AppState:
             raise ValueError("invalid connection status")
         with self._lock:
             self._value.update(
-                connection=status, monitor=None, fuel=None, speech=None, session_type=None
+                connection=status, monitor=None, fuel=None, traffic=None, speech=None,
+                session_type=None,
             )
             self._updated = None
             self._generation += 1
@@ -250,7 +259,8 @@ class AppState:
             if generation == self._generation:
                 self._updated = None
                 self._engineer_revision += 1
-                self._value.update(monitor=None, fuel=None, speech=None)
+                self._situation_revision += 1
+                self._value.update(monitor=None, fuel=None, traffic=None, speech=None)
 
     def _worker_status(self):
         # Never take a worker lock while holding the AppState lock. A worker's
@@ -282,7 +292,7 @@ class AppState:
 
     def publish(
         self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None,
-        *, observed_at=None, generation=None, allowed=lambda: True,
+        *, observed_at=None, generation=None, allowed=lambda: True, traffic=None,
     ) -> None:
         with self._lock:
             if (generation is not None and generation != self._generation) or not allowed():
@@ -290,13 +300,24 @@ class AppState:
             previous = self._value.get("monitor") or {}
             previous_fuel = self._value.get("fuel") or {}
             old_level, new_level = previous_fuel.get("current_fuel_l"), fuel.get("current_fuel_l")
-            if (
+            source_changed = (
                 (self._updated is not None and self.clock() - self._updated > FRESHNESS_S)
                 or _engineer_safety_binding(previous) != _engineer_safety_binding(monitor)
                 or self._value.get("session_type") != session_type
                 or previous.get("telemetry", {}).get("session_num")
                 != monitor.get("telemetry", {}).get("session_num")
-                or previous_fuel.get("status") != fuel.get("status")
+                or any(event.get("kind") in ("source_reset", "session_reset")
+                       for event in monitor.get("events", []))
+                or bool(set(monitor.get("interval_invalid_for_fuel", [])) & {
+                    "OUT_OF_CAR_INTERVAL", "IDENTITY_CHANGED_INTERVAL", "NONLIVE_INTERVAL",
+                    "SOURCE_STALE",
+                })
+            )
+            if (source_changed or situation_binding(self._value)
+                    != situation_binding({"monitor": monitor, "traffic": traffic})):
+                self._situation_revision += 1
+            if (
+                source_changed or previous_fuel.get("status") != fuel.get("status")
                 or monitor.get("interval_invalid_for_fuel")
                 or (_finite(old_level) and _finite(new_level) and new_level > old_level + 0.05)
             ):
@@ -306,6 +327,7 @@ class AppState:
                 connection="CONNECTED",
                 monitor=copy.deepcopy(monitor),
                 fuel=copy.deepcopy(fuel),
+                traffic=copy.deepcopy(traffic),
                 speech=copy.deepcopy(speech),
                 session_type=session_type,
             )
@@ -332,12 +354,14 @@ class AppState:
                 analysis["failed"] or analysis["generation"] != self._generation
             ):
                 # Defense in depth if a fault-notification callback could not run.
-                value.update(monitor=None, fuel=None, speech=None)
+                value.update(monitor=None, fuel=None, traffic=None, speech=None)
                 age = None
             value.update(updated_age_s=age, generation=self._generation,
-                         engineer_revision=self._engineer_revision)
+                         engineer_revision=self._engineer_revision,
+                         situation_revision=self._situation_revision)
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
-                value.update(connection="DISCONNECTED", fuel=None, monitor=None, speech=None)
+                value.update(connection="DISCONNECTED", fuel=None, monitor=None, traffic=None,
+                             speech=None)
             intent = value.get("speech")
             if intent is not None:
                 remaining = intent.pop("deadline") - self.clock()
@@ -499,18 +523,29 @@ class _LiveAnalysis:
             expected_source_kind=SourceKind.SDK_LIVE, expected_car_count=car_count,
         )
         self._fuel, self._speech = LiveFuelEngineer(config), PracticeFuelSpeech()
+        self._traffic_failed = False
         self._next_snapshot = -math.inf
 
     def process(self, item):
-        frame, session_type, observed = item
+        frame, session_type, observed, track_length_mm = item
         self._monitor.feed(frame, observed_monotonic_s=observed)
         self._monitor.advance_time(observed)
         if observed >= self._next_snapshot and self._monitor.snapshot_pending:
             snapshot = self._monitor.snapshot()
             fuel = self._fuel.feed(snapshot, session_type=session_type)
             intent = self._speech.update(snapshot, fuel, session_type, observed)
+            traffic = unavailable_traffic(snapshot, "TRAFFIC_PROCESSING_ERROR")
+            if not self._traffic_failed:
+                try:
+                    traffic = project_live_traffic(
+                        self._monitor.latest_sample, snapshot, track_length_mm,
+                        metadata_update=frame.session_info_update,
+                    )
+                except Exception:
+                    # Isolate an analytical fault; no native errors or retry storm.
+                    self._traffic_failed = True
             self._state.publish(snapshot, fuel, intent, session_type, observed_at=observed,
-                                generation=self._generation, allowed=self._allowed)
+                                generation=self._generation, allowed=self._allowed, traffic=traffic)
             self._next_snapshot = observed + 0.5
 
     def finish(self):
@@ -678,6 +713,8 @@ def run_reader(
                         ):
                             recording_disabled = True
                 if active_analysis is not None and active_analysis.healthy:
+                    track_length_mm = bound_track_length_mm(metadata, frame.session_info_update,
+                                                            frame)
                     projected = replace(
                         frame, values={name: frame.values[name]
                                        for name in selected if name in frame.values},
@@ -685,11 +722,11 @@ def run_reader(
                     )
                     try:
                         size = payload_size((projected.values, projected.read_errors,
-                                             projected.sim_mode_raw, session_type))
+                                             projected.sim_mode_raw, session_type, track_length_mm))
                     except ValueError:
                         active_analysis.fail_payload()
                     else:
-                        active_analysis.submit((projected, session_type, observed),
+                        active_analysis.submit((projected, session_type, observed, track_length_mm),
                                                size=size, observed_at=observed)
                 stop.wait(max(0.0, 0.01 - (clock() - began)))
             orderly = True

@@ -46,8 +46,9 @@ limits are tracked in [the public status](PUBLIC_PROJECT_STATUS.md) and
 cache, priority ownership, cancellation and settings migration are now implemented
 in source. Synthetic backend, local memory-only synthesis and visible synthetic
 UI checks are not a real hearing/VR acceptance pass. No new EXE deployment is
-claimed. Stage C's local current-fuel question slice is now implemented in source;
-strategy integration and real lap comparisons remain open. Stage B hardware
+claimed. Stage C's local current-fuel and physical-traffic question slices are
+implemented in source, including player pit permission and flag observations.
+Action-bound strategy integration and real lap comparisons remain open. Stage B hardware
 acceptance, D-E and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.
 LLM use is opt-in, summary-only, for question interpretation and explanation.
@@ -79,6 +80,13 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   fuel-only stop bounds retain horizon, reserve and capacity limitations.
   Selected-fact withdrawal prevents a usable observation from preserving a
   now-invalid forecast. See [the question contract](LIVE_FUEL_QUESTIONS.md).
+- Implemented: bound circular-track traffic observations and player pit-state
+  facts in native display/PTT, independent of fuel learning. Physical distance
+  is never relabeled as a time gap, race order or future rejoin position.
+  Situation answers use a ten-second question-time limit and separate revision;
+  changed neighbours, source loss, permission or flags withdraw old answers.
+  Short speech and full explanatory text are separate. See
+  [the traffic contract](LIVE_TRAFFIC_QUESTIONS.md).
 - Verify endurance-duration resource limits, integrate supported live strategy
   and incremental corner loops, and connect private capture replay to the new
   event/playback audit before claiming an integrated trial build.

@@ -291,6 +291,11 @@ class LiveMonitor:
         return self._event_count
 
     @property
+    def latest_sample(self) -> TelemetrySample | None:
+        """Immutable normalized sample for same-owner analytical consumers."""
+        return self._latest_sample
+
+    @property
     def latest_buffer_tick(self) -> int | None:
         return self._latest_buffer_tick
 

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from .live_queries import LOCAL_QUERY_INTERVAL_S, live_query_intent, render_live_query
+from .live_traffic import TRAFFIC_ANSWER_TTL_S, situation_binding
 from .llm_client import DeepSeekClient, LLMError
 from .llm_evidence import build_live_context, load_session_context
 from .runtime_clock import monotonic_now
@@ -75,13 +76,13 @@ def _topic(question: str) -> str:
 def fallback_plan(context: Mapping, question: str) -> dict:
     topic = _topic(question)
     facts = context["facts"]
-    if (topic == "strategy" and context.get("scope") == "live_snapshot"
-            and context.get("capabilities", {}).get("strategy") == "FUEL_BUDGET_ONLY"):
+    if topic == "strategy" and context.get("scope") == "live_snapshot":
         available = {item["id"] for item in facts}
         return {"topic": topic, "fact_ids": [key for key in (
-            "fuel.finish_balance", "fuel.minimum_stops", "fuel.horizon",
-            "fuel.range_laps", "fuel.reserve",
-        ) if key in available], "notice_ids": []}
+            "pit.permission", "pit.flags", "fuel.finish_balance", "fuel.horizon",
+            "traffic.ahead", "traffic.behind", "traffic.overlap", "traffic.coverage",
+            "fuel.minimum_stops", "fuel.range_laps", "fuel.reserve",
+        ) if key in available][:6], "notice_ids": []}
     prefixes = ("strategy.", "tire.") if topic == "strategy" else (f"{topic}.",)
     selected = [item["id"] for item in facts if item["id"].startswith(prefixes)]
     if topic == "status":
@@ -133,7 +134,25 @@ def _binding(snapshot: Mapping) -> tuple:
         snapshot.get("generation"), snapshot.get("engineer_revision"),
         snapshot.get("session_type"), telemetry.get("session_num"),
         telemetry.get("lap_number"), monitor.get("binding_sha256"),
+        situation_binding(snapshot),
     )
+
+
+def _situation_answer(fact_ids, intent=None):
+    # An unavailable-traffic response still belongs to this lane. Otherwise
+    # unrelated bad-fuel intervals would cancel its fault notice every 0.5 s.
+    return intent in ("traffic", "ahead", "behind", "pit_permission", "pit") or any(
+        key.startswith(("traffic.", "pit.")) for key in fact_ids)
+
+
+def _selected_binding(binding, fact_ids, intent=None):
+    if not _situation_answer(fact_ids, intent):
+        return binding[:6]
+    # Standalone traffic/pit observations do not depend on fuel learning or its
+    # interval validity. Mixed fuel/traffic answers retain both dependencies.
+    if all(key.startswith(("traffic.", "pit.")) for key in fact_ids):
+        return (binding[0], None, *binding[2:])
+    return binding
 
 
 class EngineerService:
@@ -210,9 +229,13 @@ class EngineerService:
             answer = copy.deepcopy(self._answer)
             if answer is not None:
                 age = max(0.0, now - self._answer_at)
+                fact_ids = answer.get("fact_ids", [])
+                intent = answer.get("intent")
+                ttl = TRAFFIC_ANSWER_TTL_S if _situation_answer(fact_ids, intent) else ANSWER_TTL_S
                 stale = answer["scope"] == "live_snapshot" and (
-                    self._answer_invalidated or age > ANSWER_TTL_S
-                    or _binding(current) != self._answer_binding
+                    self._answer_invalidated or age > ttl
+                    or _selected_binding(_binding(current), fact_ids, intent)
+                    != self._answer_binding
                     or (self._answer_was_valid and not self._valid_live(current))
                     or any(key not in {fact["id"] for fact in context["facts"]}
                            for key in answer.get("fact_ids", []))
@@ -268,12 +291,15 @@ class EngineerService:
                     return 429, {"error": "RATE_LIMITED"}
                 self._last_local_request = now
                 self._serial += 1
+                selected_facts_valid = bool(local_answer["fact_ids"])
                 self._answer = {
                     **local_answer, "id": str(self._serial), "origin": "local_live",
-                    "scope": "live_snapshot", "snapshot_was_valid": bool(context["facts"]),
+                    "scope": "live_snapshot", "snapshot_was_valid": selected_facts_valid,
                 }
-                self._answer_binding, self._answer_at = _binding(state), now
-                self._answer_was_valid = bool(context["facts"])
+                self._answer_binding = _selected_binding(_binding(state), local_answer["fact_ids"],
+                                                         intent)
+                self._answer_at = now
+                self._answer_was_valid = selected_facts_valid
                 self._answer_invalidated = False
                 # A slow cloud job may still unwind, but it cannot overwrite
                 # this newer answer. No second provider worker is created.
@@ -321,7 +347,7 @@ class EngineerService:
             with self._lock:
                 if not self._closed.is_set() and serial == self._serial:
                     self._answer = answer
-                    self._answer_binding = binding
+                    self._answer_binding = _selected_binding(binding, plan["fact_ids"])
                     self._answer_at = requested_at
                     self._answer_was_valid = was_valid
                     self._answer_invalidated = False

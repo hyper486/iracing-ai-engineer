@@ -70,7 +70,7 @@ def _ids(context: dict, section: str = "facts") -> set[str]:
 def _assert_bounded(context: dict) -> None:
     assert set(context) == {"contract_version", "scope", "facts", "notices", "capabilities"}
     assert context["contract_version"] == "engineer-llm-context-v1"
-    assert set(context["capabilities"]) == {"fuel", "strategy", "driving", "tire"}
+    assert set(context["capabilities"]) == {"fuel", "strategy", "driving", "tire", "traffic"}
     assert len(context["facts"]) <= 16
     assert len(context["notices"]) <= 20
     identifiers = []
@@ -99,6 +99,7 @@ def test_live_is_fuel_only_and_drops_all_unapproved_input() -> None:
         "strategy": "UNAVAILABLE",
         "driving": "UNAVAILABLE",
         "tire": "UNAVAILABLE",
+        "traffic": "UNAVAILABLE",
     }
     assert _ids(context) == {
         "fuel.current",
@@ -394,6 +395,7 @@ def test_historical_projection_has_allowlisted_strategy_patterns_and_tire_not_ac
         "strategy": "HISTORICAL_EVIDENCE",
         "driving": "HISTORICAL_EVIDENCE",
         "tire": "HISTORICAL_EVIDENCE",
+        "traffic": "UNAVAILABLE",
     }
     assert {"strategy.candidate", "driving.corner_1.pattern", "tire.performance_loss"} <= _ids(
         context

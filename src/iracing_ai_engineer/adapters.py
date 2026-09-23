@@ -1939,6 +1939,12 @@ def _lap_position_ppb(value: float) -> int:
     return round((value % 1.0) * _LAP_POSITION_SCALE) % _LAP_POSITION_SCALE
 
 
+def _lap_distance_mm(units: int, track_length_mm: int) -> int:
+    """Shared fixed-point geometry for admitted positive circular distances."""
+    rounded = (units * track_length_mm + (_LAP_POSITION_SCALE // 2)) // _LAP_POSITION_SCALE
+    return max(1, min(track_length_mm, rounded))
+
+
 def _traffic_observation_context_evidence(
     sample: TelemetrySample,
     *,
@@ -2156,21 +2162,15 @@ def _traffic_observation_context_evidence(
             else None
         )
 
-        def distance_mm(units: int) -> int:
-            rounded = (
-                units * track_length_mm + (_LAP_POSITION_SCALE // 2)
-            ) // _LAP_POSITION_SCALE
-            return max(1, min(track_length_mm, rounded))
-
         ahead_neighbor = TrafficNeighborEvidence(
             car_idx=car_idx,
-            distance_mm=distance_mm(ahead_units),
+            distance_mm=_lap_distance_mm(ahead_units, track_length_mm),
             lap_position_ppb=opponent_position,
             race_lap_delta=race_lap_delta,
         )
         behind_neighbor = TrafficNeighborEvidence(
             car_idx=car_idx,
-            distance_mm=distance_mm(behind_units),
+            distance_mm=_lap_distance_mm(behind_units, track_length_mm),
             lap_position_ppb=opponent_position,
             race_lap_delta=race_lap_delta,
         )

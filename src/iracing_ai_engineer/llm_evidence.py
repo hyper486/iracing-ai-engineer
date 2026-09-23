@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .engineer_session import validate_engineer_session
+from .live_traffic import validated_traffic
 
 LLM_CONTEXT_CONTRACT_VERSION = "engineer-llm-context-v1"
 MAX_SESSION_BYTES = 32 * 1024 * 1024
@@ -52,7 +53,8 @@ def _base(scope: str) -> dict[str, Any]:
         "scope": scope,
         "facts": [],
         "notices": [],
-        "capabilities": dict.fromkeys(("fuel", "strategy", "driving", "tire"), "UNAVAILABLE"),
+        "capabilities": dict.fromkeys(("fuel", "strategy", "driving", "tire", "traffic"),
+                                      "UNAVAILABLE"),
     }
 
 
@@ -93,6 +95,53 @@ def current_fuel_observation(snapshot: Mapping) -> float | None:
     if "READ_ERROR:FuelLevel" in reasons or not _number(amount):
         return None
     return float(amount)
+
+
+def _live_situation_facts(result: dict, snapshot: Mapping) -> None:
+    if not _live_frame_ready(snapshot):
+        return
+    monitor = _mapping(snapshot.get("monitor"))
+    telemetry, reasons = _mapping(monitor.get("telemetry")), monitor.get("reasons")
+    if type(reasons) is not list or any(type(reason) is not str for reason in reasons):
+        return
+    permission = telemetry.get("pits_open")
+    if type(permission) is bool and "READ_ERROR:PitsOpen" not in reasons:
+        result["facts"].append(_entry("pit.permission", "SDK 当前显示允许本人进站。" if permission
+                                      else "SDK 当前显示不允许本人进站。"))
+    flags = telemetry.get("session_flags")
+    if _integer(flags, maximum=2**32 - 1) and "READ_ERROR:SessionFlags" not in reasons:
+        if flags & 0x00330000:
+            result["facts"].append(_entry("pit.flags",
+                                        "存在黑旗、取消资格或维修相关旗号，需先核对游戏提示。"))
+        elif flags & (0x0008 | 0x0010 | 0x0100 | 0x4000 | 0x8000):
+            result["facts"].append(_entry("pit.flags", "当前有黄旗、红旗或安全车相关旗号。"))
+        else:
+            result["facts"].append(_entry("pit.flags",
+                                        "当前未见上述处罚、维修或黄红旗位；不代表规则已核验。"))
+    traffic = validated_traffic(snapshot)
+    if traffic is None:
+        reason = _mapping(snapshot.get("traffic")).get("reason")
+        if reason == "TRAFFIC_PROCESSING_ERROR":
+            result["notices"].append(_entry("TRAFFIC_UNAVAILABLE",
+                                          "本地交通分析故障，前后车距暂不可用；近车模块独立运行。"))
+        elif reason == "BOUND_TRACK_LENGTH_UNAVAILABLE":
+            result["notices"].append(_entry("TRAFFIC_UNAVAILABLE",
+                                          "尚无与当前帧匹配的赛道长度，暂不能计算前后车距。"))
+        return
+    result["capabilities"]["traffic"] = "PHYSICAL_OBSERVATION_ONLY"
+    if traffic["status"] == "AMBIGUOUS":
+        result["facts"].append(_entry("traffic.overlap",
+                                    "有车辆纵向位置相距不超过五米，前后关系暂不明确。"))
+    elif traffic["eligible_count"] == 0:
+        result["facts"].append(_entry("traffic.coverage",
+                                    "当前没有可定位的在赛道对手，不代表赛道清空。"))
+    else:
+        for name, label in (("ahead", "前方"), ("behind", "后方")):
+            distance = traffic[name]["distance_mm"] / 1000
+            result["facts"].append(_entry(f"traffic.{name}",
+                                        f"可用数据中，沿赛道{label}最近车辆约 {distance:.0f} 米。"))
+    result["notices"].append(_entry("TRAFFIC_OBSERVATION_ONLY",
+                                  "车距只是纵向观测，不是秒差、比赛排名或出站预测，也不表示并排清空。"))
 
 
 def _fuel_budget_facts(result: dict, fuel: Mapping, amount: float, burn: float) -> None:
@@ -163,6 +212,7 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
         ]
     )
     snapshot = _mapping(snapshot)
+    _live_situation_facts(result, snapshot)
     monitor = _mapping(snapshot.get("monitor"))
     fuel = _mapping(snapshot.get("fuel"))
     direct = current_fuel_observation(snapshot)

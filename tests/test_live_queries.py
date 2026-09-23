@@ -81,7 +81,8 @@ def test_short_answers_keep_relevant_uncertainty_and_exclude_private_strings(int
     assert speech == result["spoken_text"] and len(speech) <= 280
     assert "SYNTHETIC_PRIVATE" not in json.dumps(result)
     if intent == "pit":
-        assert "不能决定最佳进站圈" in speech
+        assert "进站时机仍待判断" in speech
+        assert "不能决定最佳进站圈" in result["text"]
     elif intent == "add":
         assert "累计" in speech and "不是本次加油设置" in speech and "12.0" in speech
     elif intent == "stops":

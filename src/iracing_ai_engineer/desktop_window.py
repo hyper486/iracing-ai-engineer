@@ -11,6 +11,8 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Any
 
+from .live_traffic import validated_traffic
+from .llm_evidence import _live_frame_ready
 from .runtime_clock import monotonic_now
 
 _DASH = "—"
@@ -104,6 +106,7 @@ class DesktopView:
     answer_text: str
     notice: str
     spotter: str
+    traffic: str
 
 
 class DesktopPresenter:
@@ -297,7 +300,7 @@ class DesktopPresenter:
         local_ready = (engineer.get("local_live_available") is True
                        and engineer.get("local_retry_after_s") == 0)
         if engineer.get("local_live_available") is True:
-            budget += " · 常用燃油问题本地直答"
+            budget += " · 常用燃油/交通问题本地直答"
         header, answer = self._answer(engineer, fresh)
         proximity = _mapping(telemetry.get("spotter"))
         proximity_status = proximity.get("status")
@@ -330,6 +333,25 @@ class DesktopPresenter:
         if audio.get("reason") == "ZERO_VOLUME":
             audio_text = "音量为零，近车语音已暂停"
         spotter = f"Spotter：{proximity_text} · {audio_text}"
+        traffic_text = "交通观测：数据未就绪或已过期；不是近车清空提示。"
+        if fresh and _live_frame_ready(telemetry):
+            traffic = validated_traffic(telemetry)
+            if traffic is not None:
+                if traffic["status"] == "AMBIGUOUS":
+                    traffic_text = "交通观测：有车辆纵向距离不超过 5 米，前后关系不明确。"
+                elif traffic["eligible_count"] == 0:
+                    traffic_text = "交通观测：没有可定位的在赛道对手，不代表赛道清空。"
+                else:
+                    ahead = traffic["ahead"]["distance_mm"] / 1000
+                    behind = traffic["behind"]["distance_mm"] / 1000
+                    traffic_text = (f"交通观测：可用数据中前方约 {ahead:.0f} m，"
+                                    f"后方约 {behind:.0f} m"
+                                    " · 沿赛道距离，不是秒差或出站预测。")
+            elif (_mapping(telemetry.get("traffic")).get("reason")
+                  == "BOUND_TRACK_LENGTH_UNAVAILABLE"):
+                traffic_text = "交通观测：缺少与当前帧匹配的赛道长度，暂不计算车距。"
+            elif _mapping(telemetry.get("traffic")).get("reason") == "TRAFFIC_PROCESSING_ERROR":
+                traffic_text = "交通观测：分析故障；燃油与近车模块独立运行，重连后重试。"
         return DesktopView(
             lifecycle=lifecycle, connection=connection, source=source, context=context_label,
             quality=quality_text,
@@ -343,7 +365,7 @@ class DesktopPresenter:
             session_available=_mapping(engineer.get("capabilities")).get("session") is True,
             answer_header=header, answer_text=answer,
             notice=_text(value.get("notice"), limit=600),
-            spotter=spotter,
+            spotter=spotter, traffic=traffic_text,
         )
 
 
@@ -478,6 +500,7 @@ class DesktopWindow:
         self._label(outer, "spotter", style="Warn.TLabel", wraplength=920).pack(
             anchor="w", pady=3,
         )
+        self._label(outer, "traffic", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
         self._label(outer, "source", style="Muted.TLabel").pack(anchor="w", pady=3)
         self._label(outer, "notice", style="Warn.TLabel", wraplength=980).pack(anchor="w", pady=4)
         ttk.Label(outer, textvariable=self.action_var, style="Warn.TLabel",
@@ -576,6 +599,7 @@ class DesktopWindow:
         for label, question in (
             ("问燃油", "当前燃油还能跑几圈？"),
             ("问策略", "该进站了吗？"),
+            ("问交通", "前后车情况？"),
             ("问驾驶", "当前数据能支持哪些驾驶分析？哪些结论尚无证据？"),
         ):
             self._button(buttons, label, lambda q=question: self._quick(q),
@@ -943,7 +967,8 @@ class DesktopWindow:
             "已配置密钥（不显示内容）" if settings.get("key_configured") is True
             else "尚未确认已配置密钥；无密钥时使用本地解读。"
         )
-        for key in ("connection", "spotter", "source", "context", "advice", "learning", "recording",
+        for key in ("connection", "spotter", "traffic", "source", "context", "advice", "learning",
+                    "recording",
                     "quality", "engineer_status", "engineer_error", "budget", "answer_header",
                     "notice"):
             self._vars[key].set(getattr(view, key))

@@ -17,7 +17,7 @@ answered from locally validated facts without a provider call:
 | 油够到终点吗？ | Conditional fuel balance against the admitted race horizon |
 | 还要加多少油？ | Cumulative deficit to the estimated finish, not a pit-box setting |
 | 还要几停？ | Fuel-only lower bound when confirmed capacity permits the calculation |
-| 该进站了吗？ | Available fuel evidence and explicit missing tactical evidence |
+| 该进站了吗？ | Available fuel, pit permission/flags and physical traffic; missing tactical evidence stays explicit |
 
 Case, whitespace, common punctuation and one courtesy prefix are normalized.
 Mixed, hypothetical and explanatory questions are not routed by loose keyword
@@ -71,8 +71,11 @@ it says nothing about mandatory stops, service time or traffic advantage.
 The native reader currently uses the default unknown tank capacity. It can
 report a cumulative deficit, but withholds a positive minimum-stop count rather
 than guessing capacity. The library/CLI supports explicit capacity. Missing
-pit-loss calibration, event rules and traffic evidence still block an optimal
+pit-loss calibration, event rules and action-bound future traffic still block an optimal
 pit/rejoin recommendation. Tire wear and driving advice are not inferred here.
+Current physical car distances and pit-state facts are now separate inputs;
+see [traffic questions](LIVE_TRAFFIC_QUESTIONS.md). They do not supply a future
+rejoin forecast or select a stop lap.
 
 ## Freshness and verification
 
@@ -83,6 +86,9 @@ remains usable. Once withdrawn, an answer does not revive when data recovers.
 Normal within-lap fuel consumption does not continually restart an utterance;
 the response describes the question-time snapshot, not a continuously updated
 command. Stale answers lose their pre-rendered spoken body.
+Mixed answers that include traffic/pit observations have the shorter ten-second
+situation limit and extra change guards. Standalone situation answers do not
+depend on fuel-learning revisions.
 
 Tests cover invented raw SDK frames through the real monitor and fuel estimator,
 learning-to-ready answers, inconsistent budgets, unavailable capacity, non-race

@@ -43,6 +43,11 @@ _QUERIES = {
         "该进站了吗", "现在该进站吗", "我要进站吗", "什么时候进站", "何时进站",
         "什么时候加油", "when should i pit", "should i pit now", "pit window",
     ),
+    "traffic": ("前后车情况", "周围车辆情况", "周围的车在哪里", "附近车辆情况", "交通情况",
+                "traffic report", "cars around me"),
+    "ahead": ("前车多远", "前车离我多远", "前面车在哪", "前车在哪里", "gap ahead"),
+    "behind": ("后车多远", "后车离我多远", "后面车在哪", "后车在哪里", "gap behind"),
+    "pit_permission": ("现在允许进站吗", "维修区开放吗", "进站通道开放吗", "are pits open"),
 }
 
 
@@ -65,6 +70,41 @@ def live_query_intent(question: object) -> str | None:
     return _INDEX.get(normalized)
 
 
+def _situation_speech(facts, intent, fallback):
+    """Short local facts fit a short-lived situation; the full text keeps detail."""
+    if intent in ("traffic", "ahead", "behind"):
+        if "traffic.overlap" in facts:
+            return "车辆纵向相距不超过五米，前后关系暂不明确。"
+        if "traffic.coverage" in facts:
+            return "当前无可定位对手，不代表赛道清空。"
+        names = ("ahead", "behind") if intent == "traffic" else (intent,)
+        parts = [facts[f"traffic.{name}"].replace("可用数据中，沿赛道", "")
+                 .replace("最近车辆约", "约").removesuffix("。")
+                 for name in names if f"traffic.{name}" in facts]
+        if parts:
+            # Only shorten this locally rendered numeric template. Approximate
+            # kilometres keep long distances speakable; full text retains metres.
+            def kilometres(match):
+                metres = int(match[1])
+                return f"{metres / 1000:.1f} 公里" if metres >= 1000 else match[0]
+            brief = re.sub(r"([0-9]+) 米", kilometres, "，".join(parts))
+            return "提问时，" + brief + "。不是秒差。"
+    if intent in ("pit", "pit_permission"):
+        permission = facts.get("pit.permission", "进站许可未确认。")
+        parts = [permission.replace("SDK 当前显示", "")]
+        flags = facts.get("pit.flags", "")
+        if "存在黑旗" in flags:
+            parts.append("处罚或维修旗号，需核对。")
+        elif "黄旗、红旗" in flags:
+            parts.append("有黄红旗或安全车旗号。")
+        elif intent == "pit" and "不允许" not in permission:
+            estimate = facts.get("fuel.range_laps", "续航未就绪。")
+            parts.append(estimate.replace("扣除已配置的储备油量后，", ""))
+        parts.append("进站时机仍待判断。")
+        return "".join(parts)
+    return fallback
+
+
 def render_live_query(context: Mapping, intent: str) -> dict:
     """Use trusted fact templates; never source messages or question text."""
     if intent not in _QUERIES or context.get("scope") != "live_snapshot":
@@ -77,7 +117,12 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         "finish": ("fuel.finish_balance", "fuel.horizon"),
         "add": ("fuel.finish_balance", "fuel.horizon"),
         "stops": ("fuel.minimum_stops",),
-        "pit": ("fuel.finish_balance", "fuel.range_laps", "fuel.reserve"),
+        "pit": ("pit.permission", "pit.flags", "fuel.finish_balance", "fuel.range_laps",
+                "traffic.ahead", "traffic.behind", "traffic.overlap"),
+        "traffic": ("traffic.ahead", "traffic.behind", "traffic.overlap", "traffic.coverage"),
+        "ahead": ("traffic.ahead", "traffic.overlap", "traffic.coverage"),
+        "behind": ("traffic.behind", "traffic.overlap", "traffic.coverage"),
+        "pit_permission": ("pit.permission", "pit.flags"),
     }
     chosen = [key for key in preferences[intent] if key in facts]
     # A reserve alone is not an answer about range; it is a configuration value.
@@ -85,7 +130,13 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         chosen = []
     fallback = None
     if not chosen:
-        if "fuel.learning_progress" in facts and intent != "amount":
+        if intent in ("traffic", "ahead", "behind"):
+            notices = {item["id"]: item["text"] for item in context.get("notices", [])}
+            fallback = notices.get("TRAFFIC_UNAVAILABLE",
+                                   "前后车距暂不可用；需新鲜的本人位置、对手数组及匹配赛道长度。")
+        elif intent == "pit_permission":
+            fallback = "当前没有有效的进站许可或旗号数据，请核对游戏提示。"
+        elif "fuel.learning_progress" in facts and intent != "amount":
             chosen = [key for key in ("fuel.current", "fuel.learning_progress") if key in facts]
             fallback = "耗油仍在学习，暂不估计续航或进站。"
         elif intent in ("finish", "add", "stops", "pit") and "fuel.current" in facts:
@@ -106,14 +157,26 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     elif intent in ("finish", "add"):
         body += "这是到终点的累计燃油预算，不是本次加油设置；未计入赛事额外要求。"
     elif intent == "pit":
-        body += "仅凭油量不能决定最佳进站圈，还缺交通、进站损失和赛事规则证据。"
+        if "fuel.range_laps" not in facts:
+            body += "当前燃油续航也未就绪。"
+        body += "仍不能决定最佳进站圈；缺少匹配的进站损失、赛事规则与出站交通预测。"
+        if any(key.startswith("traffic.") for key in chosen):
+            body += "上述车距不是出站后的车距。"
+    elif intent in ("traffic", "ahead", "behind"):
+        body = "提问时，" + body + "这是物理车距，不是秒差、比赛排名或出站预测。"
+    elif intent == "pit_permission":
+        if "pit.permission" not in facts:
+            body += "当前进站许可尚未确认。"
+        body += "这是现场状态，不代表现在进站最优，也不代替赛事规则。"
     elif intent == "stops":
         body += "不代表应当现在进站。"
     if len(body) > 280:
         raise ValueError("LIVE_QUERY_RENDER_LIMIT")
+    spoken = _situation_speech(facts, intent, body)
     return {
-        "topic": "strategy" if intent in ("pit", "stops", "add") else "fuel",
-        "fact_ids": chosen, "spoken_text": body,
+        "topic": "strategy" if intent in (
+            "pit", "stops", "add", "pit_permission", "traffic", "ahead", "behind") else "fuel",
+        "fact_ids": chosen, "spoken_text": spoken,
         "text": body + "\n这是提问时的证据解读；不会操作车辆或进站设置。",
         "intent": intent,
     }
