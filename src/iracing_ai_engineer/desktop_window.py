@@ -11,6 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Any
 
+from .live_driving import driving_notice, validated_driving
 from .live_traffic import validated_traffic
 from .llm_evidence import _live_frame_ready
 from .runtime_clock import monotonic_now
@@ -107,6 +108,7 @@ class DesktopView:
     notice: str
     spotter: str
     traffic: str
+    driving: str
 
 
 class DesktopPresenter:
@@ -352,6 +354,22 @@ class DesktopPresenter:
                 traffic_text = "交通观测：缺少与当前帧匹配的赛道长度，暂不计算车距。"
             elif _mapping(telemetry.get("traffic")).get("reason") == "TRAFFIC_PROCESSING_ERROR":
                 traffic_text = "交通观测：分析故障；燃油与近车模块独立运行，重连后重试。"
+        driving_text = "驾驶分析：等待本人完整可比圈；不会根据单圈猜测驾驶问题。"
+        if fresh and _live_frame_ready(telemetry):
+            driving = validated_driving(telemetry)
+            if driving is not None:
+                driving_text = (f"驾驶分析：近期可比圈 {driving['eligible_laps']} · "
+                                "尚无重复证据，可按住说话询问‘哪里可以改进’。")
+                if driving["status"] == "READY":
+                    point = driving["point"]
+                    driving_text = (f"驾驶分析：{point['corner_id']} · "
+                                    f"{len(point['evidence_laps'])} 圈重复"
+                                    f" · 观测中位损失 {point['loss_s']:.2f} s；"
+                                    "练习假设，不保证提速。")
+                elif driving["status"] == "LAP_REJECTED":
+                    driving_text = "驾驶分析：最近圈未通过完整性或条件筛选，暂不作建议。"
+            elif driving_notice(telemetry) is not None:
+                driving_text = driving_notice(telemetry)
         return DesktopView(
             lifecycle=lifecycle, connection=connection, source=source, context=context_label,
             quality=quality_text,
@@ -365,7 +383,7 @@ class DesktopPresenter:
             session_available=_mapping(engineer.get("capabilities")).get("session") is True,
             answer_header=header, answer_text=answer,
             notice=_text(value.get("notice"), limit=600),
-            spotter=spotter, traffic=traffic_text,
+            spotter=spotter, traffic=traffic_text, driving=driving_text,
         )
 
 
@@ -501,6 +519,7 @@ class DesktopWindow:
             anchor="w", pady=3,
         )
         self._label(outer, "traffic", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
+        self._label(outer, "driving", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
         self._label(outer, "source", style="Muted.TLabel").pack(anchor="w", pady=3)
         self._label(outer, "notice", style="Warn.TLabel", wraplength=980).pack(anchor="w", pady=4)
         ttk.Label(outer, textvariable=self.action_var, style="Warn.TLabel",
@@ -600,7 +619,7 @@ class DesktopWindow:
             ("问燃油", "当前燃油还能跑几圈？"),
             ("问策略", "该进站了吗？"),
             ("问交通", "前后车情况？"),
-            ("问驾驶", "当前数据能支持哪些驾驶分析？哪些结论尚无证据？"),
+            ("问驾驶", "哪里可以改进？"),
         ):
             self._button(buttons, label, lambda q=question: self._quick(q),
                          question=True).pack(side="left", padx=5)
@@ -967,8 +986,8 @@ class DesktopWindow:
             "已配置密钥（不显示内容）" if settings.get("key_configured") is True
             else "尚未确认已配置密钥；无密钥时使用本地解读。"
         )
-        for key in ("connection", "spotter", "traffic", "source", "context", "advice", "learning",
-                    "recording",
+        for key in ("connection", "spotter", "traffic", "driving", "source", "context", "advice",
+                    "learning", "recording",
                     "quality", "engineer_status", "engineer_error", "budget", "answer_header",
                     "notice"):
             self._vars[key].set(getattr(view, key))

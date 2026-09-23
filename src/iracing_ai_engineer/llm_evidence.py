@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .engineer_session import validate_engineer_session
+from .live_driving import driving_notice, validated_driving
 from .live_traffic import validated_traffic
 
 LLM_CONTEXT_CONTRACT_VERSION = "engineer-llm-context-v1"
@@ -144,6 +145,53 @@ def _live_situation_facts(result: dict, snapshot: Mapping) -> None:
                                   "车距只是纵向观测，不是秒差、比赛排名或出站预测，也不表示并排清空。"))
 
 
+_LIVE_DRIVING_PATTERNS = {
+    "LONG_COAST": ("重复观察到松油至刹车之间滑行较长。",
+                   "练习假设：缩短松油到刹车的空档，不直接要求推迟刹车。"),
+    "LATE_BRAKING_HURTS_EXIT": ("重复观察到较晚刹车与较慢出弯同时出现。",
+                                "练习假设：尝试稍早刹车，观察出弯速度是否改善。"),
+    "THROTTLE_SECOND_LIFT": ("重复观察到开油后再次收油。",
+                             "练习假设：更渐进地开油，观察再次收油是否减少。"),
+}
+
+
+def _live_driving_facts(result: dict, snapshot: Mapping) -> None:
+    if not _live_frame_ready(snapshot):
+        return
+    driving = validated_driving(snapshot)
+    if driving is None:
+        message = driving_notice(snapshot)
+        if message is not None:
+            for notice in result["notices"]:
+                if notice["id"] == "DRIVING_UNAVAILABLE":
+                    notice["text"] = message
+        return
+    if driving["status"] != "READY":
+        count = driving["eligible_laps"]
+        message = f"本次有 {count} 个近期可比完整圈，尚无可播报的重复弯道证据。"
+        if driving["status"] == "LAP_REJECTED":
+            message = "刚完成圈未通过完整性或条件筛选，暂不作驾驶建议。"
+        elif driving["status"] == "NO_REPEAT":
+            message = "刚完成圈未出现符合阈值的重复失时模式，不强行给建议。"
+        result["facts"].append(_entry("driving.learning_progress", message))
+        return
+    result["notices"][:] = [item for item in result["notices"]
+                            if item["id"] != "DRIVING_UNAVAILABLE"]
+    result["notices"].append(_entry("DRIVING_OBSERVATION_ONLY",
+        "驾驶结论只描述近期同一连续段内、观测燃油与天气相近的圈；胎龄与抓地未证明相同。"
+        "练习方向不是因果结论或圈速收益保证；不推断路肩、路线或循迹刹车。"))
+    result["capabilities"]["driving"] = "RECENT_LAP_OBSERVATION_ONLY"
+    point = driving["point"]
+    pattern, practice = _LIVE_DRIVING_PATTERNS[point["diagnosis"]]
+    result["facts"].extend([
+        _entry("driving.location", f"最近完成第 {driving['completed_laps']} 圈，自动分段 "
+               f"{point['corner_id']} 的参考刹车区在起跑线后约 {point['braking_zone_m']:.0f} 米。"),
+        _entry("driving.loss", f"{len(point['evidence_laps'])} 圈重复观测，相比实际参考圈 "
+               f"{driving['reference_lap']}，该段中位时间损失约 {point['loss_s']:.2f} 秒。"),
+        _entry("driving.pattern", pattern), _entry("driving.practice", practice),
+    ])
+
+
 def _fuel_budget_facts(result: dict, fuel: Mapping, amount: float, burn: float) -> None:
     """Optional richer evidence from the live model; no external strings survive."""
     facts = result["facts"]
@@ -207,12 +255,13 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
         [
             _entry("ESTIMATE_ONLY", "续航与终点燃油预算是实验性估计，不是进站指令。"),
             _entry("STRATEGY_UNAVAILABLE", "当前入口尚不提供实时进站、交通或出站策略。"),
-            _entry("DRIVING_UNAVAILABLE", "当前入口尚不提供实时弯角或驾驶技巧建议。"),
+            _entry("DRIVING_UNAVAILABLE", "当前缺少近期完整可比圈与重复弯道证据，驾驶建议未就绪。"),
             _entry("TIRE_UNAVAILABLE", "当前入口尚不提供实时胎耗或换胎建议。"),
         ]
     )
     snapshot = _mapping(snapshot)
     _live_situation_facts(result, snapshot)
+    _live_driving_facts(result, snapshot)
     monitor = _mapping(snapshot.get("monitor"))
     fuel = _mapping(snapshot.get("fuel"))
     direct = current_fuel_observation(snapshot)

@@ -27,6 +27,7 @@ from .collector import (
     validate_variable_descriptors,
 )
 from .dashboard_page import DASHBOARD_HTML
+from .live_driving import LiveDrivingEngineer
 from .live_fuel import LiveFuelConfig, LiveFuelEngineer
 from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
 from .live_traffic import (
@@ -169,6 +170,7 @@ class AppState:
             "monitor": None,
             "fuel": None,
             "traffic": None,
+            "driving": None,
             "speech": None,
             "source_mode": "LIVE",
             "session_type": None,
@@ -191,7 +193,7 @@ class AppState:
             raise ValueError("invalid connection status")
         with self._lock:
             self._value.update(
-                connection=status, monitor=None, fuel=None, traffic=None, speech=None,
+                connection=status, monitor=None, fuel=None, traffic=None, driving=None, speech=None,
                 session_type=None,
             )
             self._updated = None
@@ -260,7 +262,7 @@ class AppState:
                 self._updated = None
                 self._engineer_revision += 1
                 self._situation_revision += 1
-                self._value.update(monitor=None, fuel=None, traffic=None, speech=None)
+                self._value.update(monitor=None, fuel=None, traffic=None, driving=None, speech=None)
 
     def _worker_status(self):
         # Never take a worker lock while holding the AppState lock. A worker's
@@ -292,7 +294,7 @@ class AppState:
 
     def publish(
         self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None,
-        *, observed_at=None, generation=None, allowed=lambda: True, traffic=None,
+        *, observed_at=None, generation=None, allowed=lambda: True, traffic=None, driving=None,
     ) -> None:
         with self._lock:
             if (generation is not None and generation != self._generation) or not allowed():
@@ -328,6 +330,7 @@ class AppState:
                 monitor=copy.deepcopy(monitor),
                 fuel=copy.deepcopy(fuel),
                 traffic=copy.deepcopy(traffic),
+                driving=copy.deepcopy(driving),
                 speech=copy.deepcopy(speech),
                 session_type=session_type,
             )
@@ -354,13 +357,14 @@ class AppState:
                 analysis["failed"] or analysis["generation"] != self._generation
             ):
                 # Defense in depth if a fault-notification callback could not run.
-                value.update(monitor=None, fuel=None, traffic=None, speech=None)
+                value.update(monitor=None, fuel=None, traffic=None, driving=None, speech=None)
                 age = None
             value.update(updated_age_s=age, generation=self._generation,
                          engineer_revision=self._engineer_revision,
                          situation_revision=self._situation_revision)
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
                 value.update(connection="DISCONNECTED", fuel=None, monitor=None, traffic=None,
+                             driving=None,
                              speech=None)
             intent = value.get("speech")
             if intent is not None:
@@ -523,15 +527,28 @@ class _LiveAnalysis:
             expected_source_kind=SourceKind.SDK_LIVE, expected_car_count=car_count,
         )
         self._fuel, self._speech = LiveFuelEngineer(config), PracticeFuelSpeech()
+        try:
+            self._driving = LiveDrivingEngineer(tick_rate, clock=state.clock)
+        except Exception:
+            # A coaching-worker startup failure cannot disable fuel/traffic.
+            self._driving = None
         self._traffic_failed = False
         self._next_snapshot = -math.inf
 
     def process(self, item):
         frame, session_type, observed, track_length_mm = item
-        self._monitor.feed(frame, observed_monotonic_s=observed)
+        progressed = self._monitor.feed(frame, observed_monotonic_s=observed)
         self._monitor.advance_time(observed)
+        if progressed and self._driving is not None:
+            try:
+                self._driving.feed(frame, self._monitor.latest_sample, track_length_mm)
+            except Exception:
+                self._driving.fail()
         if observed >= self._next_snapshot and self._monitor.snapshot_pending:
             snapshot = self._monitor.snapshot()
+            if (self._driving is not None
+                    and snapshot.get("quality", {}).get("stale") is not False):
+                self._driving.reset("SOURCE_STALE")
             fuel = self._fuel.feed(snapshot, session_type=session_type)
             intent = self._speech.update(snapshot, fuel, session_type, observed)
             traffic = unavailable_traffic(snapshot, "TRAFFIC_PROCESSING_ERROR")
@@ -545,14 +562,18 @@ class _LiveAnalysis:
                     # Isolate an analytical fault; no native errors or retry storm.
                     self._traffic_failed = True
             self._state.publish(snapshot, fuel, intent, session_type, observed_at=observed,
-                                generation=self._generation, allowed=self._allowed, traffic=traffic)
+                                generation=self._generation, allowed=self._allowed, traffic=traffic,
+                                driving=(self._driving.snapshot(snapshot)
+                                         if self._driving is not None
+                                         else {"status": "ERROR"}))
             self._next_snapshot = observed + 0.5
 
     def finish(self):
         pass
 
     def close(self):
-        pass
+        if self._driving is not None:
+            self._driving.close()
 
 
 class _RecordingSink:

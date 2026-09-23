@@ -34,12 +34,44 @@ required running dependency. The final goal remains active and unaccepted.
 | Reader / analysis / recording isolation | Bounded worker lanes in source | Recorder and analysis failures no longer synchronously block the SDK reader; explicit incomplete prefixes, generation guards and streaming event digests. Not GIL isolation or a hardware latency guarantee. |
 | Routine current-fuel questions | Local source implementation; synthetic checks | Current observations, learned range and conditional race fuel budgets bypass cloud waits; not live pit tactics or an updated EXE. |
 | Current physical traffic / pit-state questions | Local source implementation; synthetic checks | Bound ahead/behind distance, player permission and flag facts in native display/PTT; independent of fuel readiness, not time gaps or optimal pit/rejoin advice. |
+| Incremental recent-lap coaching | Local source implementation; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Local traffic and pit-state question milestone
+## Incremental recent-lap coaching milestone
+
+The native **问驾驶** button and exact PTT questions now use the same completed-lap
+reference and repeated-pattern algorithms as offline analysis. The source path
+collects fixed numeric rows from the existing normalized stream, rejects unclean
+or mismatched evidence, and models laps on a separate bounded worker. It reports
+one recent supported point for long coasting, later-braking/slower-exit or a
+second throttle lift; it does not invent curb, line, tire-wear or causal gains.
+
+Results require repeated support in the latest completed lap, not just an old
+mistake. A bounded recent cohort filters observed fuel, temperature, wind and
+tire selection; it does not prove identical tire age/grip or promote stricter
+offline labeled-condition gates. Questions use local short speech, with the
+actual reference, evidence count and observed median loss in the window.
+Model/startup faults, missing data and resource limits are explicit; fuel,
+traffic and urgent proximity remain independent. Old-generation model results
+and delayed cloud explanations cannot revive withdrawn coaching.
+
+Complete regression: **2,546 passed, 44 skipped**; focused regression:
+**513 passed**. The 95 new coaching tests include positive and exclusion paths;
+ten asynchronous/fault cases also passed five consecutive runs. Ruff, public
+safety including history, and exact staged diff review passed. Existing skips
+remain data/platform/private-deployment or explicit opt-in boundaries, not live
+acceptance. Synthetic frames and fake PTT/output are not authentic
+driving or hearing acceptance. Memory-only local TTS clips were 14.6–16.6 seconds;
+no input/output device was opened. No EXE, game or Simulator Controller
+configuration was changed. See [the coaching contract](LIVE_DRIVING_COACHING.md).
+
+Full live pit/rejoin integration, private event/audio replay, packaging and
+real selected-device/in-car/VR checks remain open under the unchanged goal.
+
+## Earlier local traffic and pit-state question milestone
 
 The native display and exact PTT questions now expose ahead/behind longitudinal
 distance, current-player pit permission and available flags. These local answers

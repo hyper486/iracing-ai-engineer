@@ -1051,8 +1051,6 @@ def analyze_driving(
         resampled = resample_clean_laps(
             channels, laps, track_length_m=track_length_m, config=selected_config
         )
-        reference = select_reference_lap(resampled, selected_config)
-        corners = detect_corner_segments(resampled, reference, selected_config)
     except DrivingDataError as exc:
         return _refused(
             ("INCONSISTENT_TELEMETRY:" + str(exc),),
@@ -1060,6 +1058,30 @@ def analyze_driving(
             selected_config,
             eligible_ordinals,
         )
+    return _analyze_resampled_laps(resampled, track_length_m=track_length_m, config=selected_config)
+
+
+def _analyze_resampled_laps(
+    resampled: Sequence[ResampledLap], *, track_length_m: float,
+    config: DrivingAnalysisConfig, max_corners: int | None = None,
+) -> DrivingAnalysis:
+    """Shared model for already admitted/resampled laps, including the live cache.
+
+    Callers must use resample_clean_laps first; this is not a shortcut for raw
+    telemetry or fabricated clean labels. A live caller may bound model work.
+    """
+    selected_config = config
+    _validate_config(selected_config, track_length_m)
+    eligible_ordinals = tuple(sorted(item.lap_ordinal for item in resampled))
+    try:
+        reference = select_reference_lap(resampled, selected_config)
+        corners = detect_corner_segments(resampled, reference, selected_config)
+    except DrivingDataError as exc:
+        return _refused(("INCONSISTENT_TELEMETRY:" + str(exc),), track_length_m,
+                        selected_config, eligible_ordinals)
+    if max_corners is not None and len(corners) > max_corners:
+        return _refused(("CORNER_RESOURCE_LIMIT",), track_length_m,
+                        selected_config, eligible_ordinals)
     if not corners:
         return _refused(
             ("NO_REPRODUCIBLE_BRAKING_ZONES",),

@@ -29,6 +29,8 @@ practice opportunity.
   independent of fuel/STT/LLM work, with priority cancellation and readiness diagnostics.
 - Bounded analysis/recording workers, explicit incomplete-capture failures and
   streaming live-event digests; slow sinks are isolated from the SDK reader.
+- Incremental recent-lap coaching in source, with bounded asynchronous analysis,
+  comparable-condition filters and local PTT answers for repeated corner patterns.
 - An experimental local fuel dashboard with private recording and opt-in local
   practice speech; race speech stays disabled.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
@@ -44,6 +46,8 @@ audio, current fuel answers and supported corner coaching on the AEIS framework.
 [Detection and native priority audio](docs/PROXIMITY_SPOTTER.md) are implemented
 in source and checked with synthetic backends/local synthesis. Existing EXEs are
 not automatically upgraded; hardware hearing and in-car/VR acceptance remain open.
+The [recent-lap coaching contract](docs/LIVE_DRIVING_COACHING.md) explains the
+new **哪里可以改进？** question and why an observed loss is not a promised gain.
 
 The September 4 correctness/privacy review fixes are documented in
 [the review-fix record](docs/REVIEW_FIXES.md). Rejoin estimates now bind the

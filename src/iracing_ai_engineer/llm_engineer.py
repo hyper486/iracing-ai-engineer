@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .live_driving import coaching_binding
 from .live_queries import LOCAL_QUERY_INTERVAL_S, live_query_intent, render_live_query
 from .live_traffic import TRAFFIC_ANSWER_TTL_S, situation_binding
 from .llm_client import DeepSeekClient, LLMError
@@ -64,7 +65,8 @@ class EngineerConfig:
 def _topic(question: str) -> str:
     text = question.lower()
     for topic, words in (
-        ("driving", ("弯", "刹车", "油门", "路肩", "循迹", "驾驶", "brak", "corner", "throttle")),
+        ("driving", ("弯", "刹车", "油门", "路肩", "循迹", "驾驶", "丢时间", "改进", "练习",
+                     "brak", "corner", "throttle")),
         ("strategy", ("策略", "进站", "轮胎", "交通", "回场", "pit", "tire", "tyre", "traffic")),
         ("fuel", ("油", "fuel", "laps", "几圈")),
     ):
@@ -134,7 +136,7 @@ def _binding(snapshot: Mapping) -> tuple:
         snapshot.get("generation"), snapshot.get("engineer_revision"),
         snapshot.get("session_type"), telemetry.get("session_num"),
         telemetry.get("lap_number"), monitor.get("binding_sha256"),
-        situation_binding(snapshot),
+        situation_binding(snapshot), coaching_binding(snapshot),
     )
 
 
@@ -146,13 +148,16 @@ def _situation_answer(fact_ids, intent=None):
 
 
 def _selected_binding(binding, fact_ids, intent=None):
-    if not _situation_answer(fact_ids, intent):
+    situation = _situation_answer(fact_ids, intent)
+    driving = intent == "driving" or any(key.startswith("driving.") for key in fact_ids)
+    if not situation and not driving:
         return binding[:6]
     # Standalone traffic/pit observations do not depend on fuel learning or its
     # interval validity. Mixed fuel/traffic answers retain both dependencies.
-    if all(key.startswith(("traffic.", "pit.")) for key in fact_ids):
-        return (binding[0], None, *binding[2:])
-    return binding
+    base = binding[:6]
+    if all(key.startswith(("traffic.", "pit.", "driving.")) for key in fact_ids):
+        base = (binding[0], None, *binding[2:6])
+    return (*base, binding[6] if situation else None, binding[7] if driving else None)
 
 
 class EngineerService:

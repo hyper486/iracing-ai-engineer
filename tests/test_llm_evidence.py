@@ -71,7 +71,7 @@ def _assert_bounded(context: dict) -> None:
     assert set(context) == {"contract_version", "scope", "facts", "notices", "capabilities"}
     assert context["contract_version"] == "engineer-llm-context-v1"
     assert set(context["capabilities"]) == {"fuel", "strategy", "driving", "tire", "traffic"}
-    assert len(context["facts"]) <= 16
+    assert len(context["facts"]) <= 20
     assert len(context["notices"]) <= 20
     identifiers = []
     for item in context["facts"] + context["notices"]:

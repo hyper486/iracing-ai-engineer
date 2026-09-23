@@ -48,8 +48,11 @@ in source. Synthetic backend, local memory-only synthesis and visible synthetic
 UI checks are not a real hearing/VR acceptance pass. No new EXE deployment is
 claimed. Stage C's local current-fuel and physical-traffic question slices are
 implemented in source, including player pit permission and flag observations.
-Action-bound strategy integration and real lap comparisons remain open. Stage B hardware
-acceptance, D-E and the final endurance goal remain open.
+Action-bound strategy integration and real lap comparisons remain open. Stage D's
+bounded recent-lap model and local coaching questions are now implemented in source;
+this is descriptive evidence, not causal coaching or offline gate promotion.
+Stage B hardware acceptance, D's real-lap acceptance, E and the final endurance
+goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.
 LLM use is opt-in, summary-only, for question interpretation and explanation.
 
@@ -87,8 +90,14 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   changed neighbours, source loss, permission or flags withdraw old answers.
   Short speech and full explanatory text are separate. See
   [the traffic contract](LIVE_TRAFFIC_QUESTIONS.md).
+- Implemented: incremental complete-lap collection and a separate bounded corner
+  model, reusing the existing reference/loss/repeated-pattern algorithms. Recent
+  observed-condition filters, latest-lap support, fixed health explanations and
+  source/epoch-bound local driving answers do not depend on fuel or DeepSeek.
+  Synthetic SDK-shaped and fake PTT tests are not real coaching acceptance. See
+  [the coaching contract](LIVE_DRIVING_COACHING.md).
 - Verify endurance-duration resource limits, integrate supported live strategy
-  and incremental corner loops, and connect private capture replay to the new
+  and connect private capture replay to the new
   event/playback audit before claiming an integrated trial build.
 - Rebuild/package after those integrations, then check selected microphone and
   headphones, wheel/PTT, actual proximity latency and VR performance in a

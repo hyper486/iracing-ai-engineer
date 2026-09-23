@@ -48,6 +48,8 @@ _QUERIES = {
     "ahead": ("前车多远", "前车离我多远", "前面车在哪", "前车在哪里", "gap ahead"),
     "behind": ("后车多远", "后车离我多远", "后面车在哪", "后车在哪里", "gap behind"),
     "pit_permission": ("现在允许进站吗", "维修区开放吗", "进站通道开放吗", "are pits open"),
+    "driving": ("哪里丢时间", "哪里可以改进", "我哪里可以改进", "我该练什么", "驾驶建议",
+                "弯道分析", "driving advice", "where am i losing time"),
 }
 
 
@@ -72,6 +74,14 @@ def live_query_intent(question: object) -> str | None:
 
 def _situation_speech(facts, intent, fallback):
     """Short local facts fit a short-lived situation; the full text keeps detail."""
+    if intent == "driving" and "driving.location" in facts:
+        # Render only fixed-template fact text; no model-authored prose.
+        location = facts["driving.location"].split("的参考刹车区在", 1)[-1].rstrip("。")
+        practice = facts["driving.practice"].split("，", 1)[0].rstrip("。")
+        loss = re.search(r"中位时间损失约 ([0-9.]+) 秒", facts.get("driving.loss", ""))
+        delta = f"观测该段慢 {loss[1]} 秒。" if loss else ""
+        pattern = facts["driving.pattern"].replace("重复观察到", "反复")
+        return location + "附近，" + delta + pattern + practice + "。不保证提速。"
     if intent in ("traffic", "ahead", "behind"):
         if "traffic.overlap" in facts:
             return "车辆纵向相距不超过五米，前后关系暂不明确。"
@@ -123,6 +133,7 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         "ahead": ("traffic.ahead", "traffic.overlap", "traffic.coverage"),
         "behind": ("traffic.behind", "traffic.overlap", "traffic.coverage"),
         "pit_permission": ("pit.permission", "pit.flags"),
+        "driving": ("driving.location", "driving.loss", "driving.pattern", "driving.practice"),
     }
     chosen = [key for key in preferences[intent] if key in facts]
     # A reserve alone is not an answer about range; it is a configuration value.
@@ -130,7 +141,13 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         chosen = []
     fallback = None
     if not chosen:
-        if intent in ("traffic", "ahead", "behind"):
+        if intent == "driving":
+            if "driving.learning_progress" in facts:
+                chosen = ["driving.learning_progress"]
+            else:
+                notices = {item["id"]: item["text"] for item in context.get("notices", [])}
+                fallback = notices.get("DRIVING_UNAVAILABLE", "当前驾驶证据不足，暂不作建议。")
+        elif intent in ("traffic", "ahead", "behind"):
             notices = {item["id"]: item["text"] for item in context.get("notices", [])}
             fallback = notices.get("TRAFFIC_UNAVAILABLE",
                                    "前后车距暂不可用；需新鲜的本人位置、对手数组及匹配赛道长度。")
@@ -152,6 +169,8 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     body = "".join(facts[key] for key in chosen)
     if fallback:
         body += fallback
+    elif intent == "driving" and "driving.location" in facts:
+        body += "这是观测与练习假设，不保证提速，也不能推断路肩或路线。"
     elif intent == "range":
         body += "这是耗油估计，不是进站指令。"
     elif intent in ("finish", "add"):
@@ -174,7 +193,7 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         raise ValueError("LIVE_QUERY_RENDER_LIMIT")
     spoken = _situation_speech(facts, intent, body)
     return {
-        "topic": "strategy" if intent in (
+        "topic": "driving" if intent == "driving" else "strategy" if intent in (
             "pit", "stops", "add", "pit_permission", "traffic", "ahead", "behind") else "fuel",
         "fact_ids": chosen, "spoken_text": spoken,
         "text": body + "\n这是提问时的证据解读；不会操作车辆或进站设置。",

@@ -98,6 +98,7 @@ evidence. Memory-only local TTS checks of five sample responses produced about
 7.1–8.7 seconds of audio; no output device or microphone was opened. Those are
 clip durations for one local voice, not response latency or hardware acceptance.
 
-Real fuel comparisons, supported action-bound pit/rejoin integration, incremental
-corner coaching, private event/audio replay, packaging and selected-device/VR
-acceptance remain separate work under the [active goal](ACTIVE_GOAL.md).
+Incremental [recent-lap coaching](LIVE_DRIVING_COACHING.md) is now implemented
+separately in source. Real fuel/coaching comparisons, supported action-bound
+pit/rejoin integration, private event/audio replay, packaging and selected-device/VR
+acceptance remain work under the [active goal](ACTIVE_GOAL.md).
