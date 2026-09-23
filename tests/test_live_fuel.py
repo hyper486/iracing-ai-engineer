@@ -112,6 +112,11 @@ def test_first_partial_lap_never_counts_and_crossings_interpolate_fuel_and_time(
     assert result["estimated_laps_remaining"] == 15
     assert result["fuel_needed_to_finish_l"] == pytest.approx(6)
     assert result["fuel_to_add_l"] is None
+    assert result["reserve_l"] == 2.0 and result["tank_capacity_l"] is None
+    assert result["observed_burn_range_l_per_lap"] == pytest.approx([2, 2])
+    assert result["race_laps_to_go"] == 2
+    assert result["race_horizon_basis"] == "TIMER_FASTEST_LAP_PLUS_MARGIN"
+    assert result["fuel_shortfall_l"] == 0.0
     # Crossings are at exactly 10/20/30 seconds, not the 10.25/20.25/30.25 samples.
     assert [sample.lap_time_s for sample in engineer._history] == pytest.approx([10, 10])
 
@@ -145,6 +150,8 @@ def test_output_is_fixed_private_safe_and_does_not_alias_input_or_previous_resul
         "conservative_burn_l_per_lap", "estimated_laps_remaining",
         "fuel_needed_to_finish_l", "fuel_to_add_l", "minimum_stops", "message",
         "estimate_only", "advisor_only", "executable",
+        "reserve_l", "tank_capacity_l", "observed_burn_range_l_per_lap",
+        "race_laps_to_go", "race_horizon_basis", "fuel_shortfall_l",
     }
     assert "private detail" not in json.dumps(result, allow_nan=False)
     result["reason_codes"].append("contaminated")

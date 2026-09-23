@@ -11,6 +11,7 @@ from pathlib import Path
 from .desktop_settings import DesktopSettings, SettingsStore
 from .live_app import AppState, run_reader
 from .live_fuel import LiveFuelConfig
+from .live_queries import live_query_intent
 from .llm_client import DeepSeekClient, LLMError
 from .llm_engineer import EngineerConfig, EngineerService
 from .runtime_clock import monotonic_now
@@ -160,6 +161,7 @@ class DesktopController:
                 engineer.update(status="RATE_LIMITED", retry_after_s=round(retry, 1))
             if self._configuring:
                 engineer["status"] = "BUSY"
+                engineer["local_live_available"] = False
             recording = telemetry.get("recording") or {}
             amount = recording.get("bytes", 0)
             if type(amount) is int and amount >= 0:
@@ -220,10 +222,11 @@ class DesktopController:
         with self._lock:
             if self._closing or self._configuring:
                 return 409, {"error": "BUSY"}
-            if self._clock() - self._last_question_at < 10:
+            local = scope == "live" and live_query_intent(question) is not None
+            if not local and self._clock() - self._last_question_at < 10:
                 return 429, {"error": "RATE_LIMITED"}
             result = self._service.submit(question, scope)
-            if result[0] == 202:
+            if result[0] == 202 and not local:
                 self._last_question_at = self._clock()
             return result
 

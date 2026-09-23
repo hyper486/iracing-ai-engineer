@@ -89,6 +89,20 @@ def test_proximity_diagnostic_readiness_is_never_presented_as_working_audio():
     assert "过期" in view.spotter
 
 
+def test_cloud_busy_does_not_disable_local_fuel_questions_or_hide_local_answer():
+    snapshot = _snapshot()
+    snapshot["engineer"].update(
+        status="BUSY", local_live_available=True, local_retry_after_s=0,
+        answer={"id": "8", "origin": "local_live", "scope": "live_snapshot", "stale": False,
+                "age_s": 0.1, "snapshot_was_valid": True, "text": "当前观测剩余燃油：20.00 升。"},
+    )
+    view = DesktopPresenter().project(snapshot, now=10)
+    assert view.can_submit and "本地实时直答" in view.answer_header
+    assert "20.00" in view.answer_text and "本地直答" in view.budget
+    snapshot["engineer"]["local_live_available"] = False  # A settings change still gates input.
+    assert not DesktopPresenter().project(snapshot, now=10).can_submit
+
+
 @pytest.mark.parametrize("status,output,reason,expected", [
     ("OFF", "UNTESTED", "DISABLED", "近车语音未启用"),
     ("PREPARING", "UNTESTED", "PHRASE_CACHE", "正在预生成短语音"),

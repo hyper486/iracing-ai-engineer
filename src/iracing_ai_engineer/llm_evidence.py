@@ -56,8 +56,97 @@ def _base(scope: str) -> dict[str, Any]:
     }
 
 
+def _live_frame_ready(snapshot: Mapping) -> bool:
+    monitor = _mapping(snapshot.get("monitor"))
+    context, quality = _mapping(monitor.get("context")), _mapping(monitor.get("quality"))
+    return (
+        snapshot.get("contract_version") == "experimental-live-fuel-app-v1"
+        and snapshot.get("connection") == "CONNECTED"
+        and snapshot.get("source_mode") == "LIVE"
+        and _number(snapshot.get("updated_age_s"), maximum=2.0)
+        and monitor.get("contract_version") == "live-monitor-v1"
+        and monitor.get("record_type") == "live_monitor_snapshot"
+        and monitor.get("advisor_only") is True and monitor.get("executable") is False
+        and monitor.get("source_kind") == "SDK_LIVE"
+        and monitor.get("status") in ("READY", "DEGRADED")
+        and context.get("sim_source_mode") == "FULL"
+        and context.get("player_control_state") == "IN_CAR_PHYSICS"
+        and context.get("conflicts") == []
+        and quality.get("status") in ("READY", "DEGRADED") and quality.get("stale") is False
+    )
+
+
+def current_fuel_observation(snapshot: Mapping) -> float | None:
+    """A fresh SDK observation does not require a trained fuel-burn model.
+
+    Pit/refuel intervals can invalidate extrapolation without erasing a present
+    FuelLevel observation. Read errors, source age and driver context still gate it.
+    """
+    snapshot = _mapping(snapshot)
+    if not _live_frame_ready(snapshot):
+        return None
+    monitor = _mapping(snapshot.get("monitor"))
+    reasons = monitor.get("reasons")
+    if type(reasons) is not list or any(type(reason) is not str for reason in reasons):
+        return None
+    amount = _mapping(monitor.get("telemetry")).get("fuel_level_l")
+    if "READ_ERROR:FuelLevel" in reasons or not _number(amount):
+        return None
+    return float(amount)
+
+
+def _fuel_budget_facts(result: dict, fuel: Mapping, amount: float, burn: float) -> None:
+    """Optional richer evidence from the live model; no external strings survive."""
+    facts = result["facts"]
+    reserve = fuel.get("reserve_l")
+    if _number(reserve):
+        facts.append(_entry("fuel.reserve", f"燃油估计已预留 {reserve:.1f} 升储备。"))
+    observed = fuel.get("observed_burn_range_l_per_lap")
+    if (type(observed) is list and len(observed) == 2
+            and all(_number(value) for value in observed)
+            and 0 < observed[0] <= burn <= observed[1]):
+        facts.append(_entry("fuel.observed_burn_range",
+                            f"有效圈观测耗油范围为 {observed[0]:.2f} 至 {observed[1]:.2f} 升，"
+                            "不是未来保证范围。"))
+    needed, laps, basis = (fuel.get(name) for name in (
+        "fuel_needed_to_finish_l", "race_laps_to_go", "race_horizon_basis",
+    ))
+    if not (_number(needed, maximum=100_000) and _integer(laps, maximum=100_000)
+            and _number(reserve) and basis in (
+                "SDK_LAPS_REMAINING", "TIMER_FASTEST_LAP_PLUS_MARGIN")):
+        return
+    # A stale/mixed model payload cannot turn an arbitrary deficit into advice.
+    expected = 0.0 if laps == 0 else burn * laps + reserve
+    if not math.isclose(needed, expected, rel_tol=1e-9, abs_tol=1e-6):
+        return
+    deficit = max(0.0, needed - amount)
+    if not (_number(fuel.get("fuel_shortfall_l"), maximum=100_000)
+            and math.isclose(fuel["fuel_shortfall_l"], deficit, rel_tol=1e-9, abs_tol=1e-6)):
+        return
+    result["capabilities"]["strategy"] = "FUEL_BUDGET_ONLY"
+    facts.append(_entry("fuel.finish_balance",
+                        f"按燃油模型，跑到结束累计还缺约 {deficit:.1f} 升。" if deficit > 0
+                        else "按燃油模型，当前油量够覆盖预算赛程。"))
+    facts.append(_entry("fuel.horizon",
+                        f"按 SDK 剩余圈数预算 {laps} 圈。" if basis == "SDK_LAPS_REMAINING"
+                        else f"按剩余时间、已观测最快圈和附加圈预算 {laps} 圈，终点圈数仍是估计。"))
+    capacity, stops = fuel.get("tank_capacity_l"), fuel.get("minimum_stops")
+    if _integer(stops) and ((deficit == 0 and stops == 0) or (
+        _number(capacity) and capacity > reserve and amount <= capacity and stops > 0
+    )):
+        # Independently check this lower bound; it is not a mandatory-stop rule.
+        stop_bound = (0.0 if deficit == 0 else
+                      max(0.0, burn * laps - max(0.0, amount - reserve)) / (capacity - reserve))
+        if not math.isfinite(stop_bound):
+            return
+        expected_stops = 0 if deficit == 0 else max(1, math.ceil(stop_bound))
+        if stops == expected_stops:
+            facts.append(_entry("fuel.minimum_stops",
+                                f"仅按燃油预算，至少还需 {stops} 次补油；不含赛事强制进站。"))
+
+
 def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
-    """Project a fresh AppState snapshot into bounded fuel-only evidence.
+    """Project fresh observations and separately admitted fuel-budget estimates.
 
     This accepts the local application's snapshot, not arbitrary external
     telemetry. Readiness/context must agree before any fuel number is exposed.
@@ -67,7 +156,7 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     notices = result["notices"]
     notices.extend(
         [
-            _entry("ESTIMATE_ONLY", "燃油数值是实验性估计，不是进站指令。"),
+            _entry("ESTIMATE_ONLY", "续航与终点燃油预算是实验性估计，不是进站指令。"),
             _entry("STRATEGY_UNAVAILABLE", "当前入口尚不提供实时进站、交通或出站策略。"),
             _entry("DRIVING_UNAVAILABLE", "当前入口尚不提供实时弯角或驾驶技巧建议。"),
             _entry("TIRE_UNAVAILABLE", "当前入口尚不提供实时胎耗或换胎建议。"),
@@ -75,26 +164,15 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     )
     snapshot = _mapping(snapshot)
     monitor = _mapping(snapshot.get("monitor"))
-    context = _mapping(monitor.get("context"))
-    quality = _mapping(monitor.get("quality"))
     fuel = _mapping(snapshot.get("fuel"))
-    age = snapshot.get("updated_age_s")
+    direct = current_fuel_observation(snapshot)
+    if direct is not None:
+        result["facts"].append(_entry("fuel.current", f"当前观测剩余燃油：{direct:.2f} 升。"))
+        result["capabilities"]["fuel"] = "OBSERVED_ONLY"
+    reasons = monitor.get("reasons", [])
     scope_ready = (
-        snapshot.get("contract_version") == "experimental-live-fuel-app-v1"
-        and snapshot.get("connection") == "CONNECTED"
-        and snapshot.get("source_mode") == "LIVE"
-        and _number(age, maximum=2.0)
-        and monitor.get("contract_version") == "live-monitor-v1"
-        and monitor.get("record_type") == "live_monitor_snapshot"
-        and monitor.get("advisor_only") is True
-        and monitor.get("executable") is False
-        and monitor.get("source_kind") == "SDK_LIVE"
-        and monitor.get("status") in ("READY", "DEGRADED")
-        and context.get("sim_source_mode") == "FULL"
-        and context.get("player_control_state") == "IN_CAR_PHYSICS"
-        and context.get("conflicts") == []
-        and quality.get("status") in ("READY", "DEGRADED")
-        and quality.get("stale") is False
+        _live_frame_ready(snapshot)
+        and type(reasons) is list and "READ_ERROR:FuelLevel" not in reasons
         and monitor.get("interval_invalid_for_fuel") == []
         and fuel.get("estimate_only") is True
         and fuel.get("advisor_only") is True
@@ -103,6 +181,8 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     if not scope_ready:
         notices.append(
             _entry("LIVE_STATE_UNAVAILABLE", "没有新鲜且已确认处于车内驾驶的实时燃油证据。")
+            if direct is None else
+            _entry("FUEL_ESTIMATE_UNAVAILABLE", "当前油量读数可用；本区间不能据此推算续航。")
         )
         return result
 
@@ -110,6 +190,9 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     counts_valid = _integer(valid) and _integer(required) and required >= 2
     if fuel.get("status") == "LEARNING" and counts_valid and valid < required:
         result["capabilities"]["fuel"] = "LEARNING"
+        if direct is None and _number(fuel.get("current_fuel_l")):
+            result["facts"].append(_entry(
+                "fuel.current", f"当前观测剩余燃油：{fuel['current_fuel_l']:.2f} 升。"))
         result["facts"].append(
             _entry(
                 "fuel.learning_progress", f"已采纳 {valid} 个有效完整圈，至少需要 {required} 圈。"
@@ -128,14 +211,16 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
         and _number(burn)
         and burn > 0
         and _integer(laps)
+        and (direct is None or math.isclose(direct, amount, abs_tol=1e-6))
     ):
         notices.append(_entry("FUEL_UNAVAILABLE", "完整有效的燃油估计暂不可用。"))
         return result
 
     result["capabilities"]["fuel"] = "ESTIMATE_AVAILABLE"
+    if direct is None:
+        result["facts"].append(_entry("fuel.current", f"当前观测剩余燃油：{amount:.2f} 升。"))
     result["facts"].extend(
         [
-            _entry("fuel.current", f"当前观测剩余燃油：{amount:.2f} 升。"),
             _entry("fuel.burn_per_lap", f"估计保守耗油：每圈 {burn:.3f} 升。"),
             _entry("fuel.range_laps", f"扣除已配置的储备油量后，估计还能完成 {laps} 整圈。"),
             _entry("fuel.sample_laps", f"燃油模型已积累 {valid} 个完整有效圈。"),
@@ -148,6 +233,11 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
         result["facts"].append(
             _entry("fuel.finish_estimate", f"模型估计跑至比赛结束需要 {needed:.2f} 升燃油。")
         )
+        _fuel_budget_facts(result, fuel, amount, burn)
+    else:
+        # Non-race questions can still explain reserve and observed variation,
+        # but a practice timer never supplies a finish horizon.
+        _fuel_budget_facts(result, {**fuel, "race_horizon_basis": None}, amount, burn)
     return result
 
 

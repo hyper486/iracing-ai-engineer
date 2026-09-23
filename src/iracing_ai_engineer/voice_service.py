@@ -45,6 +45,12 @@ def concise_answer(answer: dict) -> str:
         return "赛况已经变化，这次回答已撤回。请重新提问。"
     if answer.get("scope") != "live_snapshot":
         return "这是一份历史复盘，不是当前比赛指令。请在停车后查看历史报告。"
+    local = answer.get("spoken_text")
+    if (answer.get("origin") == "local_live" and type(local) is str
+            and 1 <= len(local) <= 280 and not any(ord(char) < 32 for char in local)):
+        # The local renderer retains the relevant uncertainty in this compact
+        # answer; do not turn it back into a long list of unrelated limitations.
+        return local
     text = answer.get("text")
     if type(text) is not str or not text:
         return "当前证据不足，暂时无法回答。"

@@ -144,6 +144,21 @@ def test_start_owns_one_reader_and_native_snapshot_has_no_token_or_key(tmp_path,
     assert result["engineer"]["status"] == "DISABLED"
 
 
+def test_local_fuel_query_bypasses_native_general_question_cooldown(tmp_path, created):
+    clock = [10.0]
+    controller = created(store=Store(tmp_path), reader=Reader(), clock=lambda: clock[0])
+    controller.start()
+    assert controller.submit("解释当前证据")[0] == 202
+    # There need not be live data: the local route should explain its absence,
+    # not wait ten seconds or call a provider to report it.
+    assert controller.submit("还有多少油")[0] == 202
+    assert controller.snapshot()["engineer"]["answer"]["origin"] == "local_live"
+    assert controller.submit("还有多少油")[0] == 429
+    clock[0] += 1
+    assert controller.submit("还能跑几圈")[0] == 202
+    assert controller.snapshot()["engineer"]["requests_used"] == 0
+
+
 def test_close_is_nonblocking_stops_reader_and_clears_key(tmp_path, created):
     reader = Reader()
     controller = created(store=Store(tmp_path), reader=reader)

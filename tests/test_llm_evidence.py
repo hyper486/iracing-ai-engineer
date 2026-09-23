@@ -188,12 +188,13 @@ def test_live_scope_and_staleness_fail_closed(path, value) -> None:
     assert "LIVE_STATE_UNAVAILABLE" in _ids(context, "notices")
 
 
-def test_live_learning_does_not_expose_current_or_unfinished_model_numbers() -> None:
+def test_live_learning_exposes_current_observation_but_not_unfinished_estimates() -> None:
     snapshot = _live()
     snapshot["fuel"].update(status="LEARNING", valid_laps=3)
     context = evidence.build_live_context(snapshot)
     assert context["capabilities"]["fuel"] == "LEARNING"
     assert context["facts"] == [
+        {"id": "fuel.current", "text": "当前观测剩余燃油：25.50 升。"},
         {"id": "fuel.learning_progress", "text": "已采纳 3 个有效完整圈，至少需要 5 圈。"}
     ]
     assert "FUEL_LEARNING" in _ids(context, "notices")

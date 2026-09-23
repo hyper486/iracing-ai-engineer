@@ -32,12 +32,50 @@ required running dependency. The final goal remains active and unaccepted.
 | Native VR voice | Implemented; hardware/race acceptance pending | Opt-in background PTT, input/output selectors or refreshed Windows defaults, local Whisper STT and Windows TTS, interruption and optional guarded low-fuel facts. No continuous listening or raw-audio upload. |
 | Tick-level proximity | Detector plus opt-in native audio in source | Independent fixed-phrase cache, priority cancellation, fast snapshots and bounded playback diagnostics; synthetic/local-synthesis checks only, no hardware or in-car acceptance. |
 | Reader / analysis / recording isolation | Bounded worker lanes in source | Recorder and analysis failures no longer synchronously block the SDK reader; explicit incomplete prefixes, generation guards and streaming event digests. Not GIL isolation or a hardware latency guarantee. |
+| Routine current-fuel questions | Local source implementation; synthetic checks | Current observations, learned range and conditional race fuel budgets bypass cloud waits; not live pit tactics or an updated EXE. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Bounded live-work isolation milestone
+## Local current-fuel question milestone
+
+Explicit routine current-fuel questions now use locally rendered evidence in
+the native buttons and PTT path. Current amount, learned whole-lap range, burn,
+race finish balance and conditional fuel-stop bounds need no provider call.
+They remain usable while one older cloud request unwinds, consume no cloud
+budget and use a separate one-second guard. An older provider result cannot
+overwrite the newer local answer. Mixed or explanatory questions still use
+the existing grounded planner; this is not an unrestricted chatbot.
+
+A fresh, owned fuel observation can be answered before burn learning completes
+or while a pit/refuel interval blocks forecasting. Read errors, stale sources,
+replay and spectator context remain excluded. Reserve, observed burn range and
+finish-horizon basis are explicit. Cumulative deficit is not a next-stop fill
+setting; a fuel-only minimum stop count is not a tactical or mandatory-stop
+decision. Native default tank capacity remains unknown, so positive stop bounds
+are withheld rather than guessed. Loss of a selected fact withdraws the answer
+even when some other observation remains usable.
+
+Synthetic checks connect invented SDK frames through the real monitor, fuel
+estimator and question service. A separate fake microphone/STT/TTS/output test
+asks a cloud question, interrupts its pending voice wait, and successfully
+speaks a local range answer before the fake provider is released. These tests
+do not measure real recognition latency, output-device hearing or VR impact.
+
+Complete regression: **2,395 passed, 44 skipped**; focused regression: **427 passed**.
+The skips remain missing-data, platform, private-deployment or explicit opt-in
+boundaries, not live acceptance. The two cloud/local concurrency cases also
+passed five repeated runs. The existing five-check offline HTTP/planner
+rehearsal passed with invented data and a fake provider. Ruff, public-safety
+scanning including history and exact staged diff checks passed.
+
+No game, microphone, speaker, provider account, installed EXE or Simulator Controller
+configuration was changed. Stage C's supported traffic/pit integration, live
+fuel accuracy comparison, incremental corner coaching and capture/audio audit
+remain open. See [the question contract](LIVE_FUEL_QUESTIONS.md).
+
+## Earlier bounded live-work isolation milestone
 
 The source reader now sends slow analysis and optional private recording to
 separate single-owner lanes, each bounded to 128 observations / 16 MiB of retained

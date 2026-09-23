@@ -108,7 +108,7 @@ def services():
 def test_cloud_plan_only_can_select_locally_computed_facts(services):
     client = Planner()
     service = services(config=EngineerConfig(provider="deepseek"), client=client)
-    assert service.submit("还有多少油？")[0] == 202
+    assert service.submit("解释当前燃油估计的依据")[0] == 202
     result = wait_answer(service)
     assert result["answer"]["origin"] == "deepseek"
     assert "20" in result["answer"]["text"]

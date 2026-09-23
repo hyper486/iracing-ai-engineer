@@ -60,7 +60,8 @@ remains available separately; it is not the native UI.
 
 语音链路是 **PTT → 本地 Whisper → 问题文字 → 现有工程问答 → Windows 本地
 朗读 → 所选耳机**。录音只存在于内存，不保存音频，也不上传原始声音。
-启用 DeepSeek 时，识别出的问题文字与筛选后的工程摘要才会发送到云端。
+常用燃油短句直接在本地回答；启用 DeepSeek 后，需要模型解释的问题文字与筛选后
+的工程摘要才会发送到云端。
 不要口述密钥或私密身份信息。没听清/静音/超时不会提交问题；识别门槛只是
 启发式过滤，不保证内容正确。请用清楚的短句，避免与语音聊天同时讲话。
 
@@ -68,6 +69,14 @@ remains available separately; it is not the native UI.
 满足保守直道/无并排车条件时，才播报低油量事实，至少间隔 90 秒。
 它不调用 LLM、不决定进站、不替代比赛提醒。主动问答依然是提问时的快照；
 失效后撤回并停止尚在播放的回答。实时多停/交通/轮胎/驾驶指导仍未验收。
+
+源码新增本地短问短答：“还有多少油”“当前燃油还能跑几圈”“每圈用多少油”
+“油够到终点吗”“还要加多少油”“还要几停”“该进站了吗”。不等待 DeepSeek，
+也不消耗模型次数；云端问题未返回时，可重新按 PTT 提问这些短句。旧回答不会覆盖
+新答案。当前油量在耗油学习期也可查询，续航仍需完整有效圈；缺油是累计终点预算，
+不是下一次进站加油量。没有油箱容量或交通/规则证据时明确说明，不猜次数或最佳
+进站圈。详见[本地燃油问答边界](LIVE_FUEL_QUESTIONS.md)。识别和本地朗读仍有耗时，
+未实测端到端延迟；这部分尚未重新打包到已有 EXE。
 
 本地识别固定使用公开 Whisper medium 多语言模型，CPU int8、四个推理线程，
 不使用 VR 的 GPU；这不代表已验证对 VR 帧率无影响。识别放在可终止的本机
@@ -108,7 +117,8 @@ Cloud requests send only the question and allowlisted engineering summaries.
 Do not put identity or secrets in the question. The model selects supported
 fact IDs and local code renders the answer, numbers and mandatory limitations.
 Defaults remain 60 attempted provider calls per app run, at least 10 seconds
-between accepted questions, and a bounded provider timeout. Changing model or
+between general questions, and a bounded provider timeout. Routine live fuel
+questions have a separate one-second guard and use no provider budget. Changing model or
 loading history does not reset the run's request count. Provider errors fall
 back locally without interrupting telemetry. See [DeepSeek details](DEEPSEEK_ENGINEER.md).
 Closure waits for the answer-planning service to finish. As documented by the

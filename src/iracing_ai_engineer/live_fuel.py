@@ -152,6 +152,12 @@ class LiveFuelEngineer:
             "fuel_needed_to_finish_l": None,
             "fuel_to_add_l": None,
             "minimum_stops": None,
+            "reserve_l": self.config.reserve_l,
+            "tank_capacity_l": self.config.tank_capacity_l,
+            "observed_burn_range_l_per_lap": None,
+            "race_laps_to_go": None,
+            "race_horizon_basis": None,
+            "fuel_shortfall_l": None,
             "message": messages[status],
             "estimate_only": True,
             "advisor_only": True,
@@ -368,6 +374,7 @@ class LiveFuelEngineer:
         result = self._result("READY", ["UNCALIBRATED_FUEL_ESTIMATE"], fuel_l)
         result["conservative_burn_l_per_lap"] = burn
         result["estimated_laps_remaining"] = math.floor(range_laps + 1e-12)
+        result["observed_burn_range_l_per_lap"] = [min(burns), max(burns)]
         reasons = result["reason_codes"]
         assert isinstance(reasons, list)
         laps_to_go: int | None = None
@@ -377,9 +384,11 @@ class LiveFuelEngineer:
             if laps is not None and laps > 0:
                 # Do not subtract current lap fraction: the SDK count is not distance.
                 laps_to_go = laps
+                result["race_horizon_basis"] = "SDK_LAPS_REMAINING"
             elif remaining_s is not None and 0 <= remaining_s < 604800:
                 fastest = min(sample.lap_time_s for sample in self._history)
                 laps_to_go = math.ceil(remaining_s / fastest) + self.config.timed_race_extra_laps
+                result["race_horizon_basis"] = "TIMER_FASTEST_LAP_PLUS_MARGIN"
         if laps_to_go is None:
             reasons.append("RACE_FINISH_UNCONFIRMED")
         else:
@@ -387,6 +396,8 @@ class LiveFuelEngineer:
             if not math.isfinite(needed):
                 return self._interrupt("ESTIMATE_OUT_OF_RANGE", fuel_l)
             result["fuel_needed_to_finish_l"] = needed
+            result["race_laps_to_go"] = laps_to_go
+            result["fuel_shortfall_l"] = max(0.0, needed - fuel_l)
             capacity = self.config.tank_capacity_l
             if needed <= fuel_l:
                 result["minimum_stops"] = 0

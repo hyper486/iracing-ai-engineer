@@ -46,7 +46,9 @@ limits are tracked in [the public status](PUBLIC_PROJECT_STATUS.md) and
 cache, priority ownership, cancellation and settings migration are now implemented
 in source. Synthetic backend, local memory-only synthesis and visible synthetic
 UI checks are not a real hearing/VR acceptance pass. No new EXE deployment is
-claimed. Stage B hardware acceptance, C-E and the final endurance goal remain open.
+claimed. Stage C's local current-fuel question slice is now implemented in source;
+strategy integration and real lap comparisons remain open. Stage B hardware
+acceptance, D-E and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.
 LLM use is opt-in, summary-only, for question interpretation and explanation.
 
@@ -71,7 +73,13 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
 - Remaining isolation boundary: SDK access, metadata binding and bounded input
   inspection still run on the reader; Python threads do not isolate the GIL or
   forcibly recover a hung native call. Final shutdown waits for actual release.
-- Verify endurance-duration resource limits, implement the current fuel/strategy
+- Implemented: exact routine fuel questions use local facts without provider
+  waits or budget use, including PTT while an older cloud answer is pending.
+  Fresh observations are separate from learned range; finish deficits and
+  fuel-only stop bounds retain horizon, reserve and capacity limitations.
+  Selected-fact withdrawal prevents a usable observation from preserving a
+  now-invalid forecast. See [the question contract](LIVE_FUEL_QUESTIONS.md).
+- Verify endurance-duration resource limits, integrate supported live strategy
   and incremental corner loops, and connect private capture replay to the new
   event/playback audit before claiming an integrated trial build.
 - Rebuild/package after those integrations, then check selected microphone and

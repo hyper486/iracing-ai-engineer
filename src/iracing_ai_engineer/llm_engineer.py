@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .live_queries import LOCAL_QUERY_INTERVAL_S, live_query_intent, render_live_query
 from .llm_client import DeepSeekClient, LLMError
 from .llm_evidence import build_live_context, load_session_context
 from .runtime_clock import monotonic_now
@@ -74,6 +75,13 @@ def _topic(question: str) -> str:
 def fallback_plan(context: Mapping, question: str) -> dict:
     topic = _topic(question)
     facts = context["facts"]
+    if (topic == "strategy" and context.get("scope") == "live_snapshot"
+            and context.get("capabilities", {}).get("strategy") == "FUEL_BUDGET_ONLY"):
+        available = {item["id"] for item in facts}
+        return {"topic": topic, "fact_ids": [key for key in (
+            "fuel.finish_balance", "fuel.minimum_stops", "fuel.horizon",
+            "fuel.range_laps", "fuel.reserve",
+        ) if key in available], "notice_ids": []}
     prefixes = ("strategy.", "tire.") if topic == "strategy" else (f"{topic}.",)
     selected = [item["id"] for item in facts if item["id"].startswith(prefixes)]
     if topic == "status":
@@ -167,6 +175,7 @@ class EngineerService:
                 self._configuration_error = "MODEL_CONFIGURATION_INVALID"
         self._requests = initial_requests_used
         self._last_request = -math.inf
+        self._last_local_request = -math.inf
         self._busy = False
         self._answer: dict | None = None
         self._answer_binding: tuple | None = None
@@ -205,11 +214,14 @@ class EngineerService:
                     self._answer_invalidated or age > ANSWER_TTL_S
                     or _binding(current) != self._answer_binding
                     or (self._answer_was_valid and not self._valid_live(current))
+                    or any(key not in {fact["id"] for fact in context["facts"]}
+                           for key in answer.get("fact_ids", []))
                 )
                 answer.update(age_s=round(age, 1), stale=stale)
                 if stale:
                     self._answer_invalidated = True
                     answer["text"] = "这份回答已撤回：数据过期、圈次或会话状态已变化，请重新提问。"
+                    answer.pop("spoken_text", None)
             retry_after = max(0.0, self.config.min_interval_s - (now - self._last_request))
             status = "BUSY" if self._busy else (
                 "RATE_LIMITED" if retry_after else self._base_status()
@@ -222,6 +234,9 @@ class EngineerService:
                 "request_limit": self.config.request_limit,
                 "min_interval_s": self.config.min_interval_s,
                 "retry_after_s": round(retry_after, 1), "csrf_token": self._token,
+                "local_retry_after_s": round(max(
+                    0.0, LOCAL_QUERY_INTERVAL_S - (now - self._last_local_request)), 2),
+                "local_live_available": not self._closed.is_set(),
                 "answer": answer, "error": self._error,
                 "capabilities": {**context["capabilities"], "session": self._session is not None},
                 "advisor_only": True, "executable": False, "live_acceptance": False,
@@ -229,16 +244,7 @@ class EngineerService:
 
     @staticmethod
     def _valid_live(snapshot: Mapping) -> bool:
-        monitor = snapshot.get("monitor") or {}
-        return (
-            snapshot.get("connection") == "CONNECTED"
-            and snapshot.get("source_mode") == "LIVE"
-            and monitor.get("source_kind") == "SDK_LIVE"
-            and monitor.get("status") in ("READY", "DEGRADED")
-            and monitor.get("quality", {}).get("stale") is False
-            and monitor.get("context", {}).get("player_control_state") == "IN_CAR_PHYSICS"
-            and not monitor.get("interval_invalid_for_fuel")
-        )
+        return bool(build_live_context(snapshot)["facts"])
 
     def submit(self, question: object, scope: object = "live") -> tuple[int, dict]:
         if (
@@ -251,10 +257,27 @@ class EngineerService:
             return 409, {"error": "NO_SESSION_ARTIFACT"}
         state = self._source()
         context = self._session if scope == "session" else build_live_context(state)
+        intent = live_query_intent(question) if scope == "live" else None
+        local_answer = render_live_query(context, intent) if intent is not None else None
         now = self._clock()
         with self._lock:
             if self._closed.is_set():
                 return 409, {"error": "STOPPED"}
+            if local_answer is not None:
+                if now - self._last_local_request < LOCAL_QUERY_INTERVAL_S:
+                    return 429, {"error": "RATE_LIMITED"}
+                self._last_local_request = now
+                self._serial += 1
+                self._answer = {
+                    **local_answer, "id": str(self._serial), "origin": "local_live",
+                    "scope": "live_snapshot", "snapshot_was_valid": bool(context["facts"]),
+                }
+                self._answer_binding, self._answer_at = _binding(state), now
+                self._answer_was_valid = bool(context["facts"])
+                self._answer_invalidated = False
+                # A slow cloud job may still unwind, but it cannot overwrite
+                # this newer answer. No second provider worker is created.
+                return 202, {"accepted": True, "route": "local_live"}
             if self._busy:
                 return 409, {"error": "BUSY"}
             if now - self._last_request < self.config.min_interval_s:
@@ -292,10 +315,11 @@ class EngineerService:
             answer = {
                 "id": str(serial), "topic": plan["topic"], "text": render_plan(plan, context),
                 "origin": origin, "scope": context["scope"],
+                "fact_ids": plan["fact_ids"],
                 "snapshot_was_valid": was_valid,
             }
             with self._lock:
-                if not self._closed.is_set():
+                if not self._closed.is_set() and serial == self._serial:
                     self._answer = answer
                     self._answer_binding = binding
                     self._answer_at = requested_at

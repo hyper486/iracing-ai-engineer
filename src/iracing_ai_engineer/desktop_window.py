@@ -141,7 +141,7 @@ class DesktopPresenter:
         identity = answer.get("id")
         if (
             type(identity) is not str or not identity
-            or origin not in ("deepseek", "local_fallback")
+            or origin not in ("deepseek", "local_fallback", "local_live")
             or scope not in ("live_snapshot", "historical_session")
             or type(answer.get("text")) is not str
         ):
@@ -160,9 +160,10 @@ class DesktopPresenter:
         if invalid and scope == "live_snapshot":
             self._withdrawn.add(key)
         stale = invalid or key in self._withdrawn
-        origin_label = "本地规则解读 · 未调用模型" if origin == "local_fallback" else (
-            "DeepSeek · " + _text(engineer.get("model"), "模型未确认", 80)
-        )
+        origin_label = {
+            "local_live": "本地实时直答 · 未调用模型",
+            "local_fallback": "本地规则解读 · 未调用模型",
+        }.get(origin, "DeepSeek · " + _text(engineer.get("model"), "模型未确认", 80))
         if stale:
             scope_label = "已过期 · 正文已撤回"
         elif scope == "historical_session":
@@ -292,7 +293,11 @@ class DesktopPresenter:
                   if type(used) is int and type(limit) is int else "云端额度：未知")
         retry = engineer.get("retry_after_s")
         if _finite(retry) and retry > 0:
-            budget += f" · 再等 {math.ceil(retry)} 秒"
+            budget += f" · 常规问答再等 {math.ceil(retry)} 秒"
+        local_ready = (engineer.get("local_live_available") is True
+                       and engineer.get("local_retry_after_s") == 0)
+        if engineer.get("local_live_available") is True:
+            budget += " · 常用燃油问题本地直答"
         header, answer = self._answer(engineer, fresh)
         proximity = _mapping(telemetry.get("spotter"))
         proximity_status = proximity.get("status")
@@ -332,9 +337,9 @@ class DesktopPresenter:
             metrics=metrics, learning=learning, progress=progress, recording=record_text,
             issues=issue_text, engineer_status=engineer_labels.get(status, "问答服务未连接"),
             engineer_error=engineer_error, budget=budget,
-            can_submit=lifecycle == "RUNNING" and status in (
+            can_submit=lifecycle == "RUNNING" and (local_ready or status in (
                 "READY", "MISSING_KEY", "DISABLED", "BUDGET_EXHAUSTED", "ERROR"
-            ),
+            )),
             session_available=_mapping(engineer.get("capabilities")).get("session") is True,
             answer_header=header, answer_text=answer,
             notice=_text(value.get("notice"), limit=600),
@@ -569,8 +574,8 @@ class DesktopWindow:
             side="left", padx=(0, 5)
         )
         for label, question in (
-            ("问燃油", "根据当前有效证据，燃油还能跑几圈？有哪些不确定性？"),
-            ("问策略", "当前证据能支持哪些进站判断？哪些信息仍然不足？"),
+            ("问燃油", "当前燃油还能跑几圈？"),
+            ("问策略", "该进站了吗？"),
             ("问驾驶", "当前数据能支持哪些驾驶分析？哪些结论尚无证据？"),
         ):
             self._button(buttons, label, lambda q=question: self._quick(q),
