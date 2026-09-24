@@ -107,10 +107,17 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
 - Verify endurance-duration resource limits and integrate supported live strategy
   before claiming an integrated trial build. Journal replay currently covers
   proximity and software audio, not a simulated hardware/PTT/LLM rerun.
-- Before packaging, check observation-only fuel-answer liveness when unrelated
-  fuel-model inputs are absent, and corner-collection continuity at the observed
-  reader coverage. Treat these as open verification tasks, not proven defects
-  or permission to silently relax evidence gates.
+- Implemented: exact direct-fuel amount answers have a separate observation
+  revision, so unrelated model-invalid intervals cannot repeatedly cancel them.
+  Observation/refuel/source/lap failures remain latched, forecasts retain their
+  model dependency and question-time expiry is unchanged. Fake PTT checks cover
+  model churn and refueling during synthesis; hardware hearing is still open.
+- Implemented: live corner collection no longer clears prior laps for every
+  isolated missing tick. It retains sparse rows and uses the unchanged offline
+  99.9% whole-lap coverage / 0.1 s gap gates, with explicit quality rejections.
+  Synthetic 60 Hz sparse-frame checks are not a real reader-rate improvement.
+  Measure current acquisition under in-car/VR load; the older roughly 96%
+  spectator result would still fail, and thresholds must not be silently relaxed.
 - Rebuild/package after those integrations, then check selected microphone and
   headphones, wheel/PTT, actual proximity latency and VR performance in a
   user-driven session. A local TTS duration is not output or end-to-end latency.

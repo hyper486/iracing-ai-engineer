@@ -39,6 +39,7 @@ from .live_traffic import (
 )
 from .live_worker import FrameWorker, payload_size
 from .llm_engineer import EngineerConfig, EngineerService
+from .llm_evidence import current_fuel_observation
 from .runtime_clock import monotonic_now
 from .sdk_probe import SdkProbeUnavailable, WindowsPyirsdkTransport
 from .spotter import SPOTTER_FIELDS, ProximitySpotter
@@ -161,6 +162,8 @@ class AppState:
         self._updated: float | None = None
         self._generation = 0
         self._engineer_revision = 0
+        self._fuel_observation_revision = 0
+        self._observed_fuel_l = None
         self._situation_revision = 0
         self._spotter = ProximitySpotter()
         self._spotter_failed = False
@@ -201,6 +204,7 @@ class AppState:
                 session_type=None,
             )
             self._updated = None
+            self._observed_fuel_l = None
             self._generation += 1
             if status == "CONNECTED":
                 self._summary["connections"] += 1
@@ -318,6 +322,8 @@ class AppState:
             if generation == self._generation:
                 self._updated = None
                 self._engineer_revision += 1
+                self._fuel_observation_revision += 1
+                self._observed_fuel_l = None
                 self._situation_revision += 1
                 self._value.update(monitor=None, fuel=None, traffic=None, driving=None, speech=None)
 
@@ -372,6 +378,26 @@ class AppState:
                     "SOURCE_STALE",
                 })
             )
+            # Amount-only speech depends on the owned SDK observation, not on
+            # incident/flag/lap inputs needed to learn a consumption model.
+            # Latch actual observation loss/refuel between consumer polls. Age
+            # gaps are covered by source_changed; snapshot() still gates age.
+            observed_fuel = current_fuel_observation({
+                **self._value, "connection": "CONNECTED", "monitor": monitor,
+                "updated_age_s": 0.0,
+            })
+            if (
+                source_changed or (self._observed_fuel_l is None) != (observed_fuel is None)
+                or bool(set(monitor.get("interval_invalid_for_fuel", [])) & {
+                    "FUEL_LEVEL_MISSING_OR_INVALID", "REFUEL_INTERVAL",
+                })
+                or previous.get("telemetry", {}).get("lap_number")
+                != monitor.get("telemetry", {}).get("lap_number")
+                or (observed_fuel is not None and self._observed_fuel_l is not None
+                    and observed_fuel > self._observed_fuel_l + 0.05)
+            ):
+                self._fuel_observation_revision += 1
+            self._observed_fuel_l = observed_fuel
             if (source_changed or situation_binding(self._value)
                     != situation_binding({"monitor": monitor, "traffic": traffic})):
                 self._situation_revision += 1
@@ -418,6 +444,7 @@ class AppState:
                 age = None
             value.update(updated_age_s=age, generation=self._generation,
                          engineer_revision=self._engineer_revision,
+                         fuel_observation_revision=self._fuel_observation_revision,
                          situation_revision=self._situation_revision)
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
                 value.update(connection="DISCONNECTED", fuel=None, monitor=None, traffic=None,

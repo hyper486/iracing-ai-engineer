@@ -9,6 +9,9 @@ import numpy as np
 
 from .contracts import LAP_ALGORITHM_VERSION
 
+CLEAN_DRIVING_MIN_TICK_COVERAGE = 0.999
+CLEAN_DRIVING_MAX_GAP_S = 0.10
+
 
 @dataclass(frozen=True)
 class LapBoundary:
@@ -452,8 +455,8 @@ def segment_laps(
             and confidence == "high"
             and cleanliness_observable
             and not np.any(on_pit)
-            and tick_coverage >= 0.999
-            and max_gap_s <= 0.10
+            and tick_coverage >= CLEAN_DRIVING_MIN_TICK_COVERAGE
+            and max_gap_s <= CLEAN_DRIVING_MAX_GAP_S
             and not driving_disqualifiers.intersection(reasons)
         )
         fuel_eligible = (

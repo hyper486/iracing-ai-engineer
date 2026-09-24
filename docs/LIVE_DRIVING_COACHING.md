@@ -46,11 +46,21 @@ count, air/track temperature, wind, precipitation, lateral occupancy and usable
 opponent arrays. Missing/read-error channels are unavailable, never zero-filled.
 
 Only full, player-in-car, non-stale `SDK_LIVE` context is admitted. Pit/off-track
-intervals, incidents, dropped ticks, refueling, source/counter resets, player or
+intervals, incidents, large sampling gaps, refueling, source/counter resets, player or
 tire-context changes invalidate the collector epoch. Complete laps require both
 start/finish crossings and the existing lap-segmentation quality gates. A 0.3 s
 tail admits the existing delayed counter-alignment window; partial capture ends
 are not treated as complete laps.
+
+An isolated missing tick no longer clears all accumulated laps. Actual sparse
+rows retain their original ticks/times; no replacement frame is fabricated.
+The completed-lap model still requires **at least 99.9% tick coverage** and
+**at most 0.1 s between samples**, plus all existing cleanliness rules. The live
+collector and offline model share the same unchanged thresholds. A larger tick
+or simulation-time gap resets the epoch immediately; persistent small gaps
+that fail whole-lap coverage yield an explicit rejection/health explanation.
+This does not make the older roughly 96% spectator acquisition suitable for
+coaching. Current in-car sampling under VR load still needs measurement.
 
 Before coaching, each lap excludes unsuitable flags, stops, observable pit
 service, alongside cars, longitudinal opponents within 100 m, changing tire
@@ -110,9 +120,13 @@ traffic/pit/incident exclusions, malformed/stale projections, bounded history an
 rows, blocked model work, queue overload, startup/feed/model faults, delayed fake
 cloud replies and native health labels. SDK_LIVE tags in these fixtures are not
 authentic SDK evidence or a live acceptance result.
+Invented 60 Hz laps with one omitted tick per lap now also reach the unchanged
+model when its coverage gate passes; a sustained roughly 96% stream cannot
+produce a coaching point. Large time-only and tick-only gaps reset collection.
 
 Memory-only local synthesis produced 14.6–16.6 s clips for the three example
 recommendations. No microphone or speaker was opened. Clip duration is not
 response latency, user-confirmed hearing or selected-device/VR acceptance.
-Packaging, private event/audio replay, actual complete-lap comparisons and
+Private proximity/event/audio replay is now implemented separately; it does not
+re-run this coaching model. Packaging, actual complete-lap comparisons and
 hardware acceptance remain work under the [active goal](ACTIVE_GOAL.md).

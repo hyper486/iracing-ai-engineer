@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from iracing_ai_engineer import live_app, live_driving
+from iracing_ai_engineer.laps import segment_laps
 from iracing_ai_engineer.live_driving import (
     COLUMNS,
     LiveDrivingEngineer,
@@ -233,6 +234,77 @@ def test_sdk_shaped_frames_reach_native_query_without_provider_or_fuel_dependenc
             service.close(wait=True)
     finally:
         analysis.close()
+
+
+@pytest.mark.parametrize("sparse", [False, True])
+def test_live_collector_uses_existing_whole_lap_coverage_gate(sparse):
+    data = rows(["baseline"] * 4 + ["long_coast"] * 2 + ["baseline"], rate=60)
+    keep = np.ones(len(data), dtype=bool)
+    for lap in range(1, 7):
+        indices = np.flatnonzero(data[:, 2] == lap)
+        # One missing tick per lap is acceptable only if the unchanged offline
+        # gate admits it. Sustained 96% coverage must still reject the lap.
+        keep[indices[20:-20:25] if sparse else indices[len(indices) // 2]] = False
+    data = data[keep]
+    channels = {name: data[:, index] for index, name in enumerate(COLUMNS)}
+    complete = [lap for lap in segment_laps(channels, 60) if lap.structurally_complete]
+    assert len(complete) == 5
+    assert all(lap.clean_for_driving is (not sparse) for lap in complete)
+    assert all(lap.missing_ticks > 0 for lap in complete)
+    monitor = LiveMonitor(source_id="synthetic", session_id="synthetic", sdk_tick_rate_hz=60)
+    collector = LiveDrivingEngineer(60)
+    try:
+        for frame in frames(data):
+            monitor.feed(frame)
+            collector.feed(frame, monitor.latest_sample, 1_200_000)
+            if frame.values["LapDistPct"] < .04:
+                assert collector._worker.wait_idle(5)
+        assert collector._worker.wait_idle(5)
+        result = collector.snapshot(monitor.snapshot())
+        assert result["worker"]["processed_frames"] == 5
+        if sparse:
+            assert result["status"] == "LAP_REJECTED", result
+            assert result["reason"] == "LAP_TICK_COVERAGE_LOW"
+            assert result["retained_laps"] == 0 and result["point"] is None
+            assert "99.9%" in live_driving.driving_notice({"driving": result})
+        else:
+            assert result["status"] == "READY", result
+            assert result["retained_laps"] == 5
+            assert result["point"]["diagnosis"] == "LONG_COAST"
+            assert result["point"]["evidence_laps"] == [5, 6]
+        assert result["live_acceptance"] is False
+    finally:
+        collector.close()
+
+
+@pytest.mark.parametrize("clock_gap", [False, True])
+def test_collector_still_resets_on_gaps_above_existing_driving_limit(clock_gap):
+    data = rows(["baseline"] * 3, rate=60)
+    boundary = np.flatnonzero(np.diff(data[:, 4]) < -.9)[0] + 1
+    sequence = list(frames(data[boundary - 8:boundary + 12]))
+    monitor = LiveMonitor(source_id="synthetic", session_id="synthetic", sdk_tick_rate_hz=60)
+    collector = LiveDrivingEngineer(60)
+    try:
+        for frame in sequence[:-1]:
+            monitor.feed(frame)
+            collector.feed(frame, monitor.latest_sample, 1_200_000)
+        before = collector.snapshot(monitor.snapshot())
+        assert before["buffered_rows"] > 0
+        frame = sequence[-1]
+        if clock_gap:
+            frame = replace(frame, values={**frame.values,
+                                           "SessionTime": frame.values["SessionTime"] + .15})
+        else:
+            frame = replace(frame, buffer_tick=frame.buffer_tick + 10,
+                            values={**frame.values,
+                                    "SessionTick": frame.values["SessionTick"] + 10})
+        monitor.feed(frame)
+        collector.feed(frame, monitor.latest_sample, 1_200_000)
+        after = collector.snapshot(monitor.snapshot())
+        assert after["epoch"] > before["epoch"]
+        assert after["buffered_rows"] == 0 and after["point"] is None
+    finally:
+        collector.close()
 
 
 @pytest.mark.parametrize("query", ["哪里可以改进？", "哪里丢时间", "我该练什么", "driving advice"])

@@ -90,9 +90,25 @@ Mixed answers that include traffic/pit observations have the shorter ten-second
 situation limit and extra change guards. Standalone situation answers do not
 depend on fuel-learning revisions.
 
+An exact **还有多少油？** answer backed by direct `FuelLevel` now uses a separate
+observation revision. Unrelated missing incident/flag/lap inputs and model
+learning-status changes do not cancel a valid amount utterance. This is not an
+exception to source validity: the app latches observation loss/read failure,
+tick-level refuel signals (or an increase greater than 0.05 L between
+publications), lap/source changes and analysis failure. The monitor retains a
+fuel-specific invalid-interval reason separately from missing lap fields, so a
+bad fuel tick cannot be hidden by recovery before the half-second publication
+or the voice consumer's next poll. A new answer is required after those changes.
+The same 30-second question-time expiry remains. Forecasts, model-fallback
+amounts and cloud explanations retain the conservative model dependency; producers without a
+valid observation revision also retain the old guard.
+
 Tests cover invented raw SDK frames through the real monitor and fuel estimator,
 learning-to-ready answers, inconsistent budgets, unavailable capacity, non-race
 and stale/context guards, provider budget preservation, native presenter state,
 and fake PTT/STT/TTS/output while a fake cloud call is blocked. None opens the
 game, a microphone, speakers or a provider account. Real lap comparisons,
 selected-device hearing, first-call recognition latency and VR load remain open.
+Additional fake-PTT checks hold synthesis while the fuel model is repeatedly
+invalidated: the valid amount reaches fake output, but a refueled amount does
+not. This is software-path verification, not human-confirmed hearing.

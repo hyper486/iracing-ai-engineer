@@ -41,7 +41,37 @@ required running dependency. The final goal remains active and unaccepted.
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Private proximity / audio replay milestone
+## Fuel-answer and corner-collection continuity milestone
+
+Two pre-packaging defects were reproduced using invented frames and the actual
+state/model owners. Exact direct-fuel amount answers were withdrawn on every
+unrelated model-invalid interval. Corner collection reset its entire epoch on
+any missing tick, even when the unchanged whole-lap quality gate admitted the
+sparse lap. These are now corrected in source:
+
+- Amount-only replies use an observation revision that survives model churn,
+  while latching real read loss, refueling, source/lap changes and analysis
+  faults. Fuel-specific loss/refuel signals are retained even between the
+  half-second display publications. Forecast/model-fallback guards and expiry
+  remain unchanged. Fake PTT verifies playback after model churn and suppression
+  after refueling during TTS.
+- Live coaching retains actual sparse rows and delegates completed-lap coverage
+  to the existing 99.9% / 0.1 s gates. It resets on large tick/time gaps and gives
+  explicit low-coverage rejection text. One omitted tick per invented 60 Hz lap
+  can pass; sustained roughly 96% coverage still cannot produce advice.
+
+Complete regression: **2,656 passed, 44 skipped**, including 42 new checks.
+The two asynchronous amount/PTT cases also passed five consecutive runs. Ruff,
+public safety including history and exact staged-file/diff review passed.
+Existing skips remain data/platform/private-deployment or explicit opt-in
+boundaries, not live acceptance.
+No simulator, microphone, selected output, provider account or installed EXE
+was used for this validation. This is not a measured SDK acquisition-rate
+improvement. In particular, the older spectator coverage is still inadequate;
+current acquisition under in-car/VR load remains to be measured. Live strategy,
+endurance-duration resources, packaging and real acceptance remain open.
+
+## Earlier private proximity / audio replay milestone
 
 The native recording switch now owns an independent private diagnostic journal
 as well as the existing raw collector. The journal links fixed proximity inputs,

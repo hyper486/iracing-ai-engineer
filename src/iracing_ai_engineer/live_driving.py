@@ -26,7 +26,7 @@ from .driving import (
     _analyze_resampled_laps,
     resample_clean_laps,
 )
-from .laps import segment_laps
+from .laps import CLEAN_DRIVING_MAX_GAP_S, CLEAN_DRIVING_MIN_TICK_COVERAGE, segment_laps
 from .live_fuel import _UNSUITABLE_FLAGS
 from .live_worker import FrameWorker
 from .runtime_clock import monotonic_now
@@ -195,6 +195,10 @@ class _CornerModel:
                                       and job.completed_laps <= self.last_completed)):
             self.laps.clear()
             reason = "LAP_COUNTER_NOT_ADVANCING"
+        elif len(complete) == 1 and complete[0].tick_coverage < CLEAN_DRIVING_MIN_TICK_COVERAGE:
+            reason = "LAP_TICK_COVERAGE_LOW"
+        elif len(complete) == 1 and complete[0].max_gap_s > CLEAN_DRIVING_MAX_GAP_S:
+            reason = "LAP_SAMPLING_GAP"
         elif len(complete) == 1 and complete[0].clean_for_driving:
             condition, reason = _conditions(channels, complete[0])
         self.last_completed = job.completed_laps
@@ -272,6 +276,7 @@ class LiveDrivingEngineer:
         if type(max_rows) is not int or not 100 <= max_rows <= MAX_ROWS:
             raise ValueError("COACHING_ROW_LIMIT_INVALID")
         self.clock, self.max_rows = clock, max_rows
+        self._tick_rate = tick_rate_hz
         self._lock = threading.Lock()
         self._epoch = self._revision = self._sequence = 0
         self._result = _empty()
@@ -324,12 +329,16 @@ class LiveDrivingEngineer:
                 or _value(sample.source.source_kind, direct=False) is not SourceKind.SDK_LIVE):
             self.reset("SOURCE_NOT_READY")
             return
+        dropped = _value(sample.quality.dropped_ticks, direct=False)
         if (type(track_length_mm) is not int or not 100_000 < track_length_mm <= 100_000_000
                 or set(frame.read_errors) & _REQUIRED_READS
                 or _value(sample.quality.status, direct=False) is QualityStatus.REJECTED
                 or _value(sample.quality.stale, direct=False) is not False
-                or _value(sample.quality.dropped_ticks, direct=False) != 0):
+                or type(dropped) is not int or dropped < 0):
             self.reset("DATA_OR_GEOMETRY_UNAVAILABLE")
+            return
+        if (dropped + 1) / self._tick_rate > CLEAN_DRIVING_MAX_GAP_S:
+            self.reset("LAP_SAMPLING_GAP")
             return
         row = _row(sample, frame, track_length_mm)
         player = _value(sample.opponents.player_car_idx)
@@ -345,8 +354,19 @@ class LiveDrivingEngineer:
             self.reset("WAIT_COMPLETE_LAP")
             self._identity = identity
         previous = self._previous
+        # Keep actual sparse rows, never synthesize missing frames. The model
+        # admits a completed lap only through the unchanged offline >=99.9%
+        # coverage gate. An isolated small gap must not erase every prior lap;
+        # a larger tick OR simulation-time gap still resets the whole epoch.
         if previous is not None and (
-            row[0] <= previous[0] or row[1] <= previous[1] or row[1] - previous[1] != 1
+            row[0] - previous[0] > CLEAN_DRIVING_MAX_GAP_S
+            or (row[1] - previous[1]) / self._tick_rate > CLEAN_DRIVING_MAX_GAP_S
+        ):
+            self.reset("LAP_SAMPLING_GAP")
+            self._identity = identity
+            previous = None
+        if previous is not None and (
+            row[0] <= previous[0] or row[1] <= previous[1]
             or row[11] != previous[11] or row[3] < previous[3] or row[3] > previous[3] + 1
             or row[12] > previous[12] + 0.05
             or row[13] > previous[13] + CONDITIONS.fuel_refuel_jump_tolerance_ppm / 1_000_000
@@ -515,4 +535,6 @@ def driving_notice(snapshot):
         "CONTINUITY_OR_STINT_CHANGED": "驾驶数据或连续段已变化，需重新积累完整可比圈。",
         "LAP_BUFFER_LIMIT": "单圈采集达到内存上限，已丢弃该圈，不据此作驾驶建议。",
         "LAP_COUNTER_NOT_ADVANCING": "圈数未正常递增，已撤回旧圈结论。",
+        "LAP_TICK_COVERAGE_LOW": "本圈遥测覆盖率不足 99.9%，不用于驾驶建议；请检查采集负载。",
+        "LAP_SAMPLING_GAP": "驾驶遥测间隔超过 0.1 秒，需重新积累完整可比圈。",
     }.get(reason)

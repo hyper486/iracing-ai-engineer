@@ -5,12 +5,15 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from iracing_ai_engineer.live_app import AppState
 from iracing_ai_engineer.live_queries import live_query_intent, render_live_query
 from iracing_ai_engineer.llm_engineer import EngineerConfig, EngineerService, fallback_plan
 from iracing_ai_engineer.llm_evidence import build_live_context, current_fuel_observation
@@ -47,6 +50,7 @@ def _fixtures(name):
     spec = importlib.util.spec_from_file_location(f"_local_query_{name}_fixtures", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -208,6 +212,177 @@ def test_refuel_and_lap_change_withdraw_short_answers_and_missing_facts_stay_wit
         service.close(wait=True)
 
 
+def observed_state(now):
+    value = snapshot()
+    state = AppState(clock=lambda: now[0])
+    state.connection("CONNECTED")
+    state.publish(value["monitor"], value["fuel"], None, "Race")
+    return state, value
+
+
+@pytest.mark.parametrize("reason", [
+    "FUEL_LAP_DATA_MISSING_OR_INVALID", "INCIDENT_DATA_MISSING",
+    "CAUTION_OR_UNKNOWN_FLAGS", "PIT_SERVICE_OR_UNKNOWN",
+])
+def test_direct_amount_survives_unrelated_model_invalidations(reason):
+    now = [10.0]
+    state, value = observed_state(now)
+    service = EngineerService(state.snapshot, clock=lambda: now[0])
+    try:
+        assert service.submit("还有多少油")[0] == 202
+        initial = state.snapshot()
+        for status in ("BLOCKED", "LEARNING", "READY"):
+            now[0] += .5
+            value["monitor"]["interval_invalid_for_fuel"] = [reason]
+            value["monitor"]["telemetry"]["fuel_level_l"] -= .01
+            value["fuel"]["status"] = status
+            state.publish(value["monitor"], value["fuel"], None, "Race")
+            assert state.snapshot()["engineer_revision"] > initial["engineer_revision"]
+            answer = service.snapshot()["answer"]
+            assert answer["stale"] is False
+            assert "20.00" in answer["spoken_text"]  # Question-time, not a new reading.
+        assert service.snapshot()["requests_used"] == 0
+    finally:
+        service.close(wait=True)
+
+
+@pytest.mark.parametrize("change", [
+    "read_error", "missing", "malformed", "refuel", "lap", "session", "source",
+    "spectator", "stale", "reset", "disconnect", "analysis_failure",
+])
+def test_direct_amount_latches_observation_loss_even_if_it_recovers_before_poll(change):
+    now = [10.0]
+    state, value = observed_state(now)
+    service = EngineerService(state.snapshot, clock=lambda: now[0])
+    try:
+        assert service.submit("还有多少油")[0] == 202
+        altered = copy.deepcopy(value)
+        monitor = altered["monitor"]
+        now[0] += .5
+        if change == "read_error":
+            monitor["reasons"] = ["READ_ERROR:FuelLevel"]
+        elif change in ("missing", "malformed"):
+            monitor["telemetry"]["fuel_level_l"] = None if change == "missing" else True
+        elif change == "refuel":
+            # The model can lag or be blocked; inspect the direct reading itself.
+            monitor["telemetry"]["fuel_level_l"] += 5
+        elif change in ("lap", "session"):
+            monitor["telemetry"]["lap_number" if change == "lap" else "session_num"] += 1
+        elif change == "source":
+            monitor["source_kind"] = "IBT_DISK"
+        elif change == "spectator":
+            monitor["context"]["player_control_state"] = "SPECTATOR"
+        elif change == "stale":
+            now[0] += 2
+        elif change == "reset":
+            monitor["events"] = [{"kind": "source_reset"}]
+        elif change == "disconnect":
+            state.connection("DISCONNECTED")
+        else:
+            state.invalidate_analysis(state.generation)
+        state.publish(monitor, altered["fuel"], None, "Race")
+        now[0] += .5
+        state.publish(value["monitor"], value["fuel"], None, "Race")
+        answer = service.snapshot()["answer"]
+        assert answer["stale"] is True and "spoken_text" not in answer
+    finally:
+        service.close(wait=True)
+
+
+@pytest.mark.parametrize("question,direct", [("还能跑几圈", True), ("还有多少油", False)])
+def test_model_predictions_and_legacy_amounts_keep_the_model_revision(question, direct):
+    now = [10.0]
+    state, value = observed_state(now)
+    if not direct:
+        value["monitor"]["telemetry"]["fuel_level_l"] = None
+        state.publish(value["monitor"], value["fuel"], None, "Race")
+    service = EngineerService(state.snapshot, clock=lambda: now[0])
+    try:
+        assert service.submit(question)[0] == 202
+        assert service.snapshot()["answer"]["stale"] is False
+        now[0] += .5
+        value["monitor"]["interval_invalid_for_fuel"] = ["INCIDENT_DATA_MISSING"]
+        state.publish(value["monitor"], value["fuel"], None, "Race")
+        value["monitor"]["interval_invalid_for_fuel"] = []
+        now[0] += .5
+        state.publish(value["monitor"], value["fuel"], None, "Race")
+        assert service.snapshot()["answer"]["stale"] is True
+    finally:
+        service.close(wait=True)
+
+
+@pytest.mark.parametrize("revision", [None, True, -1, 1.0, "1"])
+def test_invalid_observation_revision_cannot_bypass_the_legacy_model_guard(revision):
+    value = snapshot()
+    value["fuel_observation_revision"] = revision
+    service = EngineerService(lambda: value, environ={})
+    try:
+        service.submit("还有多少油")
+        assert service.snapshot()["answer"]["stale"] is False
+        value["engineer_revision"] += 1
+        assert service.snapshot()["answer"]["stale"] is True
+    finally:
+        service.close(wait=True)
+
+
+def test_amount_observation_revision_does_not_extend_question_time_expiry():
+    now = [10.0]
+    state, value = observed_state(now)
+    service = EngineerService(state.snapshot, clock=lambda: now[0])
+    try:
+        service.submit("还有多少油")
+        for step in range(1, 62):
+            now[0] += .5
+            value["monitor"]["telemetry"]["fuel_level_l"] -= .01
+            state.publish(value["monitor"], value["fuel"], None, "Race")
+            assert service.snapshot()["answer"]["stale"] is (step > 60)
+    finally:
+        service.close(wait=True)
+
+
+@pytest.mark.parametrize("field,value,read_error,withdrawn", [
+    ("FuelLevel", None, False, True), ("FuelLevel", -1.0, False, True),
+    ("FuelLevel", True, False, True), ("FuelLevel", 1001.0, False, True),
+    ("FuelLevel", 42.0, True, True), ("FuelLevel", 42.001, False, True),
+    ("LapCompleted", None, False, False), ("LapDistPct", None, False, False),
+    ("PlayerCarMyIncidentCount", None, False, False), ("SessionFlags", None, False, False),
+    ("PitstopActive", None, False, False), ("SessionFlags", 0, True, False),
+])
+def test_amount_distinguishes_fuel_faults_between_display_publications(
+    field, value, read_error, withdrawn,
+):
+    fixture = _fixtures("live_monitor")
+    monitor = fixture.LiveMonitor(source_id="synthetic", session_id="synthetic",
+                                  sdk_tick_rate_hz=60)
+    now = [10.0]
+    state, payload = observed_state(now)
+    monitor.feed(fixture._clean_fuel_frame(99, FuelLevel=42.0))
+    monitor.feed(fixture._clean_fuel_frame(100, FuelLevel=42.0))
+    state.publish(monitor.snapshot(), payload["fuel"], None, "Race")
+    assert current_fuel_observation(state.snapshot()) == 42.0
+    service = EngineerService(state.snapshot, clock=lambda: now[0])
+    try:
+        service.submit("还有多少油")
+        assert service.snapshot()["answer"]["stale"] is False
+        frame = fixture._clean_fuel_frame(101, **{"FuelLevel": 42.0, field: value})
+        if read_error:
+            frame = replace(frame, read_errors=(field,))
+        monitor.feed(frame)
+        monitor.feed(fixture._clean_fuel_frame(102, FuelLevel=42.0))
+        now[0] += .5
+        state.publish(monitor.snapshot(), payload["fuel"], None, "Race")
+        # Both SDK data and the next publication recover before the consumer
+        # polls. The intermediate fuel-specific failure must still be latched.
+        monitor.feed(fixture._clean_fuel_frame(103, FuelLevel=42.0))
+        now[0] += .5
+        state.publish(monitor.snapshot(), payload["fuel"], None, "Race")
+        answer = service.snapshot()["answer"]
+        assert answer["stale"] is withdrawn
+        assert ("spoken_text" in answer) is not withdrawn
+    finally:
+        service.close(wait=True)
+
+
 def test_cloud_wait_cannot_block_local_fuel_or_overwrite_its_newer_answer():
     entered, release = threading.Event(), threading.Event()
     now, calls = [10.0], []
@@ -354,6 +529,56 @@ def test_ptt_can_replace_a_cloud_question_with_a_local_fuel_answer():
         assert engineer.snapshot()["requests_used"] == len(calls) == 1
         assert voice.snapshot()["settings"]["input_device"] == "default"
         assert all(record["device"] == "default" for record in audio.records)
+    finally:
+        release.set()
+        voice.close()
+        engineer.close(wait=True)
+
+
+@pytest.mark.parametrize("refuel", [False, True])
+def test_ptt_amount_survives_model_churn_but_not_refueling_during_synthesis(refuel):
+    from iracing_ai_engineer.voice_service import VoiceService
+
+    fixture = _fixtures("voice_service")
+    now = [10.0]
+    state, value = observed_state(now)
+    entered, release = threading.Event(), threading.Event()
+    audio, speech = fixture.Audio(), fixture.Speech()
+    speech.recognize = lambda *_args, **_kwargs: {"text": "还有多少油", "confidence": .9}
+
+    def synthesize(text, **_kwargs):
+        speech.synthesis.append(text)
+        entered.set()
+        assert release.wait(3)
+        return b"SYNTHETIC_SPEECH"
+
+    speech.synthesize = synthesize
+    engineer = EngineerService(state.snapshot, clock=lambda: now[0], environ={})
+    voice = VoiceService(lambda: {
+        "lifecycle": "RUNNING", "telemetry": state.snapshot(),
+        "engineer": {**engineer.snapshot(), "instance_id": "0"},
+    }, engineer.submit, fixture.Store(True), audio=audio, speech=speech,
+        input_factory=fixture.Input)
+    try:
+        voice.start()
+        fixture.wait_for(lambda: voice.snapshot()["devices"]["inputs"])
+        voice.press()
+        assert audio.entered.wait(1)
+        voice.release()
+        assert entered.wait(1)
+        for _ in range(3):
+            now[0] += .5
+            value["monitor"]["interval_invalid_for_fuel"] = ["INCIDENT_DATA_MISSING"]
+            value["fuel"]["status"] = "BLOCKED"
+            if refuel:
+                value["monitor"]["telemetry"]["fuel_level_l"] += 1
+            state.publish(value["monitor"], value["fuel"], None, "Race")
+        release.set()
+        fixture.wait_for(lambda: voice.snapshot()["status"] == "READY")
+        played = [wav for wav, _, _ in audio.plays if wav == b"SYNTHETIC_SPEECH"]
+        assert len(played) == (0 if refuel else 1)
+        assert len(speech.synthesis) == 1 and "20.00" in speech.synthesis[0]
+        assert engineer.snapshot()["requests_used"] == 0
     finally:
         release.set()
         voice.close()

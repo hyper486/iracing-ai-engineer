@@ -425,6 +425,12 @@ class LiveMonitor:
         }:
             interval.add("ESSENTIAL_READ_ERROR")
         fuel_level = _field_value(sample.fuel.level_l)
+        # Preserve fuel-specific loss across the slower display interval.
+        # The broader FUEL_LAP reason also covers unrelated lap channels and
+        # cannot distinguish whether an amount-only utterance is still valid.
+        if (fuel_level is None or not 0 <= fuel_level <= 1000
+                or "FuelLevel" in frame.read_errors):
+            interval.add("FUEL_LEVEL_MISSING_OR_INVALID")
         if (fuel_level is not None and self._previous_fuel_level is not None
                 and fuel_level > self._previous_fuel_level):
             interval.add("REFUEL_INTERVAL")

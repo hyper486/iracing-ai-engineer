@@ -22,7 +22,7 @@ from .live_driving import coaching_binding
 from .live_queries import LOCAL_QUERY_INTERVAL_S, live_query_intent, render_live_query
 from .live_traffic import TRAFFIC_ANSWER_TTL_S, situation_binding
 from .llm_client import DeepSeekClient, LLMError
-from .llm_evidence import build_live_context, load_session_context
+from .llm_evidence import build_live_context, current_fuel_observation, load_session_context
 from .runtime_clock import monotonic_now
 
 TOPICS = ("fuel", "strategy", "driving", "status")
@@ -132,11 +132,19 @@ def render_plan(plan: Mapping, context: Mapping) -> str:
 def _binding(snapshot: Mapping) -> tuple:
     monitor = snapshot.get("monitor") or {}
     telemetry = monitor.get("telemetry") or {}
+    observation_revision = snapshot.get("fuel_observation_revision")
+    # Older snapshot producers keep the conservative model-wide binding.
+    observation = (
+        ("fuel_observation", observation_revision)
+        if type(observation_revision) is int and observation_revision >= 0
+        and current_fuel_observation(snapshot) is not None else None
+    )
     return (
         snapshot.get("generation"), snapshot.get("engineer_revision"),
         snapshot.get("session_type"), telemetry.get("session_num"),
         telemetry.get("lap_number"), monitor.get("binding_sha256"),
         situation_binding(snapshot), coaching_binding(snapshot),
+        observation,
     )
 
 
@@ -148,6 +156,11 @@ def _situation_answer(fact_ids, intent=None):
 
 
 def _selected_binding(binding, fact_ids, intent=None):
+    if intent == "amount" and fact_ids == ["fuel.current"] and binding[8] is not None:
+        # Only an exact amount question with a direct reading can omit the
+        # model dependency. Forecasts, model fallback amounts and cloud plans
+        # retain it, including any learning/availability explanation.
+        return (binding[0], binding[8], *binding[2:6])
     situation = _situation_answer(fact_ids, intent)
     driving = intent == "driving" or any(key.startswith("driving.") for key in fact_ids)
     if not situation and not driving:
