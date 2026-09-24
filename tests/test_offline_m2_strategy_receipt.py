@@ -392,23 +392,27 @@ def _tire_stint_context(
     age_laps: int = 6,
     compound: int = 0,
 ) -> dict[str, object]:
+    from tire_service_fixtures import service_history, service_label
+
     material: dict[str, object] = {
         "availability": "AVAILABLE",
-        "contract_version": "tire-stint-context-v1",
+        "contract_version": "tire-stint-context-v2",
         "current_laps_completed": age_laps,
         "current_tire_compound": compound,
         "decision_tick": decision_tick,
         "identity_sha256": canonical_sha256(identity),
         "on_pit_road": False,
-        "origin_kind": "OBSERVED_ZERO_COMPLETED_LAPS",
+        "origin_kind": "REVIEWED_FULL_NEW_SET",
         "origin_laps_completed": 0,
         "origin_tick": 0,
         "physical_wear": copy.deepcopy(_M2._TIRE_PHYSICAL_WEAR_UNAVAILABLE),
         "reason_codes": [],
         "source_receipt_sha256": "d" * 64,
-        "status": "AVAILABLE_OBSERVED_STINT_AGE",
+        "status": "AVAILABLE_REVIEWED_TIRE_AGE",
         "stint_age_completed_laps": age_laps,
         "tire_sets_used": 1,
+        "service_history": service_history([service_label(0, compound=compound)],
+                                            canonical_sha256(identity), "d" * 64),
     }
     return {**material, "context_sha256": canonical_sha256(material)}
 
@@ -430,13 +434,14 @@ def _tire_performance_model(
     )
     material: dict[str, object] = {
         "advisor_only": True,
-        "contract_version": "tire-performance-model-v1",
+        "age_basis": "REVIEWED_FULL_NEW_SET",
+        "contract_version": "tire-performance-model-v2",
         "estimate_available": status == "PASS_SHADOW_POSITIVE_DEGRADATION",
         "fuel_load_model_sha256": "f" * 64,
         "identity_sha256": canonical_sha256(identity),
         "independent_stint_count": 3,
         "max_supported_stint_age_laps": 100,
-        "method_version": "fuel-adjusted-disjoint-pair-envelope-v1",
+        "method_version": "fuel-adjusted-reviewed-tire-age-envelope-v2",
         "pair_count": 3,
         "performance_age_slope_s_per_lap": slope,
         "performance_age_slope_uncertainty_s_per_lap": [low, high],
@@ -820,8 +825,8 @@ def test_v2_positive_model_can_select_tires_and_binds_action_belief(upstream):
         expected_identity_sha256=str(model["identity_sha256"]),
         current_stint_context_sha256=str(tire_stint["context_sha256"]),
         current_source_receipt_sha256=str(tire_stint["source_receipt_sha256"]),
-        current_stint_age_laps=int(tire_stint["stint_age_completed_laps"]),
-        current_tire_compound=int(tire_stint["current_tire_compound"]),
+        current_stint_context=tire_stint,
+        expected_decision_tick=int(tire_stint["decision_tick"]),
         laps_until_pit=int(scenario["laps_until_pit"]),
         laps_after_pit=int(scenario["laps_after_pit"]),
         fuel_add_l=float(scenario["fuel_add_l"]),

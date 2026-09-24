@@ -180,13 +180,14 @@ def _complete_identity_tire_performance_model() -> dict[str, object]:
     }
     material: dict[str, object] = {
         "advisor_only": True,
-        "contract_version": "tire-performance-model-v1",
+        "age_basis": "REVIEWED_FULL_NEW_SET",
+        "contract_version": "tire-performance-model-v2",
         "estimate_available": True,
         "fuel_load_model_sha256": "f" * 64,
         "identity_sha256": canonical_sha256(identity),
         "independent_stint_count": 3,
         "max_supported_stint_age_laps": 100,
-        "method_version": "fuel-adjusted-disjoint-pair-envelope-v1",
+        "method_version": "fuel-adjusted-reviewed-tire-age-envelope-v2",
         "pair_count": 3,
         "performance_age_slope_s_per_lap": 10.0,
         "performance_age_slope_uncertainty_s_per_lap": [9.0, 11.0],
@@ -203,6 +204,7 @@ def _write_complete_identity_live_capture(
     *,
     session_flags: int = 0,
     stable_motion: bool = False,
+    tire_exit: bool = False,
 ) -> tuple[ModuleType, dict[str, object], dict[str, object]]:
     helper = _load_live_fixture_module()
     fixture = helper._load_paired_fixture_module()
@@ -215,6 +217,8 @@ def _write_complete_identity_live_capture(
         }
         for item in fixture._paired_frames()
     ]
+    if tire_exit:
+        frames[0]["OnPitRoad"] = True
     if stable_motion:
         # A seven-lap-ahead PASS needs a stable observed motion envelope.
         # Keep the final player position, and make both actors' cumulative
@@ -815,10 +819,15 @@ def test_same_capture_tire_model_can_select_change_and_replay_exactly(
     tmp_path: Path,
 ) -> None:
     capture = tmp_path / "live-20260823T220000Z.jsonl"
-    _, authority, live = _write_complete_identity_live_capture(capture, stable_motion=True)
+    _, authority, live = _write_complete_identity_live_capture(
+        capture, stable_motion=True, tire_exit=True)
     profile = _profile()
     calibration = _complete_identity_calibration()
     tire_model = _complete_identity_tire_performance_model()
+    from tire_service_fixtures import service_history, service_label
+
+    history = service_history([service_label(10_001)], tire_model["identity_sha256"],
+                              live["observed_live_evidence"]["input_evidence_sha256"])
     rules = _complete_identity_rules()
     rules["official_rules"].update(
         {
@@ -848,6 +857,8 @@ def test_same_capture_tire_model_can_select_change_and_replay_exactly(
             calibration["source_receipt_sha256"]
         ),
         "tire_performance_model": tire_model,
+        "tire_service_history": history,
+        "expected_tire_service_history_sha256": history["history_sha256"],
         "expected_tire_performance_model_sha256": str(
             tire_model["model_sha256"]
         ),
@@ -936,13 +947,13 @@ def test_same_capture_black_flag_is_an_active_penalty(tmp_path: Path) -> None:
     assert motion["player"]["car_idx"] == 0
     assert [item["car_idx"] for item in motion["opponents"]] == [1]
     tires = evidence["tire_stint_context"]
-    assert tires["availability"] == "AVAILABLE"
-    assert tires["status"] == "AVAILABLE_OBSERVED_STINT_AGE"
+    assert tires["availability"] == "UNAVAILABLE"
+    assert tires["status"] == "WAIT_STINT_ORIGIN"
     assert tires["decision_tick"] == traffic["decision_tick"]
-    assert tires["origin_kind"] == "OBSERVED_ZERO_COMPLETED_LAPS"
-    assert tires["origin_laps_completed"] == 0
+    assert tires["origin_kind"] is None
+    assert tires["origin_laps_completed"] is None
     assert tires["current_laps_completed"] == 6
-    assert tires["stint_age_completed_laps"] == 6
+    assert tires["stint_age_completed_laps"] is None
     assert tires["current_tire_compound"] == 0
     assert tires["tire_sets_used"] == 1
     assert tires["physical_wear"]["estimate_available"] is False
@@ -1209,11 +1220,13 @@ def test_finalize_cli_surfaces_all_four_output_bindings(
     profile_path = tmp_path / "profile.json"
     calibration_path = tmp_path / "calibration.json"
     tire_performance_path = tmp_path / "tire-performance.json"
+    tire_service_path = tmp_path / "tire-service-history.json"
     capture.write_bytes(b"x")
     live_path.write_text("{}\n", encoding="utf-8")
     profile_path.write_text("{}\n", encoding="utf-8")
     calibration_path.write_text("{}\n", encoding="utf-8")
     tire_performance_path.write_text("{}\n", encoding="utf-8")
+    tire_service_path.write_text("{}\n", encoding="utf-8")
     receipt = {
         "bundle_receipt_sha256": "1" * 64,
         "engineer_session_binding": {"session_sha256": "2" * 64},
@@ -1232,6 +1245,8 @@ def test_finalize_cli_surfaces_all_four_output_bindings(
         assert kwargs["expected_calibration_model_sha256"] == "8" * 64
         assert kwargs["expected_calibration_source_receipt_sha256"] == "9" * 64
         assert kwargs["tire_performance_model"] == {}
+        assert kwargs["tire_service_history"] == {}
+        assert kwargs["expected_tire_service_history_sha256"] == "c" * 64
         assert kwargs["expected_tire_performance_model_sha256"] == "a" * 64
         assert (
             kwargs["expected_tire_performance_source_receipt_sha256"]
@@ -1269,6 +1284,10 @@ def test_finalize_cli_surfaces_all_four_output_bindings(
             "9" * 64,
             "--tire-performance-model",
             str(tire_performance_path),
+            "--tire-service-history",
+            str(tire_service_path),
+            "--expected-tire-service-history-sha256",
+            "c" * 64,
             "--expected-tire-performance-model-sha256",
             "a" * 64,
             "--expected-tire-performance-source-receipt-sha256",
@@ -1291,9 +1310,11 @@ def test_finalize_cli_surfaces_all_four_output_bindings(
     assert payload["source_kind"] == "SDK_LIVE"
 
 
+@pytest.mark.parametrize("option", ["--tire-performance-model", "--tire-service-history"])
 def test_finalize_cli_rejects_partial_tire_performance_pin_set(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    option: str,
 ) -> None:
     capture = tmp_path / "capture.jsonl"
     live_path = tmp_path / "live.json"
@@ -1320,7 +1341,7 @@ def test_finalize_cli_rejects_partial_tire_performance_pin_set(
             "1",
             "--expected-analysis-profile-sha256",
             "3" * 64,
-            "--tire-performance-model",
+            option,
             str(tire_path),
             "--session-output",
             str(tmp_path / "session.json"),

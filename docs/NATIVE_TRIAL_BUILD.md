@@ -5,6 +5,12 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
+The later offline reviewed tire-origin v2 correction is source-only and is not
+included in this existing build. Its native live tire questions remain bounded
+observations, not physical tire age or model-selected tire service. Use current
+source for offline finalization/verification; do not use an older packaged CLI
+to regenerate tire-strategy evidence. See [the v2 contract](TIRE_PERFORMANCE_BELIEF.md).
+
 ## What the integrated self-test actually exercises
 
 The default frozen-binary self-test now feeds invented numeric frames through

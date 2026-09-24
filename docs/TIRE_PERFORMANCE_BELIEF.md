@@ -1,6 +1,6 @@
-# Tire-performance belief v1
+# Tire-performance belief v2: reviewed tire origins
 
-The frozen analysis-v2 source now contains an advisor-only tire-
+The current analysis source contains an advisor-only tire-
 performance calibration and service-tradeoff slice. It deliberately keeps two
 different questions separate:
 
@@ -16,11 +16,19 @@ physical-wear capability remains `SKIP_CURRENT_PHYSICAL_WEAR`.
 This is a source-contract and synthetic-model proof. It is not an accepted
 Audi/Spa tire model and does not authorize a live no-tire recommendation. The
 M2 v2 path now consumes the model and the current-stint receipt, while
-the frozen collector and historical M2 v1 artifacts remain unchanged.
+the collector/normalization format and historical files remain unchanged.
+
+The previous implementation incorrectly used any observed pit exit or zero
+completed laps as a new-tire origin. A fuel-only stop can retain old tires, and
+attachment at zero race laps does not prove a fresh set. Current source rejects
+those v1 tire contexts/models/beliefs; regenerate them from reviewed evidence,
+not by changing a version string or rehashing an old receipt. The M2 v1 path
+without a performance model is unchanged. The existing native trial EXE was
+not rebuilt for this offline-only correction and does not contain this update.
 
 ## Matched input contract
 
-`matched-tire-performance-dataset-v1` is a self-hashed, independently pinned
+`matched-tire-performance-dataset-v2` is a self-hashed, independently pinned
 JSON object containing:
 
 - the exact ten-field event identity used by the M2 and pit-calibration paths;
@@ -34,6 +42,14 @@ age, lap time, and starting fuel. It also binds a source receipt, a human/event-
 label receipt, and a condition-match receipt. The validator requires all lap,
 pair, stint, label, and condition identities to be disjoint. The late lap must
 be at least two completed laps older and cannot gain fuel inside the stint.
+
+Each pair now also requires a `tire_installation` reviewed `FULL_NEW_SET` label
+(the six label fields below). Both laps include `laps_completed` and
+`session_tick`; their `stint_age_laps` must equal completed laps minus the
+installation's completed laps. Installation, early-lap and late-lap ticks must
+be ordered. Installation label receipts must be independent across pairs and
+match the dataset compound. The condition review must establish that both laps
+belong to this same unchanged tire set, not simply the same fuel stint.
 
 The condition receipt is an input trust boundary rather than a caller-owned
 `clean=true` boolean. A real dataset still needs independently reviewed clean-
@@ -65,16 +81,20 @@ An interval entirely above zero returns
 `estimate_available=true`.
 
 The fixed method id is
-`fuel-adjusted-disjoint-pair-envelope-v1`. The model rejects non-finite values,
+`fuel-adjusted-reviewed-tire-age-envelope-v2`, and the v2 model explicitly carries
+`age_basis=REVIEWED_FULL_NEW_SET`. The model rejects non-finite values,
 implausible per-lap slopes, duplicate evidence, fuel gains within a pair,
 partial schemas, stale or crossed external pins, and any attempt to promote a
 physical-wear claim.
 
 ## Action-bound performance tradeoff
 
-`tire-performance-belief-v1` combines an identity-matched tire model, the
-identity-matched pit/service calibration, an independently bound current-stint
-context digest, and an exact future pit scenario.
+`tire-performance-belief-v2` combines an identity-matched tire model, the
+identity-matched pit/service calibration, a complete independently bound current
+tire context, and an exact future pit scenario. Its public builder no longer
+accepts a bare age/compound and an unrelated context digest: callers must pass
+`current_stint_context` and `expected_decision_tick`; age and compound are read
+only from that validated, available context.
 
 For a proposed stop:
 
@@ -116,9 +136,51 @@ action.
 context: `tire_performance_model` and `tire_stint_context`. The latter is built
 from the same held collector descriptor and binds SDK-direct `SessionTick`,
 `LapCompleted`, `PlayerTireCompound`, `TireSetsUsed`, and `OnPitRoad` evidence.
-An age is available only from an observed pit exit or a captured zero-completed-
-lap origin, with monotonic channel continuity. It never contains physical-wear
-percentage.
+The v2 tire context additionally carries a reviewed `service_history` or null.
+Without a reviewed full-new-set installation there is no tire age, including at
+lap zero. It never contains physical-wear percentage.
+
+### Reviewed service history, not SDK service-content proof
+
+`reviewed-tire-service-history-v1` contains exactly `contract_version`,
+`history_sha256`, `identity_sha256`, `source_receipt_sha256`, `provenance`, and
+`events`. Provenance must be `REVIEWED_LABELS_NOT_SDK_SERVICE_CONTENTS`. The
+source receipt is the exact collector input-evidence digest, not a path or an
+unrelated capture-file digest. At most 256 events are admitted; events are
+strictly tick-ordered, lap counts do not regress, and label receipts are unique.
+
+Every event has exactly these fields:
+
+| Field | Meaning |
+|---|---|
+| `kind` | `FULL_NEW_SET`, `NO_TIRE_CHANGE`, or `PARTIAL_OR_UNKNOWN` |
+| `decision_tick` | First captured off-pit-road sample after the observed pit exit |
+| `laps_completed` | SDK completed-lap count at that sample |
+| `tire_compound` | SDK `PlayerTireCompound` at that sample |
+| `tire_sets_used` | SDK `TireSetsUsed` at that sample; corroboration, not service truth |
+| `label_receipt_sha256` | Independently reviewed evidence for actual service contents |
+
+The reviewer must establish all four newly installed tires, or an unchanged
+set, from retained service evidence. A pit checkbox/request, counter increment,
+pit exit, or assumed starting set alone is insufficient. Hashes bind the label;
+they do not make a false label true or turn a synthetic record into SDK evidence.
+There is no automatic labeling UI or unattended confirmation in this slice.
+
+The same held capture is replayed to match every label to its pit-road edge,
+tick, completed laps, compound and counter. A first-frame label cannot claim an
+unseen exit. Only a matched `FULL_NEW_SET` creates a new age origin.
+`NO_TIRE_CHANGE` preserves an existing origin; it cannot create one. A partial
+or unlabelled stop revokes age, even if the set counter did not change. This
+deliberately requires review of fuel-only stops as well: the current channels
+cannot exclude partial service automatically. Age counts completed-lap counter
+differences, not exact tire distance, heat cycles or physical wear.
+
+Missing tire channels, dropped/stale samples, source/session boundaries,
+regressions and unreviewed counter/compound changes prevent an available age.
+A later fully observed reviewed installation can recover after a channel gap;
+contradictory labels/sequence faults stay invalid. Unmatched or future labels
+cannot supply a usable age. Source replays are bounded by the history limit and
+constant-size tracking state; repeated invalid reasons are deduplicated.
 
 The corresponding `offline-m2-strategy-receipt-v2` exposes a self-hashed,
 audited `tire_strategy` surface:
@@ -166,6 +228,19 @@ three-part input:
 The same triplet is required for object-exact bundle verification. Partial or
 crossed pins fail before any output is created.
 
+Both `finalize-live-analysis` and `verify-live-analysis` also accept this paired
+input, which must be retained unchanged for reproduction:
+
+```text
+--tire-service-history <private-reviewed-history.json>
+--expected-tire-service-history-sha256 <independently-retained-history-digest>
+```
+
+Omitting it preserves the other analysis surfaces, but tire age remains WAIT.
+The public belief-builder API additionally requires the validated context and
+expected decision tick as described above. Neither CLI creates a service label
+or silently migrates an old calibration.
+
 ## Verification
 
 Focused tests cover exact deterministic derivation, fuel-load uncertainty,
@@ -174,10 +249,13 @@ signs, model extrapolation, compound mismatch, sequential and parallel service,
 full-interval decision boundaries, the physical-wear non-promotion invariant,
 duplicate JSON keys, and CreateNew persistence.
 
-The dedicated tire-model result is `14 passed`. Additional M2 v2,
-advisor-timeline, retrieved-live, and CLI tests cover the integrated positive,
-WAIT, lifecycle, replay, and tamper paths; current aggregate counts are recorded
-in [the goal acceptance status](GOAL_ACCEPTANCE_STATUS.md).
+Synthetic regression covers reviewed origin/unchanged/partial service, missing
+or mismatched labels, channel gaps, old-schema rejection, source/identity pins,
+age derivation, bounded faults and CLI input pairing. The retrieved-capture
+integration still exercises a positive model-selected tire change and exact
+bundle replay, now with an explicitly invented service label matched to an
+invented captured pit exit. This is not genuine SDK_LIVE or accepted tire data.
+Current aggregate results are recorded in [public status](PUBLIC_PROJECT_STATUS.md).
 
 ## Evidence still required
 

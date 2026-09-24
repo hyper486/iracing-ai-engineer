@@ -21,7 +21,7 @@ required running dependency. The final goal remains active and unaccepted.
 | Standalone Crew Chief-derived acquisition | Optional prototype; real spectator comparison | Metadata/encoding optimization preserves bytes; 120 same-tick pairs matched 335 fields. Durable spectator captures reached about 40-41 Hz versus about 57 Hz for pyirsdk, still below quality needs. |
 | Fuel, stint and pit reasoning | Implemented with evidence gates | Missing event rules or calibration produce `WAIT`, not invented values. |
 | Rejoin/traffic reasoning | Implemented with evidence gates; review corrections applied | Physical circular-track projection binds the selected stop lap; ambiguous future position is WAIT. |
-| Tire reasoning | Implemented as a performance belief | The project does not claim direct physical tire wear without a supported source. |
+| Tire reasoning | Offline v2 performance belief with reviewed origin | Fuel-only stops do not imply new tires; explicit source-bound service labels and installation-derived calibration ages are required. Not native live tire advice or physical wear. |
 | Corner diagnosis | Implemented for repeated comparable evidence | Curb/risk claims remain blocked without trusted labels. |
 | Deterministic reports | Implemented | JSON and script-free HTML outputs preserve provenance and limitations. |
 | Privacy-safe live state bridge | Implemented; spectator-only field check | Tick-level normalization feeds bounded JSONL snapshots; spectator guard stayed WAIT_CAR. In-car validation remains pending. |
@@ -43,7 +43,38 @@ required running dependency. The final goal remains active and unaccepted.
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Observed stint and raw pace milestone
+## Reviewed tire-origin correction
+
+Current source fixes the old offline assumption that every pit exit or lap-zero
+attachment proves a fresh tire set. V2 tire contexts bind independently pinned
+reviewed service labels to captured exit ticks and SDK observations. Full-new-set
+labels establish an origin, reviewed unchanged stops preserve age, and unknown
+or partial service withdraws age even when the set counter remains unchanged.
+Missing channels, continuity loss and contradictory evidence stay unavailable.
+
+Calibration pairs now require reviewed new-set origins and origin-derived lap
+ages. M2 and the public belief API require the complete current v2 context; a
+bare age plus a digest cannot bypass its provenance checks. Finalization and
+object-exact verification both accept the same pinned private service history.
+Old tire subcontracts must be regenerated from evidence, not blindly rehashed.
+The unchanged native live tracker still reports observations only.
+
+Targeted checks include a positive synthetic capture-to-model-selected-change
+and exact bundle replay, plus unknown/partial/fuel-only service and tampering
+regressions. These labels/captures are invented tests, not real tire calibration.
+The existing local trial EXE and installed copies have not been rebuilt/replaced
+for this offline source correction. Real matched tire/service data, native
+strategy integration and hardware/VR acceptance remain open. See
+[the tire-origin contract](TIRE_PERFORMANCE_BELIEF.md).
+
+Final regression: **2,894 passed, 44 skipped** in **535.73 seconds**, including
+50 added cases. The retained skips are data/platform/private-deployment or
+explicit opt-in boundaries, not newly accepted evidence. A separate 54-variant
+malformed-label check rejected every rehashed invalid input. Ruff, public safety
+including history, exact staged-file review and diff checks passed. No simulator,
+microphone, speaker or provider session was opened for this milestone.
+
+## Previous milestone: observed stint and raw pace
 
 Current-source questions now connect a constant-space stint/tire-counter tracker
 and the recent-lap worker's raw pace summary to the native UI and local PTT.

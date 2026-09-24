@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
+from tire_service_fixtures import service_history, service_label, tire_context
 
 from iracing_ai_engineer.cli import main as cli_main
 from iracing_ai_engineer.retrieved_live_analysis import (
@@ -85,6 +86,8 @@ def _pair(
             "lap_id": f"stint-{index}-early",
             "lap_time_s": early_time,
             "stint_age_laps": early_age,
+            "laps_completed": 5 + early_age,
+            "session_tick": 100 + early_age * 100,
         },
         "label_receipt_sha256": f"{index:x}" * 64,
         "late_lap": {
@@ -92,10 +95,13 @@ def _pair(
             "lap_id": f"stint-{index}-late",
             "lap_time_s": late_time,
             "stint_age_laps": late_age,
+            "laps_completed": 5 + late_age,
+            "session_tick": 100 + late_age * 100,
         },
         "sample_id": f"matched-stint-pair-{index}",
         "source_receipt_sha256": f"{index + 6:x}" * 64,
         "stint_id": f"observed-stint-{index}",
+        "tire_installation": service_label(index, 5, sets=index),
     }
 
 
@@ -187,6 +193,9 @@ def _model() -> dict[str, object]:
 def _belief(**overrides: object) -> dict[str, object]:
     model = _model()
     calibration = _pit_calibration()
+    context = tire_context(age=overrides.pop("current_stint_age_laps", 4),
+                           compound=overrides.pop("current_tire_compound", 0),
+                           identity=str(model["identity_sha256"]))
     arguments: dict[str, object] = {
         "expected_model_sha256": model["model_sha256"],
         "expected_model_source_receipt_sha256": model["source_receipt_sha256"],
@@ -195,10 +204,10 @@ def _belief(**overrides: object) -> dict[str, object]:
             "source_receipt_sha256"
         ],
         "expected_identity_sha256": model["identity_sha256"],
-        "current_stint_context_sha256": "a" * 64,
+        "current_stint_context_sha256": str(context["context_sha256"]),
         "current_source_receipt_sha256": "b" * 64,
-        "current_stint_age_laps": 4,
-        "current_tire_compound": 0,
+        "current_stint_context": context,
+        "expected_decision_tick": 100,
         "laps_until_pit": 2,
         "laps_after_pit": 4,
         "fuel_add_l": 20.0,
@@ -226,6 +235,7 @@ def test_matched_dataset_builds_fuel_adjusted_performance_envelope() -> None:
     assert validated == dataset
     assert model == {
         "advisor_only": True,
+        "age_basis": "REVIEWED_FULL_NEW_SET",
         "contract_version": TIRE_PERFORMANCE_MODEL_CONTRACT_VERSION,
         "estimate_available": True,
         "fuel_load_model_sha256": dataset["fuel_load_model"]["model_sha256"],  # type: ignore[index]
@@ -460,6 +470,7 @@ def test_belief_waits_on_compound_mismatch_extrapolation_and_ambiguous_model() -
         expected_dataset_sha256=str(dataset["dataset_sha256"]),
     )
     calibration = _pit_calibration()
+    context = tire_context(identity=str(model["identity_sha256"]))
     waiting = build_tire_performance_belief(
         model,
         calibration,
@@ -470,10 +481,10 @@ def test_belief_waits_on_compound_mismatch_extrapolation_and_ambiguous_model() -
             calibration["source_receipt_sha256"]
         ),
         expected_identity_sha256=str(model["identity_sha256"]),
-        current_stint_context_sha256="a" * 64,
+        current_stint_context_sha256=str(context["context_sha256"]),
         current_source_receipt_sha256="b" * 64,
-        current_stint_age_laps=4,
-        current_tire_compound=0,
+        current_stint_context=context,
+        expected_decision_tick=100,
         laps_until_pit=2,
         laps_after_pit=4,
         fuel_add_l=20.0,
@@ -577,7 +588,7 @@ def test_tire_stint_context_is_exactly_bound_and_cannot_claim_wear() -> None:
         "decision_tick": 500,
         "identity_sha256": "a" * 64,
         "on_pit_road": False,
-        "origin_kind": "OBSERVED_PIT_EXIT",
+        "origin_kind": "REVIEWED_FULL_NEW_SET",
         "origin_laps_completed": 3,
         "origin_tick": 100,
         "physical_wear": {
@@ -592,9 +603,10 @@ def test_tire_stint_context_is_exactly_bound_and_cannot_claim_wear() -> None:
         },
         "reason_codes": [],
         "source_receipt_sha256": "b" * 64,
-        "status": "AVAILABLE_OBSERVED_STINT_AGE",
+        "status": "AVAILABLE_REVIEWED_TIRE_AGE",
         "stint_age_completed_laps": 5,
         "tire_sets_used": 2,
+        "service_history": service_history([service_label(100, 3, sets=2)]),
     }
     context = {**material, "context_sha256": _sha256(material)}
     expected = {
@@ -647,6 +659,7 @@ def test_waiting_tire_stint_context_never_invents_age() -> None:
         "reason_codes": ["CURRENT_STINT_ORIGIN_NOT_OBSERVED"],
         "source_receipt_sha256": "b" * 64,
         "status": "WAIT_STINT_ORIGIN",
+        "service_history": None,
         "stint_age_completed_laps": None,
         "tire_sets_used": 2,
     }
@@ -658,3 +671,43 @@ def test_waiting_tire_stint_context_never_invents_age() -> None:
         expected_source_receipt_sha256="b" * 64,
         expected_decision_tick=500,
     ) == context
+
+
+@pytest.mark.parametrize("mutation", ["missing", "partial", "age", "tick", "compound", "reused"])
+def test_calibration_requires_full_new_set_origin_and_derived_ages(mutation):
+    dataset = _dataset()
+    first = dataset["samples"][0]
+    if mutation == "missing":
+        del first["tire_installation"]
+    elif mutation == "partial":
+        first["tire_installation"]["kind"] = "PARTIAL_OR_UNKNOWN"
+    elif mutation == "age":
+        first["early_lap"]["laps_completed"] += 1
+    elif mutation == "tick":
+        first["early_lap"]["session_tick"] = first["tire_installation"]["decision_tick"]
+    elif mutation == "compound":
+        first["tire_installation"]["tire_compound"] = 1
+    else:
+        dataset["samples"][1]["tire_installation"] = copy.deepcopy(first["tire_installation"])
+    _rehash_dataset(dataset)
+    with pytest.raises(TirePerformanceError):
+        build_tire_performance_model(dataset, expected_dataset_sha256=dataset["dataset_sha256"])
+
+
+@pytest.mark.parametrize("mutation", ["legacy", "basis", "context_missing", "context_pin", "clock"])
+def test_belief_does_not_accept_bare_age_old_model_or_crossed_context(mutation):
+    if mutation in {"legacy", "basis"}:
+        model = _model()
+        model["contract_version" if mutation == "legacy" else "age_basis"] = (
+            "tire-performance-model-v1" if mutation == "legacy" else "OBSERVED_PIT_EXIT")
+        model["model_sha256"] = _sha256({k: v for k, v in model.items() if k != "model_sha256"})
+        with pytest.raises(TirePerformanceError):
+            validate_tire_performance_model(model, expected_model_sha256=model["model_sha256"],
+                                            expected_identity_sha256=model["identity_sha256"],
+                                            expected_source_receipt_sha256=model["source_receipt_sha256"])
+    else:
+        overrides = {"context_missing": {"current_stint_context": {}},
+                     "context_pin": {"current_stint_context_sha256": "0" * 64},
+                     "clock": {"expected_decision_tick": 101}}[mutation]
+        with pytest.raises(TirePerformanceError):
+            _belief(**overrides)

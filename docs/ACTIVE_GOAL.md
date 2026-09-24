@@ -146,12 +146,17 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   explicit. Raw medians disclose starting-fuel change without claiming causal
   degradation or deciding tire replacement. See [the observation contract](LIVE_STINT_PACE.md).
   Physical tire/service calibration and its strategy integration remain open.
-- Integration blocker: the older offline tire-context origin is pit-bounded
-  (`OBSERVED_PIT_EXIT` or zero completed laps), which is not proof of a fresh
-  tire installation. Correct that provenance before admitting its age-based
-  tire-service tradeoff into the native live planner. This slice does not use
-  that offline belief to issue a tire recommendation.
-- Next: establish matched tire/service provenance and connect calibrated
+- Corrected in current source: the offline tire path no longer uses pit exits
+  or zero completed laps as new-tire proof. Versioned reviewed service history
+  is bound to the same capture; full-new-set labels establish age, reviewed
+  unchanged stops retain it, and missing/partial service or gaps withdraw it.
+  V2 calibration pairs require installation-derived ages, and the belief API
+  consumes the complete context. M2 and exact bundle replay enforce the same
+  origin boundary. Labels are an explicit review trust boundary, not SDK service
+  contents or physical wear. See [the contract](TIRE_PERFORMANCE_BELIEF.md).
+  This offline-only source change is not in the existing trial EXE and does not
+  admit a tire model to native live recommendations.
+- Next: obtain reviewed matched tire/service evidence and connect calibrated
   performance/service costs to endurance strategy. Check selected microphone
   and headphones, wheel/PTT, actual proximity latency and VR performance in a
   user-driven session. A local TTS duration is not output or end-to-end latency;

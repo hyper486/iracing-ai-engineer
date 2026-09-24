@@ -761,6 +761,8 @@ def _parser() -> argparse.ArgumentParser:
         "--expected-calibration-source-receipt-sha256", type=_sha256_digest
     )
     finalize_live_parser.add_argument("--tire-performance-model", type=Path)
+    finalize_live_parser.add_argument("--tire-service-history", type=Path)
+    finalize_live_parser.add_argument("--expected-tire-service-history-sha256", type=_sha256_digest)
     finalize_live_parser.add_argument(
         "--expected-tire-performance-model-sha256", type=_sha256_digest
     )
@@ -854,6 +856,8 @@ def _parser() -> argparse.ArgumentParser:
         "--expected-calibration-source-receipt-sha256", type=_sha256_digest
     )
     verify_live_parser.add_argument("--tire-performance-model", type=Path)
+    verify_live_parser.add_argument("--tire-service-history", type=Path)
+    verify_live_parser.add_argument("--expected-tire-service-history-sha256", type=_sha256_digest)
     verify_live_parser.add_argument(
         "--expected-tire-performance-model-sha256", type=_sha256_digest
     )
@@ -1524,7 +1528,14 @@ def _retrieved_live_optional_inputs(
     dict[str, object] | None,
     dict[str, object] | None,
     dict[str, object] | None,
+    dict[str, object] | None,
 ]:
+    if (args.tire_service_history is None) != (args.expected_tire_service_history_sha256 is None):
+        raise ValueError("tire-service history and independent SHA-256 must be supplied together")
+    tire_service_history = (
+        _read_regular_json_object(args.tire_service_history, "tire-service history")
+        if args.tire_service_history is not None else None
+    )
     calibration_values = (
         args.calibration_model,
         args.expected_calibration_model_sha256,
@@ -1595,7 +1606,7 @@ def _retrieved_live_optional_inputs(
         if args.previous_m2_receipt is not None
         else None
     )
-    return calibration, tire_performance, rules, previous
+    return calibration, tire_performance, rules, previous, tire_service_history
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1839,7 +1850,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             profile = _read_regular_json_object(
                 args.analysis_profile, "analysis profile"
             )
-            calibration, tire_performance, rules, previous = (
+            calibration, tire_performance, rules, previous, tire_service_history = (
                 _retrieved_live_optional_inputs(args)
             )
             flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
@@ -1874,6 +1885,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.expected_calibration_source_receipt_sha256
                     ),
                     tire_performance_model=tire_performance,
+                    tire_service_history=tire_service_history,
+                    expected_tire_service_history_sha256=args.expected_tire_service_history_sha256,
                     expected_tire_performance_model_sha256=(
                         args.expected_tire_performance_model_sha256
                     ),
@@ -1985,7 +1998,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             bundle_receipt = _read_regular_json_object(
                 args.bundle_receipt, "analysis bundle receipt"
             )
-            calibration, tire_performance, rules, previous = (
+            calibration, tire_performance, rules, previous, tire_service_history = (
                 _retrieved_live_optional_inputs(args)
             )
             session_bytes = _read_regular_file_bytes(
@@ -2030,6 +2043,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                         args.expected_calibration_source_receipt_sha256
                     ),
                     tire_performance_model=tire_performance,
+                    tire_service_history=tire_service_history,
+                    expected_tire_service_history_sha256=args.expected_tire_service_history_sha256,
                     expected_tire_performance_model_sha256=(
                         args.expected_tire_performance_model_sha256
                     ),

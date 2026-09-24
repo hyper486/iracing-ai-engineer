@@ -31,6 +31,11 @@ from .rejoin_projection import (
     REJOIN_METHOD_VERSION,
     project_physical_rejoin,
 )
+from .tire_service_history import (
+    AGE_BASIS,
+    TIRE_STINT_CONTEXT_VERSION,
+    validate_context_service_origin,
+)
 
 CONTRACT_VERSION = "offline-m2-strategy-receipt-v1"
 CONTRACT_V2_VERSION = "offline-m2-strategy-receipt-v2"
@@ -40,11 +45,11 @@ RULES_PROFILE_CONTRACT_VERSION = "event-rules-profile-v2"
 FUEL_REPLAY_CONTRACT_VERSION = "fuel-model-replay-v2"
 M1_CONTRACT_VERSION = "offline-m1-pit-stint-v1"
 MATCHED_PIT_CALIBRATION_METHOD_VERSION = "matched-pit-service-median-v1"
-TIRE_PERFORMANCE_MODEL_CONTRACT_VERSION = "tire-performance-model-v1"
-TIRE_PERFORMANCE_METHOD_VERSION = "fuel-adjusted-disjoint-pair-envelope-v1"
-TIRE_PERFORMANCE_BELIEF_CONTRACT_VERSION = "tire-performance-belief-v1"
-TIRE_PERFORMANCE_BELIEF_METHOD_VERSION = "linear-age-service-tradeoff-v1"
-TIRE_STINT_CONTEXT_CONTRACT_VERSION = "tire-stint-context-v1"
+TIRE_PERFORMANCE_MODEL_CONTRACT_VERSION = "tire-performance-model-v2"
+TIRE_PERFORMANCE_METHOD_VERSION = "fuel-adjusted-reviewed-tire-age-envelope-v2"
+TIRE_PERFORMANCE_BELIEF_CONTRACT_VERSION = "tire-performance-belief-v2"
+TIRE_PERFORMANCE_BELIEF_METHOD_VERSION = "reviewed-age-service-tradeoff-v2"
+TIRE_STINT_CONTEXT_CONTRACT_VERSION = TIRE_STINT_CONTEXT_VERSION
 MAX_INPUT_BYTES = 32 * 1024 * 1024
 
 _SHA256_CHARS = frozenset("0123456789abcdef")
@@ -199,6 +204,7 @@ _CONTEXT_V2_KEYS = frozenset(
 _TIRE_PERFORMANCE_MODEL_KEYS = frozenset(
     {
         "advisor_only",
+        "age_basis",
         "contract_version",
         "estimate_available",
         "fuel_load_model_sha256",
@@ -232,6 +238,7 @@ _TIRE_STINT_CONTEXT_KEYS = frozenset(
         "physical_wear",
         "reason_codes",
         "source_receipt_sha256",
+        "service_history",
         "status",
         "stint_age_completed_laps",
         "tire_sets_used",
@@ -756,6 +763,7 @@ def _validate_tire_performance_model(
     if (
         model.get("contract_version") != TIRE_PERFORMANCE_MODEL_CONTRACT_VERSION
         or model.get("method_version") != TIRE_PERFORMANCE_METHOD_VERSION
+        or model.get("age_basis") != AGE_BASIS
         or model.get("advisor_only") is not True
     ):
         _fail("CONTEXT_INVALID", "tire-performance model contract is unsupported")
@@ -849,7 +857,8 @@ def _validate_tire_stint_context(
         and source_sha != expected_source_receipt_sha256
     ):
         _fail("CONTEXT_INVALID", "tire-stint and traffic source receipts differ")
-    if context.get("decision_tick") != decision_tick:
+    if (type(context.get("decision_tick")) is not int
+            or context.get("decision_tick") != decision_tick):
         _fail("CONTEXT_INVALID", "tire-stint observation is stale")
     _validate_tire_physical_wear_boundary(
         context.get("physical_wear"),
@@ -886,10 +895,7 @@ def _validate_tire_stint_context(
         _fail("CONTEXT_INVALID", "tire-stint origin fields are partial")
     origin_laps = 0
     if origin_available:
-        if context.get("origin_kind") not in {
-            "OBSERVED_PIT_EXIT",
-            "OBSERVED_ZERO_COMPLETED_LAPS",
-        }:
+        if context.get("origin_kind") != AGE_BASIS:
             _fail("CONTEXT_INVALID", "tire-stint origin kind is invalid")
         origin_laps = _plain_int(
             context.get("origin_laps_completed"), "tire-stint origin laps"
@@ -900,7 +906,7 @@ def _validate_tire_stint_context(
     availability = context.get("availability")
     if availability == "AVAILABLE":
         if (
-            context.get("status") != "AVAILABLE_OBSERVED_STINT_AGE"
+            context.get("status") != "AVAILABLE_REVIEWED_TIRE_AGE"
             or reasons
             or not current_available
             or not origin_available
@@ -935,6 +941,10 @@ def _validate_tire_stint_context(
             _fail("CONTEXT_INVALID", "invalid tire-stint context is invalid")
     else:
         _fail("CONTEXT_INVALID", "tire-stint availability is invalid")
+    try:
+        validate_context_service_origin(context)
+    except (TypeError, ValueError) as exc:
+        _fail("CONTEXT_INVALID", str(exc))
     return context, stored
 
 

@@ -53,7 +53,14 @@ from .session_report import (
     validate_engineer_session_report,
     write_engineer_session_report_bundle_exclusive,
 )
-from .telemetry import Presence, Provenance
+from .telemetry import Presence, Provenance, QualityStatus
+from .tire_service_history import (
+    AGE_BASIS,
+    TIRE_STINT_CONTEXT_VERSION,
+    validate_context_service_origin,
+    validate_service_history,
+    validate_service_label,
+)
 
 RETRIEVED_LIVE_ANALYSIS_PROFILE_CONTRACT_VERSION = (
     "retrieved-live-analysis-profile-v1"
@@ -66,13 +73,13 @@ MATCHED_PIT_CALIBRATION_DATASET_CONTRACT_VERSION = (
 )
 MATCHED_PIT_CALIBRATION_METHOD_VERSION = "matched-pit-service-median-v1"
 MATCHED_TIRE_PERFORMANCE_DATASET_CONTRACT_VERSION = (
-    "matched-tire-performance-dataset-v1"
+    "matched-tire-performance-dataset-v2"
 )
-TIRE_PERFORMANCE_MODEL_CONTRACT_VERSION = "tire-performance-model-v1"
-TIRE_PERFORMANCE_METHOD_VERSION = "fuel-adjusted-disjoint-pair-envelope-v1"
-TIRE_PERFORMANCE_BELIEF_CONTRACT_VERSION = "tire-performance-belief-v1"
-TIRE_PERFORMANCE_BELIEF_METHOD_VERSION = "linear-age-service-tradeoff-v1"
-TIRE_STINT_CONTEXT_CONTRACT_VERSION = "tire-stint-context-v1"
+TIRE_PERFORMANCE_MODEL_CONTRACT_VERSION = "tire-performance-model-v2"
+TIRE_PERFORMANCE_METHOD_VERSION = "fuel-adjusted-reviewed-tire-age-envelope-v2"
+TIRE_PERFORMANCE_BELIEF_CONTRACT_VERSION = "tire-performance-belief-v2"
+TIRE_PERFORMANCE_BELIEF_METHOD_VERSION = "reviewed-age-service-tradeoff-v2"
+TIRE_STINT_CONTEXT_CONTRACT_VERSION = TIRE_STINT_CONTEXT_VERSION
 TRAFFIC_MOTION_CONTEXT_CONTRACT_VERSION = "traffic-motion-context-v1"
 TIME_DOMAIN_REJOIN_ESTIMATE_CONTRACT_VERSION = REJOIN_CONTRACT_VERSION
 TIME_DOMAIN_REJOIN_METHOD_VERSION = REJOIN_METHOD_VERSION
@@ -168,14 +175,16 @@ _TIRE_PERFORMANCE_SAMPLE_KEYS = frozenset(
         "sample_id",
         "source_receipt_sha256",
         "stint_id",
+        "tire_installation",
     }
 )
 _TIRE_PERFORMANCE_LAP_KEYS = frozenset(
-    {"fuel_start_l", "lap_id", "lap_time_s", "stint_age_laps"}
+    {"fuel_start_l", "lap_id", "lap_time_s", "stint_age_laps", "laps_completed", "session_tick"}
 )
 _TIRE_PERFORMANCE_MODEL_KEYS = frozenset(
     {
         "advisor_only",
+        "age_basis",
         "contract_version",
         "estimate_available",
         "fuel_load_model_sha256",
@@ -251,6 +260,7 @@ _TIRE_STINT_CONTEXT_KEYS = frozenset(
         "physical_wear",
         "reason_codes",
         "source_receipt_sha256",
+        "service_history",
         "status",
         "stint_age_completed_laps",
         "tire_sets_used",
@@ -937,19 +947,34 @@ def _tire_stint_point(sample: object) -> tuple[dict[str, object] | None, list[st
     )
 
 
-def _new_tire_stint_tracker() -> dict[str, object]:
+def _new_tire_stint_tracker(
+    service_history: Mapping[str, object] | None = None,
+) -> dict[str, object]:
     return {
         "gap_since_origin": False,
-        "invalid_reasons": [],
+        "invalid_reasons": set(),
         "last_missing_reasons": [],
         "last_point": None,
         "origin": None,
         "previous_point": None,
+        "service_history": service_history,
+        "service_labels": {
+            event["decision_tick"]: event
+            for event in (service_history["events"] if service_history else [])
+        },
+        "matched_service_ticks": set(),
     }
 
 
 def _track_tire_stint_sample(tracker: dict[str, object], sample: object) -> None:
     point, missing = _tire_stint_point(sample)
+    if (sample.quality.stale.value is True
+            or sample.quality.dropped_ticks.value not in (None, 0)
+            or sample.quality.status.value is QualityStatus.REJECTED
+            or any(str(issue).startswith("CONTINUITY_BOUNDARY:")
+                   or issue in {"SESSION_BOUNDARY", "SOURCE_BOUNDARY"}
+                   for issue in (sample.quality.issues.value or ()))):
+        point, missing = None, ["TIRE_CHANNEL_CONTINUITY_LOST"]
     if point is None:
         tracker["last_point"] = None
         tracker["last_missing_reasons"] = missing
@@ -961,26 +986,38 @@ def _track_tire_stint_sample(tracker: dict[str, object], sample: object) -> None
     previous = tracker.get("previous_point")
     origin = tracker.get("origin")
     invalid = tracker["invalid_reasons"]
-    if not isinstance(invalid, list):  # pragma: no cover - private invariant
+    if not isinstance(invalid, set):  # pragma: no cover - private invariant
         raise AssertionError("tire tracker lost invalid-reason storage")
     if isinstance(previous, Mapping):
         if int(point["decision_tick"]) <= int(previous["decision_tick"]):
-            invalid.append("TIRE_STINT_TICK_NOT_MONOTONIC")
+            invalid.add("TIRE_STINT_TICK_NOT_MONOTONIC")
         if int(point["laps_completed"]) < int(previous["laps_completed"]):
-            invalid.append("TIRE_STINT_LAP_COUNT_REGRESSION")
-        if previous["on_pit_road"] is True and point["on_pit_road"] is False:
-            origin = {**point, "origin_kind": "OBSERVED_PIT_EXIT"}
-            tracker["origin"] = origin
+            invalid.add("TIRE_STINT_LAP_COUNT_REGRESSION")
+    labels = tracker["service_labels"]
+    label = labels.get(point["decision_tick"])
+    pit_exit = (isinstance(previous, Mapping)
+                and previous["on_pit_road"] is True and point["on_pit_road"] is False)
+    if label is not None:
+        if not pit_exit or any(label[key] != point[key] for key in (
+            "decision_tick", "laps_completed", "tire_compound", "tire_sets_used",
+        )):
+            invalid.add("TIRE_SERVICE_LABEL_NOT_MATCHED_TO_CAPTURED_PIT_EXIT")
+            label = None
+        else:
+            tracker["matched_service_ticks"].add(point["decision_tick"])
+    if pit_exit:
+        if label is not None and label["kind"] == "FULL_NEW_SET":
+            origin = {**point, "origin_kind": AGE_BASIS}
             tracker["gap_since_origin"] = False
-    if origin is None and point["on_pit_road"] is False and point["laps_completed"] == 0:
-        origin = {**point, "origin_kind": "OBSERVED_ZERO_COMPLETED_LAPS"}
+        elif label is None or label["kind"] != "NO_TIRE_CHANGE":
+            origin = None
+        # An unchanged-service label preserves the existing origin, never creates one.
         tracker["origin"] = origin
-        tracker["gap_since_origin"] = False
     if isinstance(origin, Mapping) and point["on_pit_road"] is False:
         if int(point["tire_sets_used"]) != int(origin["tire_sets_used"]):
-            invalid.append("TIRE_SET_CHANGED_WITHOUT_OBSERVED_PIT_EXIT")
+            invalid.add("TIRE_SET_CHANGED_WITHOUT_REVIEWED_INSTALLATION")
         if int(point["tire_compound"]) != int(origin["tire_compound"]):
-            invalid.append("TIRE_COMPOUND_CHANGED_WITHOUT_OBSERVED_PIT_EXIT")
+            invalid.add("TIRE_COMPOUND_CHANGED_WITHOUT_REVIEWED_INSTALLATION")
     tracker["last_point"] = point
     tracker["previous_point"] = point
 
@@ -995,6 +1032,8 @@ def _build_tire_stint_context(
     last = tracker.get("last_point")
     origin = tracker.get("origin")
     invalid = sorted(set(str(item) for item in tracker.get("invalid_reasons", [])))
+    if set(tracker["service_labels"]) != tracker["matched_service_ticks"]:
+        invalid = sorted(set(invalid + ["TIRE_SERVICE_LABEL_NOT_OBSERVED"]))
     last_missing = sorted(
         set(str(item) for item in tracker.get("last_missing_reasons", []))
     )
@@ -1015,7 +1054,7 @@ def _build_tire_stint_context(
         reasons = ["PLAYER_ON_PIT_ROAD"]
     elif not isinstance(origin, Mapping):
         status = "WAIT_STINT_ORIGIN"
-        reasons = ["CURRENT_STINT_ORIGIN_NOT_OBSERVED"]
+        reasons = ["FULL_NEW_SET_INSTALLATION_NOT_REVIEWED"]
     elif tracker.get("gap_since_origin") is True:
         status = "WAIT_TIRE_CHANNEL_CONTINUITY"
         reasons = ["TIRE_CHANNEL_GAP_AFTER_STINT_ORIGIN"]
@@ -1028,7 +1067,7 @@ def _build_tire_stint_context(
             age = None
         else:
             availability = "AVAILABLE"
-            status = "AVAILABLE_OBSERVED_STINT_AGE"
+            status = "AVAILABLE_REVIEWED_TIRE_AGE"
     material: dict[str, object] = {
         "availability": availability,
         "contract_version": TIRE_STINT_CONTEXT_CONTRACT_VERSION,
@@ -1051,6 +1090,7 @@ def _build_tire_stint_context(
         "physical_wear": dict(_TIRE_PHYSICAL_WEAR_UNAVAILABLE),
         "reason_codes": reasons,
         "source_receipt_sha256": source_receipt_sha256,
+        "service_history": tracker["service_history"],
         "status": status,
         "stint_age_completed_laps": age,
         "tire_sets_used": (
@@ -1075,7 +1115,7 @@ def validate_tire_stint_context(
     expected_source_receipt_sha256: str,
     expected_decision_tick: int,
 ) -> dict[str, object]:
-    """Validate a same-capture current-stint-age observation."""
+    """Validate reviewed full-set origin plus same-capture lap continuity."""
 
     context = _exact(
         _json_copy(value, "tire-stint context"),
@@ -1104,6 +1144,7 @@ def validate_tire_stint_context(
     if (
         type(expected_decision_tick) is not int
         or expected_decision_tick < 0
+        or type(context.get("decision_tick")) is not int
         or context.get("decision_tick") != expected_decision_tick
     ):
         _fail("TIRE_STINT_CONTEXT_INVALID", "tire-stint decision tick differs")
@@ -1144,10 +1185,7 @@ def validate_tire_stint_context(
         _fail("TIRE_STINT_CONTEXT_INVALID", "tire-stint origin fields are partial")
     origin_laps = 0
     if origin_available:
-        if context.get("origin_kind") not in {
-            "OBSERVED_PIT_EXIT",
-            "OBSERVED_ZERO_COMPLETED_LAPS",
-        }:
+        if context.get("origin_kind") != AGE_BASIS:
             _fail("TIRE_STINT_CONTEXT_INVALID", "tire-stint origin kind is invalid")
         origin_laps = _plain_int(
             context.get("origin_laps_completed"), "tire-stint origin laps"
@@ -1157,7 +1195,7 @@ def validate_tire_stint_context(
             _fail("TIRE_STINT_CONTEXT_INVALID", "tire-stint origin is in the future")
     if context.get("availability") == "AVAILABLE":
         if (
-            context.get("status") != "AVAILABLE_OBSERVED_STINT_AGE"
+            context.get("status") != "AVAILABLE_REVIEWED_TIRE_AGE"
             or reasons
             or not current_available
             or not origin_available
@@ -1191,6 +1229,10 @@ def validate_tire_stint_context(
             _fail("TIRE_STINT_CONTEXT_INVALID", "invalid tire-stint context is invalid")
     else:
         _fail("TIRE_STINT_CONTEXT_INVALID", "tire-stint availability is invalid")
+    try:
+        validate_context_service_origin(context)
+    except (TypeError, ValueError) as exc:
+        _fail("TIRE_STINT_CONTEXT_INVALID", str(exc))
     return context
 
 
@@ -1814,6 +1856,8 @@ def _same_capture_strategy_evidence(
     expected_capture_sha256: str,
     expected_capture_byte_size: int,
     stale_after_s: float,
+    tire_service_history: Mapping[str, object] | None = None,
+    expected_tire_service_history_sha256: str | None = None,
 ) -> dict[str, object]:
     """Read only the strategy-safe projection from the already held capture.
 
@@ -1842,9 +1886,21 @@ def _same_capture_strategy_evidence(
         input_evidence = run.evidence.to_dict()
         event_context = run.event_identity_context.to_dict()
         traffic_observation_context = run.traffic_observation_context.to_dict()
+        reviewed_history = None
+        if tire_service_history is not None or expected_tire_service_history_sha256 is not None:
+            try:
+                reviewed_history = validate_service_history(
+                    tire_service_history,
+                    expected_history_sha256=expected_tire_service_history_sha256,
+                    expected_identity_sha256=canonical_sha256(
+                        _bound_event_identity_from_context(event_context)),
+                    expected_source_receipt_sha256=canonical_sha256(input_evidence),
+                )
+            except (TypeError, ValueError) as exc:
+                _fail("TIRE_SERVICE_HISTORY_INVALID", str(exc))
         last_sample = None
         motion_points: deque[dict[str, object]] = deque()
-        tire_stint_tracker = _new_tire_stint_tracker()
+        tire_stint_tracker = _new_tire_stint_tracker(reviewed_history)
         for sample in run.samples:
             last_sample = sample
             _track_tire_stint_sample(tire_stint_tracker, sample)
@@ -2291,6 +2347,8 @@ def _build_analysis(
     expected_previous_m2_sha256: str | None,
     expected_previous_revision: int | None,
     stale_after_s: float,
+    tire_service_history: Mapping[str, object] | None = None,
+    expected_tire_service_history_sha256: str | None = None,
 ) -> tuple[
     dict[str, object],
     dict[str, object],
@@ -2333,6 +2391,8 @@ def _build_analysis(
             expected_capture_sha256=expected_remote_capture_sha256,
             expected_capture_byte_size=expected_remote_capture_byte_size,
             stale_after_s=stale_after_s,
+            tire_service_history=tire_service_history,
+            expected_tire_service_history_sha256=expected_tire_service_history_sha256,
         )
         session = build_engineer_session_from_collector_snapshot(
             capture_handle,
@@ -3374,6 +3434,7 @@ def validate_matched_tire_performance_dataset(
     stint_ids: set[str] = set()
     label_receipts: set[str] = set()
     condition_receipts: set[str] = set()
+    installation_receipts: set[str] = set()
     lap_ids: set[str] = set()
     for index, raw in enumerate(samples):
         sample = _tire_exact(
@@ -3439,6 +3500,23 @@ def validate_matched_tire_performance_dataset(
                 "PAIR_INVALID",
                 f"tire-performance sample {index} spans fewer than two completed laps",
             )
+        try:
+            installation = validate_service_label(sample.get("tire_installation"))
+        except (TypeError, ValueError) as exc:
+            _tire_fail("PAIR_INVALID", str(exc))
+        if (installation["kind"] != "FULL_NEW_SET"
+                or installation["tire_compound"] != dataset["tire_compound"]
+                or installation["label_receipt_sha256"] in installation_receipts):
+            _tire_fail("PAIR_INVALID", "pairs require independent reviewed full-new-set origins")
+        installation_receipts.add(str(installation["label_receipt_sha256"]))
+        for lap in (early, late):
+            completed = _tire_int(lap["laps_completed"], "tire pair completed laps")
+            tick = _tire_int(lap["session_tick"], "tire pair session tick")
+            if (completed - installation["laps_completed"] != lap["stint_age_laps"]
+                    or tick <= installation["decision_tick"]):
+                _tire_fail("PAIR_INVALID", "tire pair age is not installation-derived")
+        if early["session_tick"] >= late["session_tick"]:
+            _tire_fail("PAIR_INVALID", "tire pair ticks are not ordered")
         if float(late["fuel_start_l"]) > float(early["fuel_start_l"]) + 1e-9:
             _tire_fail(
                 "PAIR_INVALID",
@@ -3514,6 +3592,7 @@ def build_tire_performance_model(
         status = "WAIT_DEGRADATION_SIGN_AMBIGUOUS"
     material: dict[str, object] = {
         "advisor_only": True,
+        "age_basis": AGE_BASIS,
         "contract_version": TIRE_PERFORMANCE_MODEL_CONTRACT_VERSION,
         "estimate_available": estimate_available,
         "fuel_load_model_sha256": fuel_model["model_sha256"],
@@ -3556,6 +3635,8 @@ def validate_tire_performance_model(
         _tire_fail("MODEL_INVALID", "tire-performance model contract is unsupported")
     if model.get("method_version") != TIRE_PERFORMANCE_METHOD_VERSION:
         _tire_fail("MODEL_INVALID", "tire-performance model method is unsupported")
+    if model.get("age_basis") != AGE_BASIS:
+        _tire_fail("MODEL_INVALID", "tire-performance model age basis is unsupported")
     if model.get("advisor_only") is not True:
         _tire_fail("MODEL_INVALID", "tire-performance model is not advisor-only")
     stored = _tire_sha256(
@@ -3789,8 +3870,8 @@ def build_tire_performance_belief(
     expected_identity_sha256: str,
     current_stint_context_sha256: str,
     current_source_receipt_sha256: str,
-    current_stint_age_laps: int,
-    current_tire_compound: int,
+    current_stint_context: Mapping[str, object],
+    expected_decision_tick: int,
     laps_until_pit: int,
     laps_after_pit: int,
     fuel_add_l: float,
@@ -3833,10 +3914,19 @@ def build_tire_performance_belief(
     current_source = _tire_sha256(
         current_source_receipt_sha256, "current tire-stint source receipt"
     )
-    current_age = _tire_int(
-        current_stint_age_laps, "current tire-stint age"
-    )
-    current_compound = _tire_int(current_tire_compound, "current tire compound")
+    try:
+        tire_context = validate_tire_stint_context(
+            current_stint_context, expected_context_sha256=context_sha,
+            expected_identity_sha256=identity_sha,
+            expected_source_receipt_sha256=current_source,
+            expected_decision_tick=expected_decision_tick,
+        )
+    except RetrievedLiveAnalysisError as exc:
+        _tire_fail("TIRE_CONTEXT_INVALID", str(exc))
+    if tire_context["availability"] != "AVAILABLE":
+        _tire_fail("TIRE_CONTEXT_UNAVAILABLE", "reviewed current tire age is unavailable")
+    current_age = int(tire_context["stint_age_completed_laps"])
+    current_compound = int(tire_context["current_tire_compound"])
     until_pit = _tire_int(laps_until_pit, "laps until pit")
     after_pit = _tire_int(laps_after_pit, "laps after pit")
     fuel_add = _tire_number(fuel_add_l, "tire belief fuel addition", minimum=0.0)
@@ -4092,6 +4182,8 @@ def write_retrieved_live_analysis_bundle_exclusive(
     expected_previous_m2_sha256: str | None = None,
     expected_previous_revision: int | None = None,
     stale_after_s: float = 0.5,
+    tire_service_history: Mapping[str, object] | None = None,
+    expected_tire_service_history_sha256: str | None = None,
 ) -> dict[str, object]:
     """Build and CreateNew-write a complete SDK-live analysis bundle."""
 
@@ -4138,6 +4230,8 @@ def write_retrieved_live_analysis_bundle_exclusive(
         expected_previous_m2_sha256=expected_previous_m2_sha256,
         expected_previous_revision=expected_previous_revision,
         stale_after_s=stale_after_s,
+        tire_service_history=tire_service_history,
+        expected_tire_service_history_sha256=expected_tire_service_history_sha256,
     )
     session_bytes = _persisted_json(session)
     report_bytes = _persisted_json(report)
@@ -4214,6 +4308,8 @@ def verify_retrieved_live_analysis_bundle(
     expected_previous_m2_sha256: str | None = None,
     expected_previous_revision: int | None = None,
     stale_after_s: float = 0.5,
+    tire_service_history: Mapping[str, object] | None = None,
+    expected_tire_service_history_sha256: str | None = None,
 ) -> dict[str, object]:
     """Object-exactly replay every semantic and byte binding in one bundle."""
 
@@ -4260,6 +4356,8 @@ def verify_retrieved_live_analysis_bundle(
         expected_previous_m2_sha256=expected_previous_m2_sha256,
         expected_previous_revision=expected_previous_revision,
         stale_after_s=stale_after_s,
+        tire_service_history=tire_service_history,
+        expected_tire_service_history_sha256=expected_tire_service_history_sha256,
     )
     if persisted_session != rebuilt_session:
         _fail("SESSION_REPLAY_MISMATCH", "engineer session is not object-exact")
