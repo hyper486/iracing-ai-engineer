@@ -11,12 +11,14 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Any
 
+from .live_car_context import car_context_notice
 from .live_driving import driving_notice, validated_driving
 from .live_pit_observation import pit_observation_draft, pit_observation_notice
 from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import stint_notice
 from .live_strategy import StrategyParameters, strategy_notice, validated_strategy
 from .live_tire_age import confirmation_command, tire_age_notice
+from .live_tire_calibration import calibration_notice
 from .live_traffic import validated_traffic
 from .llm_evidence import _live_frame_ready
 from .runtime_clock import monotonic_now
@@ -872,6 +874,28 @@ class DesktopWindow:
         frame.pack(fill="both", expand=True, pady=(7, 0))
 
     def _build_settings(self, parent) -> None:
+        self.car_context_var = tk.StringVar(self.root, "校准绑定：等待当前车型和设置。")
+        ttk.Label(parent, textvariable=self.car_context_var, style="Muted.TLabel",
+                  wraplength=920).pack(anchor="w", pady=4)
+        self.tire_calibration_var = tk.StringVar(self.root, "尚未载入轮胎校准。")
+        ttk.Label(parent, textvariable=self.tire_calibration_var, style="Muted.TLabel",
+                  wraplength=920).pack(anchor="w", pady=4)
+        calibration = ttk.Frame(parent)
+        calibration.pack(anchor="w", pady=6)
+        ttk.Label(calibration, text="校准请求独立 SHA-256（非 API 密钥）").pack(side="left")
+        self.tire_calibration_pin = tk.StringVar(self.root, "")
+        pin_entry = ttk.Entry(calibration, textvariable=self.tire_calibration_pin, width=28)
+        pin_entry.pack(side="left", padx=8)
+        self._controls.append(pin_entry)
+        self.tire_calibration_buttons = []
+        for label, callback in (("停车载入校准", self._load_tire_calibration),
+                                 ("清除校准", lambda: self._load_tire_calibration(clear=True))):
+            button = self._button(calibration, label, callback)
+            button.pack(side="left", padx=4)
+            self.tire_calibration_buttons.append(button)
+        ttk.Label(parent, text="选择已审核的训练＋留出验证请求。校准仅本次连接有效；"
+                  "换车、设置变化或证据中断后需重新选择。不使用驾驶员姓名或设置文件名。",
+                  style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=(0, 8))
         ttk.Label(parent, text="轮胎安装确认 · 仅记录事实，不发送游戏指令").pack(anchor="w")
         self.tire_age_var = tk.StringVar(self.root, "等待新鲜连续数据。")
         ttk.Label(parent, textvariable=self.tire_age_var, style="Muted.TLabel",
@@ -1355,6 +1379,11 @@ class DesktopWindow:
         status_text = {"QUEUED": "待分析线程核对。",
                        "REJECTED": "确认已过期或条件变化，请重新确认。"}
         self.tire_age_var.set(status_text.get(status, "") + tire_age_notice(tire_snapshot))
+        self.car_context_var.set(car_context_notice(tire_snapshot))
+        self.tire_calibration_var.set(calibration_notice(tire_snapshot.get("tire_calibration")))
+        for button in self.tire_calibration_buttons:
+            button.state(["disabled"] if all_disabled or not callable(
+                getattr(self.controller, "load_tire_calibration", None)) else ["!disabled"])
         can_confirm = (not all_disabled and view.lifecycle == "RUNNING"
                        and status != "QUEUED"
                        and callable(getattr(self.controller, "confirm_tire_service", None)))
@@ -1517,6 +1546,24 @@ class DesktopWindow:
             self.action_var.set("未能加载会话报告，请检查格式和本地服务状态。")
         else:
             self.action_var.set("正在后台验证会话报告。" if path else "已请求清除历史报告。")
+
+    def _load_tire_calibration(self, *, clear=False) -> None:
+        if self._closing:
+            return
+        name = None if clear else filedialog.askopenfilename(
+            parent=self.root, title="选择私有轮胎校准验证请求（不是普通模型文件）",
+            filetypes=[("校准验证 JSON", "*.json")])
+        if not clear and not name:
+            return
+        try:
+            self.controller.load_tire_calibration(
+                Path(name) if name else None,
+                expected_request_sha256=self.tire_calibration_pin.get().strip())
+        except Exception:
+            self.action_var.set("请停车并等待车型／设置绑定完整，再载入带独立摘要的校准请求。")
+        else:
+            self.action_var.set("已请求清除校准。" if clear else
+                                "正在后台验证校准；不生成换胎建议。")
 
     def _load_trial(self) -> None:
         if self._closing:

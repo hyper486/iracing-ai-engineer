@@ -72,6 +72,27 @@ def test_invalid_measurements_are_not_rendered_as_zero(value) -> None:
     assert format_number(value, " L") == "—"
 
 
+def _native_tire_calibration_controls(native_window):
+    from unittest.mock import patch
+
+    _, controller, window = native_window
+    calls = []
+    controller.load_tire_calibration = lambda path, **kwargs: calls.append((path, kwargs))
+    assert window.tire_calibration_pin.get() == ""
+    window.tire_calibration_pin.set("a" * 64)
+    with patch("iracing_ai_engineer.desktop_window.filedialog.askopenfilename",
+               return_value="C:/Users/racer/synthetic-tire-validation.json"):
+        window._load_tire_calibration()
+    assert calls[-1][1] == {"expected_request_sha256": "a" * 64}
+    assert "不生成换胎建议" in window.action_var.get()
+    window._load_tire_calibration(clear=True)
+    assert calls[-1][0] is None
+    before = len(calls)
+    with patch("iracing_ai_engineer.desktop_window.filedialog.askopenfilename", return_value=""):
+        window._load_tire_calibration()
+    assert len(calls) == before
+
+
 def test_numeric_formatting_and_question_validation() -> None:
     assert format_number(0, " L") == "0.0 L"
     assert format_number(3.14159, " L/圈", 2) == "3.14 L/圈"
@@ -950,6 +971,7 @@ _NATIVE_SCENARIOS = {
     "capture_replay": _native_capture_replay,
     "tire_confirmation": _native_tire_confirmation,
     "tire_review": _native_tire_review,
+    "tire_calibration": _native_tire_calibration_controls,
 }
 
 

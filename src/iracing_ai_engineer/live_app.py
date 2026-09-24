@@ -29,6 +29,8 @@ from .collector import (
     validate_variable_descriptors,
 )
 from .dashboard_page import DASHBOARD_HTML
+from .live_car_context import FIELDS as CAR_CONTEXT_FIELDS
+from .live_car_context import CarMetadataProjector, LiveCarContext, car_context_binding
 from .live_driving import LiveDrivingEngineer
 from .live_fuel import LiveFuelConfig, LiveFuelEngineer
 from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
@@ -55,6 +57,7 @@ from .live_tire_age import (
     confirmation_command,
     unavailable_tire_age,
 )
+from .live_tire_calibration import calibration_status, matches_identity
 from .live_traffic import (
     bound_track_length_mm,
     project_live_traffic,
@@ -198,6 +201,8 @@ class AppState:
         self._rejoin_revision = 0
         self._pit_observation_revision = 0
         self._tire_confirmation = None
+        self._tire_calibration = None
+        self._tire_calibration_revision = 0
         self._spotter = ProximitySpotter()
         self._spotter_failed = False
         self._trial = None
@@ -213,6 +218,7 @@ class AppState:
             "driving": None,
             "stint": None,
             "tire_age": None,
+            "car_context": None,
             "tire_confirmation_status": "IDLE",
             "strategy": None,
             "motion": None,
@@ -241,7 +247,7 @@ class AppState:
         with self._lock:
             self._value.update(
                 connection=status, monitor=None, fuel=None, traffic=None, driving=None, stint=None,
-                tire_age=None, tire_confirmation_status="IDLE",
+                tire_age=None, car_context=None, tire_confirmation_status="IDLE",
                 motion=None, rejoin=None, pit_observation=None,
                 speech=None,
                 session_type=None,
@@ -250,6 +256,7 @@ class AppState:
             self._observed_fuel_l = None
             self._generation += 1
             self._tire_confirmation = None
+            self._clear_tire_calibration()
             self._pit_observation_revision += 1
             self._clear_strategy()
             if status == "CONNECTED":
@@ -273,6 +280,34 @@ class AppState:
         """Immutable configuration snapshot; expensive projection stays off this lock."""
         with self._lock:
             return (self._strategy_parameters, self._strategy_scope, self._strategy_revision)
+
+    def _clear_tire_calibration(self):
+        if self._tire_calibration is not None:
+            self._tire_calibration = None
+            self._tire_calibration_revision += 1
+
+    def set_tire_calibration(self, calibration, *, expected_binding=None, expected_revision=None):
+        workers, _ = self._worker_status()
+        with self._lock:
+            if calibration is None:
+                self._clear_tire_calibration()
+                self._tire_calibration_revision += 1
+                return
+            snapshot = {**self._value, "generation": self._generation,
+                "updated_age_s": (self.clock() - self._updated
+                                  if self._updated is not None else None)}
+            binding = car_context_binding(snapshot, parked=True)
+            analysis = workers.get("analysis")
+            if (binding is None or type(expected_binding) is not tuple
+                    or binding != expected_binding
+                    or type(expected_revision) is not int
+                    or expected_revision != self._tire_calibration_revision
+                    or analysis is not None and (
+                        analysis["failed"] or analysis["generation"] != self._generation)
+                    or not matches_identity(calibration, snapshot)):
+                raise ValueError("TIRE_CALIBRATION_BINDING_CHANGED")
+            self._tire_calibration = calibration
+            self._tire_calibration_revision += 1
 
     def confirm_tire_service(self, kind, *, expected_binding=None):
         """One in-memory driver assertion; never a simulator/service command."""
@@ -491,7 +526,7 @@ class AppState:
                 self._pit_observation_revision += 1
                 self._tire_confirmation = None
                 self._value.update(monitor=None, fuel=None, traffic=None, driving=None, stint=None,
-                                   tire_age=None, tire_confirmation_status="IDLE",
+                                   tire_age=None, car_context=None, tire_confirmation_status="IDLE",
                                    motion=None, rejoin=None, pit_observation=None,
                                    speech=None)
                 self._clear_strategy()
@@ -527,7 +562,7 @@ class AppState:
     def publish(
         self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None,
         *, observed_at=None, generation=None, allowed=lambda: True, traffic=None, driving=None,
-        stint=None, tire_age=None,
+        stint=None, tire_age=None, car_context=None,
         motion=None, rejoin=None, rejoin_configuration_revision=None, pit_observation=None,
     ) -> None:
         with self._lock:
@@ -551,6 +586,10 @@ class AppState:
                     "SOURCE_STALE",
                 })
             )
+            old_car = self._value.get("car_context") or {}
+            if (source_changed or car_context is None or car_context.get("status") != "BOUND"
+                    or old_car.get("revision") != car_context.get("revision")):
+                self._clear_tire_calibration()
             # Amount-only speech depends on the owned SDK observation, not on
             # incident/flag/lap inputs needed to learn a consumption model.
             # Latch actual observation loss/refuel between consumer polls. Age
@@ -597,6 +636,7 @@ class AppState:
                 driving=copy.deepcopy(driving),
                 stint=copy.deepcopy(stint),
                 tire_age=copy.deepcopy(tire_age),
+                car_context=copy.deepcopy(car_context),
                 motion=copy.deepcopy(motion),
                 rejoin=copy.deepcopy(rejoin),
                 pit_observation=copy.deepcopy(pit_observation),
@@ -631,7 +671,7 @@ class AppState:
             ):
                 # Defense in depth if a fault-notification callback could not run.
                 value.update(monitor=None, fuel=None, traffic=None, driving=None, stint=None,
-                             tire_age=None, tire_confirmation_status="IDLE",
+                             tire_age=None, car_context=None, tire_confirmation_status="IDLE",
                              motion=None, rejoin=None, pit_observation=None,
                              speech=None)
                 age = None
@@ -644,6 +684,7 @@ class AppState:
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
                 value.update(connection="DISCONNECTED", fuel=None, monitor=None, traffic=None,
                              driving=None, stint=None, strategy=None, tire_age=None,
+                             car_context=None,
                              tire_confirmation_status="IDLE",
                              motion=None, rejoin=None, pit_observation=None,
                              speech=None)
@@ -652,6 +693,10 @@ class AppState:
             value["strategy_configuration"] = configuration_projection(
                 self._strategy_parameters, self._strategy_scope, self._strategy_revision)
             value["strategy_revision"] = self._strategy_evidence_revision
+            if car_context_binding(value) is None:
+                self._clear_tire_calibration()
+            value["tire_calibration"] = calibration_status(
+                self._tire_calibration, value, self._tire_calibration_revision)
             intent = value.get("speech")
             if intent is not None:
                 remaining = intent.pop("deadline") - self.clock()
@@ -813,6 +858,8 @@ class _LiveAnalysis:
             expected_source_kind=SourceKind.SDK_LIVE, expected_car_count=car_count,
         )
         self._fuel, self._speech = LiveFuelEngineer(config), PracticeFuelSpeech()
+        self._car_context = LiveCarContext()
+        self._car_context_failed = False
         try:
             self._motion = LiveMotionTracker(tick_rate)
         except Exception:
@@ -840,7 +887,14 @@ class _LiveAnalysis:
         self._next_snapshot = -math.inf
 
     def process(self, item):
-        frame, session_type, observed, track_length_mm = item
+        frame, session_type, observed, track_length_mm = item[:4]
+        car_metadata = item[4] if len(item) == 5 else None
+        if not self._car_context_failed:
+            try:
+                self._car_context.feed(frame, car_metadata)
+            except Exception:
+                # Optional calibration evidence cannot disable fuel or proximity.
+                self._car_context_failed = True
         progressed = self._monitor.feed(frame, observed_monotonic_s=observed)
         self._monitor.advance_time(observed)
         if progressed and self._pit_observation is not None:
@@ -880,6 +934,12 @@ class _LiveAnalysis:
                 self._driving.fail()
         if observed >= self._next_snapshot and self._monitor.snapshot_pending:
             snapshot = self._monitor.snapshot()
+            car_context = None
+            if not self._car_context_failed:
+                try:
+                    car_context = self._car_context.snapshot(frame, snapshot)
+                except Exception:
+                    self._car_context_failed = True
             if (self._pit_observation is not None
                     and snapshot.get("quality", {}).get("stale") is not False):
                 self._pit_observation.reset("SOURCE_STALE")
@@ -956,7 +1016,7 @@ class _LiveAnalysis:
                     self._traffic_failed = True
             self._state.publish(snapshot, fuel, intent, session_type, observed_at=observed,
                                 generation=self._generation, allowed=self._allowed, traffic=traffic,
-                                stint=stint, tire_age=tire_age,
+                                stint=stint, tire_age=tire_age, car_context=car_context,
                                 motion=motion, rejoin=rejoin,
                                 pit_observation=pit_observation,
                                 rejoin_configuration_revision=config_revision,
@@ -1079,8 +1139,10 @@ def run_reader(
             if not {"SessionNum", "SessionTime", "SessionTick"} <= available:
                 raise ValueError("missing core schema")
             selected = tuple(dict.fromkeys(
-                name for name in (*LIVE_MONITOR_FIELDS, *SPOTTER_FIELDS) if name in available
+                name for name in (*LIVE_MONITOR_FIELDS, *SPOTTER_FIELDS, *CAR_CONTEXT_FIELDS)
+                if name in available
             ))
+            car_projector = CarMetadataProjector()
             identifier = uuid4().hex
             state.connection("CONNECTED")
             state.start_spotter(connection.tick_rate_hz)
@@ -1174,12 +1236,19 @@ def run_reader(
                         read_errors=tuple(name for name in frame.read_errors if name in selected),
                     )
                     try:
+                        car_metadata = car_projector.project(
+                            metadata, frame.session_info_update, frame, scope)
+                    except Exception:
+                        car_metadata = None
+                    try:
                         size = payload_size((projected.values, projected.read_errors,
-                                             projected.sim_mode_raw, session_type, track_length_mm))
+                                             projected.sim_mode_raw, session_type, track_length_mm,
+                                             car_metadata))
                     except ValueError:
                         active_analysis.fail_payload()
                     else:
-                        active_analysis.submit((projected, session_type, observed, track_length_mm),
+                        active_analysis.submit((projected, session_type, observed, track_length_mm,
+                                                car_metadata),
                                                size=size, observed_at=observed)
                 _pace_reader(stop, began, clock, sleeper)
             orderly = True

@@ -49,10 +49,46 @@ required running dependency. The final goal remains active and unaccepted.
 | Native tire-service review/export | Explicit self-attested workflow | Same-capture exit and identity/source pins, per-row human dispositions, independent local evidence and private CreateNew export. Not automatic approval, reviewer/service authentication or live model admission. |
 | VR tire-record confirmation | Two-utterance local PTT workflow | Same parked-visit binding, explicit readback/confirmation and matched analysis-owner acknowledgement. No game control, automatic approval, model request or real hearing acceptance. |
 | Tire-model holdout validation | Offline source/CLI; invented-data checks | Frozen-model prediction on source-disjoint stints, explicit car/setup/condition bindings and exact report reconstruction. Not source authentication, statistical coverage, native model admission or real tire calibration. |
+| Native tire-calibration preflight | Packaged session-only context matching; synthetic checks | Parked pinned-request verification, owned car/setup/event binding, current compound/weather checks and source/setup withdrawal. Not current tire belief, live model admission or a tire recommendation. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Native tire-calibration context preflight
+
+The native settings page now accepts a private pinned training/holdout request
+and verifies it off the UI thread. Numeric owned-car identity and a versioned
+filtered SDK setup fingerprint bind it to the current source. Driver names,
+setup names and raw setup values are not copied into app snapshots. Explicit
+historical tire measurements are excluded from the setup hash; unknown settings
+remain included. Current dry-state, compound and marginal weather-range checks
+can reach only `CONTEXT_MATCH_ONLY`, never a live tire decision.
+
+Clear, stale data, source changes and setup/metadata loss withdraw the selection;
+a late background result cannot restore an old selection. No persistence,
+provider request, tire-service assertion or simulator command is added. Old
+captures missing car metadata are not rewritten or relabeled. See
+[the workflow and remaining model boundary](LIVE_TIRE_CALIBRATION.md).
+
+Validation added **43 invented-data tests and one isolated native-control
+scenario**. Full regression with `uv` on the child PATH passed **3,431 tests,
+44 skipped**, in **692.59 s**, including both locked-wheel checks. Remaining
+skips require absent data, private deployment, platform capabilities or explicit
+local-speech opt-in. Ruff and public-safety including history passed. These are
+software checks, not genuine calibration, hardware hearing or in-car evidence.
+
+The unsigned rebuilt EXE passed **25 frozen checks**, including the new
+synthetic context-matching/withdrawal check, under a system-only child PATH
+without saved keys. Artifact size and SHA-256 matched the new build receipt.
+Computer Use confirmed the native input, buttons and no-advice notices were
+visible; the synthetic window closed normally. No genuine calibration, SDK,
+provider, microphone or output endpoint was used. Existing installations,
+shortcuts and saved settings were not replaced. See
+[the local trial build](NATIVE_TRIAL_BUILD.md).
+
+Real calibration, model-bound current tire/fuel belief and action-bound tire/service/rejoin
+integration remain open. The full goal remains active and unaccepted.
 
 ## Frozen tire-model holdout validation
 
@@ -73,9 +109,10 @@ capabilities or explicit local-speech opt-in. An additional in-memory check of
 public-safety including history, CLI help and exact staged-file/diff review
 passed. These are software checks, not genuine tire/service or race evidence.
 
-This milestone uses invented data only. Real calibration, native capture-bound
-identity/model admission and action-bound tire/service/rejoin integration remain
-open. It changes the source CLI, not the previously built or installed EXE.
+This milestone used invented data only and changed the source CLI, not the then
+existing EXE. Native car/setup context preflight is now implemented above; real
+calibration, live model admission and action-bound tire/service/rejoin integration
+remain open.
 The full goal remains active and unaccepted.
 
 ## VR tire-record confirmation

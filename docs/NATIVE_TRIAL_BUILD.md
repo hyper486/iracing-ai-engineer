@@ -5,14 +5,29 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current rebuild adds [two-utterance native PTT tire confirmation](VR_TIRE_CONFIRMATION.md).
+The current rebuild adds [native tire-calibration context preflight](LIVE_TIRE_CALIBRATION.md).
+**停车载入校准 / 清除校准** verify a private pinned training/holdout request
+off the UI thread and retain only a session-bound context selection. Current
+owned-car/setup/event identity, compound and observed weather ranges are checked;
+stale source or setup/metadata loss withdraws the selection. The best status is
+`CONTEXT_MATCH_ONLY`, not a live model or a tire recommendation. A new synthetic
+frozen check covers matching plus condition/setup withdrawal with an explicitly
+invented prevalidated object, not a genuine calibration file or driving trial.
+The unsigned EXE passed **25 frozen checks** with a system-only child PATH and
+saved keys removed; its size and SHA-256 matched the new build receipt. Computer
+Use confirmed the new input, buttons and no-advice notices were visible in the
+native settings tab. The synthetic-only window closed normally. No real
+calibration, SDK, provider, microphone or output endpoint was used; existing
+installations, shortcuts and saved settings were not replaced.
+
+The preceding rebuild added [two-utterance native PTT tire confirmation](VR_TIRE_CONFIRMATION.md).
 The three explicit tire-record phrases, readback, second confirmation and matched
 owner acknowledgement stay local. No simulator command, implicit service truth,
 reviewed label, cloud request or live tire-performance admission is introduced.
 New frozen checks cover the fake-PTT/actual-owner path and memory-only Chinese
 TTS/STT matching for the three record phrases plus confirm/cancel. Real driver
 hearing, microphone accuracy and VR acceptance remain open.
-The rebuilt unsigned EXE passed all **24 frozen checks** with a system-only child
+That rebuilt unsigned EXE passed all **24 frozen checks** with a system-only child
 PATH and saved keys removed; artifact size/hash matched its build receipt.
 Computer Use confirmed the new two-utterance instructions were visible in the
 frozen native settings tab. The synthetic-only window closed normally; no

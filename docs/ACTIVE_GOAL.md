@@ -78,6 +78,11 @@ history from explicitly reviewed exits and retained local evidence. No kind or
 attestation is preselected; receipts remain self-attested, not authenticated.
 See [the manual workflow](TIRE_SERVICE_REVIEW.md). It does not supply real labels
 or a calibrated/live tire model by itself.
+Native calibration preflight now verifies a private pinned holdout request and
+matches its car/setup/event identity to the owned SDK frame. Current compound
+and observed weather ranges gate a session-only context match; source/setup
+loss withdraws it. This is not current-tire belief or live model admission.
+See [the native preflight boundary](LIVE_TIRE_CALIBRATION.md).
 Stage B hardware acceptance, D's real-lap acceptance, E's actual in-car trial
 and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.

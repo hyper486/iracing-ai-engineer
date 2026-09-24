@@ -130,8 +130,10 @@ receipt. These checks are not a defense against a hostile same-user process.
 ## Remaining product work
 
 The tests use explicitly invented stints and declarations. There is no genuine
-calibration or holdout acceptance in this milestone. Native capture-bound car/
-setup extraction, actual reviewed calibration, native model admission, current
-condition/age withdrawal and action-bound tire/service/rejoin integration remain
+calibration or holdout acceptance in this milestone. A separate
+[native preflight](LIVE_TIRE_CALIBRATION.md) now performs parked private-request
+verification, owned car/setup binding and current condition checks. Its best
+status is a context-only match, not model admission. Actual reviewed calibration,
+current tire/fuel belief and action-bound tire/service/rejoin integration remain
 open. No simulator launch, game command, provider call, speech or live-owner
 mutation is performed by this evaluator.

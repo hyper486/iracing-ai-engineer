@@ -528,6 +528,44 @@ class DesktopController:
                 raise ValueError("TIRE_CONFIRMATION_NOT_READY")
             self._state.confirm_tire_service(kind)
 
+    def load_tire_calibration(self, path, *, expected_request_sha256=None):
+        """Explicit local file verification; no source restart, persistence or LLM."""
+        from .live_car_context import car_context_binding
+        from .live_tire_calibration import load_tire_calibration
+
+        with self._lock:
+            if self._closing or self._lifecycle != "RUNNING":
+                raise ValueError("TIRE_CALIBRATION_NOT_READY")
+            if path is not None and self._configuring:
+                raise ValueError("TIRE_CALIBRATION_BUSY")
+            self._state.set_tire_calibration(None)
+            if path is None:
+                self._notice = "已清除本次轮胎校准；不改变轮胎确认和游戏设置。"
+                return
+            snapshot = self._state.snapshot()
+            binding = car_context_binding(snapshot, parked=True)
+            if binding is None:
+                raise ValueError("TIRE_CALIBRATION_REQUIRES_PARKED_BOUND_CAR")
+            revision = snapshot["tire_calibration"]["revision"]
+
+            def load():
+                try:
+                    calibration = load_tire_calibration(
+                        path, expected_request_sha256=expected_request_sha256)
+                    with self._lock:
+                        if self._closing:
+                            return
+                        self._state.set_tire_calibration(calibration, expected_binding=binding,
+                                                         expected_revision=revision)
+                        self._notice = "轮胎校准已验证并暂存；当前仅核对适用条件，不生成换胎建议。"
+                except Exception:
+                    with self._lock:
+                        if not self._closing:
+                            self._notice = ("校准未载入：检查独立摘要、留出验证和当前车型／设置。"
+                                            "旧校准已撤回，文件及游戏设置未改变。")
+
+            self._schedule(load)
+
     def _voice_confirm_tire_service(self, kind, *, expected_binding):
         with self._lock:
             if self._closing or self._configuring or self._lifecycle != "RUNNING":

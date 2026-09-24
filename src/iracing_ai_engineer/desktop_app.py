@@ -99,6 +99,7 @@ def run_self_test() -> dict:
     import tkinter as tk
 
     from .desktop_window import DesktopWindow
+    from .synthetic_car_context import run_synthetic_car_context
     from .synthetic_runtime import (
         run_synthetic_capture_replay,
         run_synthetic_pit_observation,
@@ -115,6 +116,10 @@ def run_self_test() -> dict:
     try:
         numerical = run_synthetic_runtime()
         checks.extend(numerical["checks"])
+        car_context = run_synthetic_car_context()
+        checks.extend(car_context["checks"])
+        if car_context["status"] != "PASS":
+            raise ValueError("SYNTHETIC_CAR_CONTEXT_FAILED")
         if numerical["status"] != "PASS":
             raise ValueError("SYNTHETIC_NUMERICAL_FAILED")
         checks.append(run_synthetic_pit_observation())
