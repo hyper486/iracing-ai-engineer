@@ -719,6 +719,21 @@ def _parser() -> argparse.ArgumentParser:
     )
     tire_performance_parser.add_argument("--output", type=Path, required=True)
 
+    tire_validation_parser = subcommands.add_parser(
+        "validate-tire-performance",
+        help="Evaluate a frozen tire model against source-disjoint reviewed holdout stints",
+        description=(
+            "Rebuild the pinned training model without fitting to held-out laps, check "
+            "explicit car/setup/condition scope, and CreateNew-write a private report. "
+            "This does not admit a live tire model or authenticate reviewed evidence."
+        ),
+    )
+    tire_validation_parser.add_argument("request", type=Path)
+    tire_validation_parser.add_argument(
+        "--expected-request-sha256", type=_sha256_digest, required=True
+    )
+    tire_validation_parser.add_argument("--output", type=Path, required=True)
+
     finalize_live_parser = subcommands.add_parser(
         "finalize-live-analysis",
         help="build a complete advisor-only analysis bundle from a sealed SDK_LIVE run",
@@ -1639,6 +1654,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps({"error": "LIVE_APP_CONFIGURATION_OR_START_FAILED"}))
             return 2
         return 0
+    elif args.command == "validate-tire-performance":
+        from .tire_model_validation import TireValidationError, write_tire_validation_report
+
+        try:
+            report = write_tire_validation_report(args.request, args.output,
+                expected_request_sha256=args.expected_request_sha256)
+        except TireValidationError as exc:
+            print(json.dumps({"status": "WAIT_REVIEWED_HOLDOUT", "code": exc.code}, sort_keys=True))
+            return 2
+        print(json.dumps({key: report[key] for key in (
+            "status", "report_sha256", "summary", "reason_codes", "live_model_admitted",
+            "live_acceptance")}, sort_keys=True))
+        return 0 if report["status"] == "PASS_REVIEWED_HOLDOUT" else 2
     elif args.command == "build-tire-performance-model":
         from .retrieved_live_analysis import (
             MATCHED_TIRE_PERFORMANCE_DATASET_CONTRACT_VERSION,

@@ -223,6 +223,12 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   and headphones, wheel/PTT, actual proximity latency and VR performance in a
   user-driven session. A local TTS duration is not output or end-to-end latency;
   a trial build does not close the full tire/rule/action-bound rejoin goal.
+- Implemented: offline frozen-model evaluation against source-disjoint reviewed
+  holdout stints, with explicit per-lap car/setup bindings and observed-condition
+  domains. Every prediction/miss is retained; validation cannot refit the model,
+  expand its domain or promote source authenticity, physical wear or live
+  acceptance. See [the validation contract](TIRE_MODEL_VALIDATION.md).
+  Real data, native identity/model admission and live strategy integration remain open.
 
 For each major advance: update status, run Ruff and all pytest tests, scan public
 safety including history, review exact staged files/diff, commit with the configured

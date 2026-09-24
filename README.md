@@ -221,6 +221,7 @@ Useful design documents:
 - [Strategy readiness](docs/OFFLINE_M2_STRATEGY_RECEIPT.md)
 - [Time-domain rejoin estimate](docs/TIME_DOMAIN_REJOIN_ESTIMATE.md)
 - [Tire-performance boundary](docs/TIRE_PERFORMANCE_BELIEF.md)
+- [Frozen tire-model holdout validation](docs/TIRE_MODEL_VALIDATION.md)
 - [Driving diagnosis evidence](docs/OFFLINE_DRIVING_DIAGNOSIS_EVIDENCE.md)
 - [Post-session report](docs/OFFLINE_SESSION_REPORT.md)
 - [Privacy-safe live monitor](docs/LIVE_MONITOR.md)

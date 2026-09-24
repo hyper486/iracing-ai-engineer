@@ -48,10 +48,35 @@ required running dependency. The final goal remains active and unaccepted.
 | Paired tire-counter replay | Exact capture-byte and confirmation-frame binding | Current-code historical counter/state recomputation from a sealed capture and v3 journal; legacy unanchored assertions are refused. Not service authentication or original scheduling. |
 | Native tire-service review/export | Explicit self-attested workflow | Same-capture exit and identity/source pins, per-row human dispositions, independent local evidence and private CreateNew export. Not automatic approval, reviewer/service authentication or live model admission. |
 | VR tire-record confirmation | Two-utterance local PTT workflow | Same parked-visit binding, explicit readback/confirmation and matched analysis-owner acknowledgement. No game control, automatic approval, model request or real hearing acceptance. |
+| Tire-model holdout validation | Offline source/CLI; invented-data checks | Frozen-model prediction on source-disjoint stints, explicit car/setup/condition bindings and exact report reconstruction. Not source authentication, statistical coverage, native model admission or real tire calibration. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Frozen tire-model holdout validation
+
+The source CLI now evaluates a pinned training model against separate reviewed
+holdout stints, without using those stints to refit or widen it. Full source
+receipt separation, per-lap car/setup bindings, unchanged fuel correction and
+observed age/fuel/weather domains gate eligibility. Failed predictions remain
+in the private CreateNew report with numerical residuals; exact reconstruction
+rejects rehashed edits and acceptance promotion. See
+[the contract and operator command](TIRE_MODEL_VALIDATION.md).
+
+Validation added **64 invented-data tests**; the focused new/existing tire-model
+suite passed **89 tests**. Full regression with `uv` on the child PATH passed
+**3,387 tests with 44 skipped** in **637.85 s**, including both locked-wheel
+checks. Remaining skips require absent data, private deployments, platform
+capabilities or explicit local-speech opt-in. An additional in-memory check of
+**2,156 constructed input mutations** produced no unhandled exceptions. Ruff,
+public-safety including history, CLI help and exact staged-file/diff review
+passed. These are software checks, not genuine tire/service or race evidence.
+
+This milestone uses invented data only. Real calibration, native capture-bound
+identity/model admission and action-bound tire/service/rejoin integration remain
+open. It changes the source CLI, not the previously built or installed EXE.
+The full goal remains active and unaccepted.
 
 ## VR tire-record confirmation
 

@@ -267,6 +267,11 @@ Current aggregate results are recorded in [public status](PUBLIC_PROJECT_STATUS.
 
 ## Evidence still required
 
+The separate [frozen-model validation command](TIRE_MODEL_VALIDATION.md) now
+checks source-disjoint holdout predictions, explicit per-lap car/setup bindings
+and observed-condition domains without changing this v2 model. It does not
+automatically upgrade old models, authenticate inputs or admit live advice.
+
 Before this can affect an official-race strategy recommendation, the project
 still needs:
 
