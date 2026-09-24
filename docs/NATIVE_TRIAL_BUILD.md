@@ -5,7 +5,21 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current tire-service review rebuild adds **准备换胎审核… / 审核并导出…**.
+The current rebuild adds [two-utterance native PTT tire confirmation](VR_TIRE_CONFIRMATION.md).
+The three explicit tire-record phrases, readback, second confirmation and matched
+owner acknowledgement stay local. No simulator command, implicit service truth,
+reviewed label, cloud request or live tire-performance admission is introduced.
+New frozen checks cover the fake-PTT/actual-owner path and memory-only Chinese
+TTS/STT matching for the three record phrases plus confirm/cancel. Real driver
+hearing, microphone accuracy and VR acceptance remain open.
+The rebuilt unsigned EXE passed all **24 frozen checks** with a system-only child
+PATH and saved keys removed; artifact size/hash matched its build receipt.
+Computer Use confirmed the new two-utterance instructions were visible in the
+frozen native settings tab. The synthetic-only window closed normally; no
+real microphone, output endpoint, simulator, saved settings or old installation
+was used or changed by that inspection.
+
+The preceding tire-service review rebuild added **准备换胎审核… / 审核并导出…**.
 It locates observed exits in an exact pair, requires explicit per-row human
 decisions/evidence and an unchecked-by-default attestation, then exports the
 existing offline service-history format plus self-attested review receipts.

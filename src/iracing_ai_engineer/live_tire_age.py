@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 
 from .live_stint import _CORE, _int, _map, _value
-from .live_strategy import source_ready
+from .live_strategy import source_ready, source_scope
 from .sdk_probe import classify_context
 from .telemetry import QualityStatus, SourceKind
 
@@ -129,6 +129,11 @@ class LiveTireAgeTracker:
             self.visit_tick, self.confirmation = tick, None
             self.departed_stall = False
             self.reason = "SERVICE_NOT_CONFIRMED"
+            self.revision += 1
+        if (pit and previous is not None and previous["pit"]
+                and point["parked"] != previous["parked"]):
+            # A two-utterance review must not survive a brief service restart,
+            # departure or missing service field between its two snapshots.
             self.revision += 1
         if (pit or (previous is not None and previous["pit"])) and self.confirmation is not None:
             if not service_valid or active or (self.departed_stall and stall):
@@ -291,6 +296,20 @@ def confirmation_command(snapshot, kind):
     point = value["point"]
     return TireConfirmation(kind, value["revision"], value["visit_tick"], point["tick"],
                             point["compound"], point["sets_used"])
+
+
+def confirmation_binding(snapshot):
+    """Bind a parked review to this connection and uninterrupted service state."""
+    if snapshot.get("source_mode") != "LIVE":
+        return None
+    scope = source_scope(_map(snapshot.get("monitor")), snapshot.get("generation"))
+    if scope is None:
+        return None
+    try:
+        command = confirmation_command(snapshot, "FULL_NEW_SET")
+    except ValueError:
+        return None
+    return (*scope, command.revision, command.visit_tick, command.compound, command.sets_used)
 
 
 def tire_age_binding(snapshot):

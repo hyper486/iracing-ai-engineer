@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
-from dataclasses import replace
+from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -49,7 +49,12 @@ from .live_strategy import (
     source_scope,
     strategy_binding,
 )
-from .live_tire_age import LiveTireAgeTracker, confirmation_command, unavailable_tire_age
+from .live_tire_age import (
+    LiveTireAgeTracker,
+    confirmation_binding,
+    confirmation_command,
+    unavailable_tire_age,
+)
 from .live_traffic import (
     bound_track_length_mm,
     project_live_traffic,
@@ -269,7 +274,7 @@ class AppState:
         with self._lock:
             return (self._strategy_parameters, self._strategy_scope, self._strategy_revision)
 
-    def confirm_tire_service(self, kind):
+    def confirm_tire_service(self, kind, *, expected_binding=None):
         """One in-memory driver assertion; never a simulator/service command."""
         workers, _ = self._worker_status()
         with self._lock:
@@ -279,12 +284,25 @@ class AppState:
                     or (analysis is not None and (analysis["failed"]
                         or analysis["generation"] != self._generation))):
                 raise ValueError("TIRE_CONFIRMATION_NOT_READY")
-            command = confirmation_command({
+            snapshot = {
                 **self._value, "updated_age_s": (self.clock() - self._updated
                                                  if self._updated is not None else None),
-            }, kind)
+                "generation": self._generation,
+            }
+            binding = confirmation_binding(snapshot)
+            if expected_binding is not None and (
+                binding is None or type(expected_binding) is not tuple
+                or len(binding) != len(expected_binding)
+                or any(type(a) is not type(b) or a != b
+                       for a, b in zip(binding, expected_binding, strict=True))
+            ):
+                raise ValueError("TIRE_CONFIRMATION_NOT_READY")
+            command = confirmation_command(snapshot, kind)
             self._tire_confirmation = command
             self._value["tire_confirmation_status"] = "QUEUED"
+            return {"generation": self._generation,
+                    "binding_sha256": snapshot["monitor"].get("binding_sha256"),
+                    "command": asdict(command)}
 
     def take_tire_confirmation(self, generation):
         with self._lock:

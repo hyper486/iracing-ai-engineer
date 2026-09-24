@@ -877,7 +877,8 @@ class DesktopWindow:
         ttk.Label(parent, textvariable=self.tire_age_var, style="Muted.TLabel",
                   wraplength=920).pack(anchor="w", pady=4)
         ttk.Label(parent, text="须先连续观测进站，在停车位静止且服务结束后确认。"
-                  "仅补油选择未换胎；部分换胎或不确定选择未知。断线后不会沿用。",
+                  "仅补油选择未换胎；部分换胎或不确定选择未知。断线后不会沿用。\n"
+                  "VR 可按键说“记录四胎已换新”，听完复述后再次按键说“确认记录”。",
                   style="Muted.TLabel", wraplength=920).pack(anchor="w")
         tire_buttons = ttk.Frame(parent)
         tire_buttons.pack(anchor="w", pady=6)
@@ -1175,6 +1176,7 @@ class DesktopWindow:
                     "READY": "语音已就绪 · 等待按住说话",
                     "LISTENING": "正在收音 · 松开结束", "RECOGNIZING": "正在识别问题",
                     "WAITING_MODEL": "正在整理工程师回答", "SPEAKING": "正在播报",
+                    "WAITING_CONFIRMATION": "等待本地分析确认换胎记录",
                     "BINDING": "等待方向盘按钮", "STARTING": "正在启动本地语音",
                     "ERROR": "语音需要检查", "UNAVAILABLE": "本机语音不可用",
                     "STOPPING": "正在关闭语音", "CLOSED": "语音已停止"}

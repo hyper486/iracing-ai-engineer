@@ -91,6 +91,7 @@ class DesktopController:
             from .voice_service import VoiceService
             self._voice = VoiceService(self._core_snapshot, self.submit, self._store, clock=clock,
                                        spotter_source=self._spotter_snapshot,
+                                       tire_confirm=self._voice_confirm_tire_service,
                                        audit_sink=self._state.audit_audio)
 
     def _new_service(self, settings: DesktopSettings, key: str, path: Path | None, used: int):
@@ -526,6 +527,12 @@ class DesktopController:
             if self._closing or self._configuring or self._lifecycle != "RUNNING":
                 raise ValueError("TIRE_CONFIRMATION_NOT_READY")
             self._state.confirm_tire_service(kind)
+
+    def _voice_confirm_tire_service(self, kind, *, expected_binding):
+        with self._lock:
+            if self._closing or self._configuring or self._lifecycle != "RUNNING":
+                raise ValueError("TIRE_CONFIRMATION_NOT_READY")
+            return self._state.confirm_tire_service(kind, expected_binding=expected_binding)
 
     def set_recording(self, enabled: bool) -> None:
         if type(enabled) is not bool:

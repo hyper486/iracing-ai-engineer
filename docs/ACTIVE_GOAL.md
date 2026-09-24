@@ -54,7 +54,10 @@ session-scoped user assumptions. Conditional mapped pit/rejoin projection now
 connects hand-entered entry/exit/full-loss assumptions and observed phase tracks;
 conditional fuel/tire service components can now vary that loss per scenario.
 Native driver-confirmed tire installation now provides a separate, revocable
-counter origin and local question. It does not satisfy the offline reviewed
+counter origin and local question. A two-utterance local PTT review now allows
+parked VR drivers to submit the same assertion without clicking the window;
+matching owner acknowledgement, not queue status, gates success speech.
+See [the voice workflow](VR_TIRE_CONFIRMATION.md). It does not satisfy the offline reviewed
 label contract or admit a live degradation model; see
 [the explicit evidence boundary](LIVE_TIRE_INSTALLATION.md).
 Measured calibration, rule/tire-performance integration and real comparisons remain open. Stage D's

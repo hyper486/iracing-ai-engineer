@@ -452,7 +452,8 @@ def test_cancel_between_recognition_and_submit_cannot_send_text(rig):
     original = voice._source
 
     def cancel_when_called():
-        voice.stop()
+        if speech.recognitions:
+            voice.stop()
         return original()
 
     voice._source = cancel_when_called

@@ -66,11 +66,13 @@ def test_native_voice_delegates_without_recursive_snapshot_or_key_access(
     finished = threading.Event()
 
     class Voice:
-        def __init__(self, source, submit, store, *, clock, spotter_source, audit_sink):
+        def __init__(self, source, submit, store, *, clock, spotter_source, audit_sink,
+                     tire_confirm):
             self.source = source
             self.spotter_source = spotter_source
             self.submit = submit
             self.audit_sink = audit_sink
+            self.tire_confirm = tire_confirm
 
         def trace_state(self):
             pass
@@ -127,6 +129,25 @@ def test_native_tire_confirmation_is_memory_only_and_lifecycle_guarded(tmp_path,
     with pytest.raises(ValueError, match="TIRE_CONFIRMATION_NOT_READY"):
         controller.confirm_tire_service("FULL_NEW_SET")
     assert calls == ["FULL_NEW_SET"]
+
+
+def test_native_voice_tire_callback_preserves_binding_and_never_calls_provider(tmp_path, created):
+    reader, store, calls = Reader(), Store(tmp_path), []
+    controller = created(store=store, reader=reader)
+    controller.start()
+    assert reader.entered.wait(1)
+    def confirm(kind, *, expected_binding):
+        calls.append((kind, expected_binding))
+        return {"synthetic_ticket": True}
+    controller._state.confirm_tire_service = confirm
+    assert controller._voice_confirm_tire_service("FULL_NEW_SET", expected_binding=(1,)) == {
+        "synthetic_ticket": True}
+    controller._configuring = True
+    with pytest.raises(ValueError):
+        controller._voice_confirm_tire_service("FULL_NEW_SET", expected_binding=(1,))
+    assert calls == [("FULL_NEW_SET", (1,))] and not store.saved
+    assert controller._service.snapshot()["requests_used"] == 0
+    controller._configuring = False
 
 
 def test_voice_runtime_is_opt_in_in_controller_tests(tmp_path, created):

@@ -181,6 +181,8 @@ def test_build_script_bounds_outputs_and_checks_frozen_synthetic_receipt():
         "'VOICE_IO_IMPORT_ONLY'",
         "'PINNED_LOCAL_STT_MODEL_HASHES'",
         "'CHINESE_SYNTHETIC_TTS_TO_STT'",
+        "'CHINESE_TIRE_REVIEW_TTS_TO_STT'",
+        "'SYNTHETIC_TIRE_VOICE_CONFIRMATION'",
         "'SYNTHETIC_PROXIMITY_TRANSITIONS'",
         "'SYNTHETIC_LEARNED_FUEL_QUERY'",
         "'SYNTHETIC_REPEATED_CORNER_QUERY'",

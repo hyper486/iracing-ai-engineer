@@ -107,6 +107,7 @@ def run_self_test() -> dict:
         run_synthetic_tire_confirmation,
         run_synthetic_tire_review,
     )
+    from .synthetic_tire_voice import run_synthetic_tire_voice
 
     checks = []
     callback_errors = []
@@ -122,6 +123,9 @@ def run_self_test() -> dict:
         checks.append(run_synthetic_tire_confirmation())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_TIRE_CONFIRMATION_FAILED")
+        checks.append(run_synthetic_tire_voice())
+        if checks[-1]["status"] != "PASS":
+            raise ValueError("SYNTHETIC_TIRE_VOICE_FAILED")
         checks.append(run_synthetic_tire_capture_replay())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_TIRE_CAPTURE_REPLAY_FAILED")

@@ -1,7 +1,8 @@
 """Opt-in VR push-to-talk orchestration, independent of window focus.
 
 Microphone audio exists only for a held PTT request, remains in memory, and is
-recognized locally. Only the resulting text enters the existing advisor queue.
+recognized locally. Exact tire-record assertions use a two-utterance local
+review; other recognized text enters the existing advisor queue.
 No audio, transcript, credentials or backend exceptions are logged here.
 """
 
@@ -16,11 +17,21 @@ import struct
 import threading
 import wave
 from collections.abc import Callable, Mapping
+from dataclasses import replace
 
 from .priority_audio import AudioPreempted, PriorityAudio
 from .runtime_clock import monotonic_now
 from .spotter_voice import SpotterVoice
 from .voice_settings import VoiceSettingsStore, default_voice_settings, validate_voice_settings
+from .voice_tire_confirmation import (
+    ACK_SECONDS,
+    LABELS,
+    REVIEW_SECONDS,
+    TireVoiceReview,
+    tire_voice_acknowledged,
+    tire_voice_intent,
+    voice_tire_binding,
+)
 
 
 def _map(value: object) -> Mapping:
@@ -163,7 +174,7 @@ class VoiceService:
 
     def __init__(self, source: Callable[[], dict], submit: Callable, store,
                  *, audio=None, speech=None, input_factory=None, clock=monotonic_now,
-                 spotter_source=None, spotter_speech=None, audit_sink=None):
+                 spotter_source=None, spotter_speech=None, audit_sink=None, tire_confirm=None):
         if audio is None:
             from .voice_audio import AudioIO
             audio = AudioIO()
@@ -174,6 +185,7 @@ class VoiceService:
             from .voice_inputs import InputPoller
             input_factory = InputPoller
         self._source, self._submit, self._clock = source, submit, clock
+        self._tire_confirm, self._tire_review = tire_confirm, None
         self._audio, self._speech = PriorityAudio(audio, clock=clock), speech
 
         def fallback_spotter_source():
@@ -241,8 +253,10 @@ class VoiceService:
         except queue.Full:
             raise ValueError("VOICE_BUSY") from None
 
-    def _invalidate(self):
+    def _invalidate(self, *, preserve_tire_review=False):
         with self._lock:
+            if not preserve_tire_review:
+                self._tire_review = None
             self._cancel.set()
             self._release.set()
             self._epoch += 1
@@ -356,7 +370,7 @@ class VoiceService:
             if (self._held or not self._settings["enabled"] or self._shutdown.is_set()
                     or self._pending_configurations or self._binding_pending is not None):
                 return
-            self._invalidate()
+            self._invalidate(preserve_tire_review=True)
             self._held = True
             self._cancel, self._release = threading.Event(), threading.Event()
             job = self._epoch, self._cancel, self._release, copy.deepcopy(self._settings)
@@ -474,11 +488,91 @@ class VoiceService:
             with self._lock:
                 if self._playing_guard is playback:
                     self._playing_guard = None
+        return self._valid(epoch, cancel) and (guard is None or guard())
+
+    def _tire_record(self, text, started_binding, settings, epoch, cancel):
+        """Handle only exact PTT phrases. Drafts never reach the model queue."""
+        intent = tire_voice_intent(text)
+        with self._lock:
+            pending, self._tire_review = self._tire_review, None
+            if not self._valid(epoch, cancel):
+                return True
+        if intent is None:
+            if re.sub(r"\s", "", text).startswith(("记录", "确认记录", "取消记录")):
+                # Reject-only prefix reservation: never guess an assertion from
+                # approximate STT text or send an attempted record to a model.
+                self._say("未识别到支持的记录口令，没有记录。请重说，听完复述再确认。",
+                          settings, epoch, cancel)
+                return True
+            return False  # An unrelated question also discards any old draft.
+        if intent == "CANCEL":
+            self._say("待确认记录已清除；不会撤销已经提交的记录。", settings, epoch, cancel)
+            return True
+        if settings["volume"] <= 0:
+            self._set_status("READY", "语音音量为零，未准备或提交换胎记录。请恢复音量后重试。")
+            return True
+        current = voice_tire_binding(self._source())
+        if (self._tire_confirm is None or started_binding is None
+                or current != started_binding):
+            self._say("未记录。需连续观测本次进站，并在停车位服务结束后确认。",
+                      settings, epoch, cancel)
+            return True
+        if intent != "CONFIRM":
+            pending = TireVoiceReview(intent, current, self._clock() + REVIEW_SECONDS)
+            with self._lock:
+                if not self._valid(epoch, cancel):
+                    return True
+                self._tire_review = pending
+            prompt = (f"准备记录：{LABELS[intent]}。只记录你的确认，不操作游戏。"
+                      "请再次按键说：确认记录。")
+            played = self._say(prompt, settings, epoch, cancel,
+                               lambda: pending.current(self._source(), self._clock()))
+            with self._lock:
+                if self._tire_review is pending:
+                    if played and self._valid(epoch, cancel):
+                        self._tire_review = replace(pending, armed=True)
+                        self._set_status("READY",
+                                         "待确认换胎记录：请在 30 秒内再次按键说“确认记录”。")
+                    else:
+                        self._tire_review = None
+            return True
+        if (pending is None or not pending.armed or pending.binding != started_binding
+                or not pending.current(self._source(), self._clock())):
+            self._say("没有有效的待确认记录，请先说要记录的换胎情况并听完复述。",
+                      settings, epoch, cancel)
+            return True
+        try:
+            # Linearize with stop/configuration; the callback only queues one
+            # assertion and atomically rechecks this exact parked-visit binding.
+            with self._lock:
+                if (not self._valid(epoch, cancel) or not self._settings["enabled"]
+                        or self._pending_configurations):
+                    return True
+                ticket = self._tire_confirm(pending.kind, expected_binding=pending.binding)
+        except ValueError:
+            self._say("未记录，停车或服务状态已经变化，请重新核对。", settings, epoch, cancel)
+            return True
+        self._set_status("WAITING_CONFIRMATION", "已排队，等待本地分析确认；尚不能视为已记录。")
+        deadline = self._clock() + ACK_SECONDS
+        while self._valid(epoch, cancel) and self._clock() < deadline:
+            if tire_voice_acknowledged(self._source(), ticket):
+                message = (f"已记录你的确认：{LABELS[pending.kind]}。"
+                           "这是人工记录，不是换胎传感器证明。")
+                if self._say(message, settings, epoch, cancel,
+                             lambda: tire_voice_acknowledged(self._source(), ticket)):
+                    self._set_status("READY", message)
+                return True
+            cancel.wait(.05)
+        if self._valid(epoch, cancel):
+            self._say("尚未核实本次记录结果，请问轮胎状态核对；不要当作已经保存。",
+                      settings, epoch, cancel)
+        return True
 
     def _listen(self, job):
         epoch, cancel, release, settings = job
         if not self._valid(epoch, cancel) or release.is_set():
             return
+        started_binding = voice_tire_binding(self._source())
         self._set_status("LISTENING", "听到提示音后说话，松开按键提交；最长 12 秒。")
         self._audio.play(
             cue_wave(), cancel, device=settings["output_device"], volume=settings["volume"],
@@ -493,11 +587,15 @@ class VoiceService:
             # truncated utterance must not reach STT or the question queue.
             # Preserve _held until the real release, suppressing repeated presses.
             del pcm
+            with self._lock:
+                self._tire_review = None
             self._say("本次收音超过十二秒已取消。请松开按键后重新说话。", settings, epoch, cancel)
             if self._valid(epoch, cancel):
                 self._set_status("READY", "本次收音超过 12 秒已取消；请松开按键后重新说话。")
             return
         if len(pcm) < 6400:
+            with self._lock:
+                self._tire_review = None
             self._say("没有听清，请按住按键再说一次。", settings, epoch, cancel)
             return
         self._audio.play(
@@ -515,10 +613,14 @@ class VoiceService:
         # that the recognizer understood the driver's intended question.
         if (type(text) is not str or not 1 <= len(text.strip()) <= 500
                 or any(ord(c) < 32 for c in text) or not _finite(confidence) or confidence < 0.5):
+            with self._lock:
+                self._tire_review = None
             self._say("没有听清，请再说一次。", settings, epoch, cancel)
             return
         with self._lock:
             self._transcript = text.strip()
+        if self._tire_record(text.strip(), started_binding, settings, epoch, cancel):
+            return
         before = _identity(self._source())
         # Linearize the final authorization with stop/configuration callbacks.
         # The submit operation only queues existing local work; no network wait.
@@ -624,6 +726,9 @@ class VoiceService:
                     self._set_status("READY" if self._settings["enabled"] else "OFF",
                                      "近车提示正在使用音频设备；请稍后刷新设备列表。")
             except Exception:
+                if action == "listen":
+                    with self._lock:
+                        self._tire_review = None
                 cancelled = (action in ("listen", "test")
                              and not self._valid(payload[0], payload[1]))
                 if not cancelled:

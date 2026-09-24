@@ -43,12 +43,13 @@ def test_voice_check_closes_local_worker_without_starting_io(monkeypatch, accept
     class Speech:
         def synthesize(self, text):
             calls.append("synthesize")
+            self.text = text
             return wav()
 
         def recognize(self, pcm, culture):
             calls.append("recognize")
             assert culture == "zh-CN" and pcm
-            return {"text": "多少油", "confidence": 0.9 if accepted else 0.1}
+            return {"text": self.text, "confidence": 0.9 if accepted else 0.1}
 
         def close(self):
             calls.append("close")
@@ -59,7 +60,7 @@ def test_voice_check_closes_local_worker_without_starting_io(monkeypatch, accept
                         SimpleNamespace(LocalSpeech=Speech))
     monkeypatch.setattr(diagnostics, "_verify_model", lambda: calls.append("verify"))
     result = diagnostics.run_voice_self_test()
-    assert calls == ["verify", "synthesize", "recognize", "close"]
+    assert calls == ["verify", *(["synthesize", "recognize"] * (6 if accepted else 1)), "close"]
     assert all(check["status"] == "PASS" for check in result) is accepted
 
 

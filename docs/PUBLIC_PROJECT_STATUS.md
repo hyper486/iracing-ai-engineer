@@ -47,10 +47,43 @@ required running dependency. The final goal remains active and unaccepted.
 | Driver-confirmed tire installation | Native assertion and continuous counter origin | Explicit parked service assertion, observed exit, strict withdrawal, local question and private assertion audit. Not SDK service truth, independently reviewed history or a live performance-model decision. |
 | Paired tire-counter replay | Exact capture-byte and confirmation-frame binding | Current-code historical counter/state recomputation from a sealed capture and v3 journal; legacy unanchored assertions are refused. Not service authentication or original scheduling. |
 | Native tire-service review/export | Explicit self-attested workflow | Same-capture exit and identity/source pins, per-row human dispositions, independent local evidence and private CreateNew export. Not automatic approval, reviewer/service authentication or live model admission. |
+| VR tire-record confirmation | Two-utterance local PTT workflow | Same parked-visit binding, explicit readback/confirmation and matched analysis-owner acknowledgement. No game control, automatic approval, model request or real hearing acceptance. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## VR tire-record confirmation
+
+The native PTT path now allows a parked VR driver to record a tire-service
+assertion without clicking a window. First an exact phrase creates a local
+30-second draft and reads it back; a new explicit confirmation queues one
+assertion only if the same fresh service-complete parked episode still holds.
+The analysis owner's exact matching receipt gates success speech; queue status
+alone does not. Transient movement/service restarts invalidate the original
+binding even if recovered before the UI refresh. Proximity, cancellation and
+answer withdrawal retain their independent paths. No approximate recognition
+or model answer is treated as an action, and attempted unmatched record phrases
+are rejected locally. See [the workflow and boundaries](VR_TIRE_CONFIRMATION.md).
+
+The unsigned rebuilt EXE passed **24 frozen checks**, including the real
+voice-handler/analysis-owner path with fake audio and a memory-only local
+TTS/STT check of the five record/confirm/cancel phrases. Its size/hash matched
+the build receipt. Computer Use confirmed the new native instructions were
+visible, and the synthetic-only window closed normally. Existing installed
+copies, settings, keys and audio selections were not replaced.
+
+Full regression completed with **3,321 passed and 46 skipped** in **658.22 s**.
+Two of those skips were locked-wheel checks caused by `uv` not being on the
+child PATH; both passed in a subsequent explicit rerun with PATH corrected
+(**2 passed**, 6.17 s). The other 44 data/private/platform/opt-in skips remain.
+Ruff, public-safety including history and exact staged-file/diff review passed
+before publication. None of these results promotes real racing acceptance.
+
+Synthetic tests and explicit memory-only TTS/STT checks do not establish real
+microphone accuracy, hearing, SDK/service truth, end-to-end latency, tire-model
+calibration or VR acceptance. Real reviewed calibration and live tire/service/
+rejoin integration remain open; the final goal is still active.
 
 ## Native tire-service review/export
 

@@ -37,7 +37,10 @@ line shortly after exit can already add one. It is not an independently
 verified tire age and is never presented as physical wear or remaining life.
 **问轮胎 / 轮胎怎么样** uses a short local answer without a provider call;
 the confirmed origin/lap binding expires existing answers when it changes.
-Confirmation itself currently requires the parked native UI, not a voice command.
+Confirmation can use the parked native buttons or the separate local
+[two-utterance PTT review](VR_TIRE_CONFIRMATION.md). Voice first reads back a
+pending assertion, then requires a new explicit confirmation in the same parked
+episode. It never interprets an LLM answer as a service assertion.
 
 ## Withdrawal and isolation
 

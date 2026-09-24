@@ -67,6 +67,17 @@ def run_voice_self_test() -> list[dict]:
         if result["confidence"] < 0.5 or "油" not in result["text"]:
             raise ValueError("VOICE_TEST_RECOGNITION")
         checks.append({"id": "CHINESE_SYNTHETIC_TTS_TO_STT", "status": "PASS"})
+        from .voice_tire_confirmation import tire_voice_intent
+        for phrase, expected in (
+            ("记录四胎已换新。", "FULL_NEW_SET"),
+            ("记录本次没有换胎。", "NO_TIRE_CHANGE"),
+            ("记录部分换胎。", "PARTIAL_OR_UNKNOWN"),
+            ("确认记录。", "CONFIRM"), ("取消记录。", "CANCEL"),
+        ):
+            result = speech.recognize(wav_to_pcm(speech.synthesize(phrase)), "zh-CN")
+            if result["confidence"] < .5 or tire_voice_intent(result["text"]) != expected:
+                raise ValueError("VOICE_TEST_TIRE_RECOGNITION")
+        checks.append({"id": "CHINESE_TIRE_REVIEW_TTS_TO_STT", "status": "PASS"})
     except Exception:
         checks.append({"id": "SYNTHETIC_VOICE_RUNTIME", "status": "FAIL"})
     finally:
