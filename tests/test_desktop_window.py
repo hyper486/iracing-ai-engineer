@@ -840,6 +840,30 @@ def _native_capture_replay(native_window):
     assert not controller.questions and not controller.voice_calls
 
 
+def _native_tire_confirmation(native_window):
+    from test_live_tire_age import Rig
+
+    _root, controller, window = native_window
+    rig, calls = Rig(), []
+    controller.confirm_tire_service = calls.append
+    controller.value["telemetry"] = rig.park()
+    window._poll()
+    assert all(not button.instate(["disabled"]) for button in window.tire_confirmation_buttons)
+    window.tire_confirmation_buttons[0].invoke()
+    assert calls == ["FULL_NEW_SET"]
+    controller.value["telemetry"]["tire_confirmation_status"] = "QUEUED"
+    window._poll()
+    assert all(button.instate(["disabled"]) for button in window.tire_confirmation_buttons)
+    assert "待分析线程核对" in window.tire_age_var.get()
+    controller.value["telemetry"] = rig.step(Speed=1.)
+    window._poll()
+    assert all(button.instate(["disabled"]) for button in window.tire_confirmation_buttons)
+    controller.value["telemetry"] = Rig().known()
+    window._poll()
+    assert "车手确认" in window.tire_age_var.get()
+    assert not controller.questions and not controller.voice_calls
+
+
 _NATIVE_SCENARIOS = {
     "settings": _native_settings, "question": _native_question,
     "close": _native_close, "validation": _native_validation,
@@ -853,6 +877,7 @@ _NATIVE_SCENARIOS = {
     "strategy_configuration": _native_strategy_configuration,
     "pit_observation_draft": _native_pit_observation_draft,
     "capture_replay": _native_capture_replay,
+    "tire_confirmation": _native_tire_confirmation,
 }
 
 

@@ -44,10 +44,35 @@ required running dependency. The final goal remains active and unaccepted.
 | Conditional fuel / tire service comparison | Native settings and local questions; synthetic checks | Parallel/sequential four-tire costs, explicit other overhead and scenario-specific complete loss feed up to four mapped rejoin variants. Not tire condition, calibrated performance benefit or a keep/change recommendation. |
 | Historical pit-visit observation | Native local question and reviewed draft | SDK-edge elapsed interval, preceding phase-profile net-loss estimate and tank net change; optional stopped-only, revision-bound form draft, never automatically applied or promoted to calibrated future service cost. |
 | Observed stint / tire-counter interval / raw pace | Packaged local trial; synthetic checks | Separate stint and tire observations, six consecutive clean-lap median comparison and local questions; not physical tire age, fuel-corrected degradation or a tire-change decision. |
+| Driver-confirmed tire installation | Native assertion and continuous counter origin | Explicit parked service assertion, observed exit, strict withdrawal, local question and private assertion audit. Not SDK service truth, independently reviewed history or a live performance-model decision. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Driver-confirmed tire installation prerequisite
+
+The native settings now accept a current-visit driver assertion after observed
+entry and completed stopped service. A full-new assertion plus continuous exit
+can establish a counter origin; unchanged service only preserves a known one.
+Missing/partial service, discontinuities and tire-context changes withdraw it.
+The local tire question identifies its human-confirmed basis explicitly.
+
+The private journal's new v2 assertion lane is fixed numeric/enum data. Updated
+replay accepts v1 logs and reports assertions without claiming tire-age
+recomputation or verified service contents. This is not yet live calibrated
+tire-benefit integration. Full capture/assertion replay and reviewed label export
+remain open. See [the workflow and limits](LIVE_TIRE_INSTALLATION.md).
+
+Full regression passed **3,221 tests, with 44 skips**, in **623.84 seconds**.
+Ruff, public-safety including history and exact staged-file/diff review passed.
+The unsigned rebuilt EXE passed **20 frozen checks** under a system-only child
+PATH with saved keys removed; its size/hash matched the build receipt.
+Computer Use checked the source and final frozen synthetic settings windows;
+both were closed normally. Isolated native tests cover confirmation availability,
+queued/moving states and delegation. No authentic SDK, service,
+microphone/headphone or VR acceptance has been added. Existing installations,
+shortcuts and saved settings are unchanged.
 
 ## Conditional service costs connected to rejoin
 
@@ -63,7 +88,8 @@ conditional answer without waiting for DeepSeek. Full native text retains the
 assumptions and does not turn the fuel-only counterfactual into safe tire
 retention advice. See [the setup, formulas and limits](LIVE_SERVICE_COMPARISON.md).
 
-Full regression passed **3,144 tests, with 44 skips**, in **610.51 seconds**;
+At that service-comparison milestone, full regression passed
+**3,144 tests, with 44 skips**, in **610.51 seconds**;
 the focused suite passed 515 tests. Ruff, public-safety including history and
 exact staged-file/diff review passed. The unsigned rebuilt EXE passed all
 **19 frozen checks** under a system-only child PATH with saved keys removed.

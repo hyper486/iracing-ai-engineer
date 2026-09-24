@@ -73,6 +73,17 @@ def read_rows(path):
     return [json.loads(line) for line in path.read_bytes().splitlines()]
 
 
+def test_legacy_v1_journal_still_replays_without_tire_assertions(trial):
+    trial.feed(1)
+    trial.feed(2)
+    trial.close()
+    rows = read_rows(trial.path)
+    rows[0]["contract_version"] = "private-trial-audit-v1"
+    rewrite(trial.path, rows)
+    result = replay_trial(trial.path)
+    assert result["status"] == "REPLAY_MATCH" and result["tire_assertions"] == 0
+
+
 def rewrite(path, rows):
     raw = b"".join((json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
                    for row in rows[:-1])
@@ -168,7 +179,7 @@ def test_metadata_projection_replays(trial, change, reason):
     trial.state.feed_spotter(replace(frame(1), **change))
     trial.close()
     assert reason in replay_trial(trial.path)["health_transitions"]
-    assert b"private" not in trial.path.read_bytes().replace(b"private-trial-audit-v1", b"")
+    assert b"private" not in trial.path.read_bytes().replace(b"private-trial-audit-v2", b"")
 
 
 def test_projection_never_copies_extra_sdk_values_or_identity():

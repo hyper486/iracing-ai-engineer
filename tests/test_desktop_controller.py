@@ -111,6 +111,24 @@ def test_native_voice_delegates_without_recursive_snapshot_or_key_access(
                      "press", "release", "test", "stop", "close"]
 
 
+def test_native_tire_confirmation_is_memory_only_and_lifecycle_guarded(tmp_path, created):
+    reader, store, calls = Reader(), Store(tmp_path), []
+    controller = created(store=store, reader=reader)
+    controller.start()
+    assert reader.entered.wait(1)
+    controller._state.confirm_tire_service = calls.append
+    controller.confirm_tire_service("FULL_NEW_SET")
+    assert calls == ["FULL_NEW_SET"] and not store.saved and len(reader.calls) == 1
+    controller._configuring = True
+    with pytest.raises(ValueError, match="TIRE_CONFIRMATION_NOT_READY"):
+        controller.confirm_tire_service("NO_TIRE_CHANGE")
+    controller._configuring = False
+    controller.close()
+    with pytest.raises(ValueError, match="TIRE_CONFIRMATION_NOT_READY"):
+        controller.confirm_tire_service("FULL_NEW_SET")
+    assert calls == ["FULL_NEW_SET"]
+
+
 def test_voice_runtime_is_opt_in_in_controller_tests(tmp_path, created):
     controller = created(store=Store(tmp_path), reader=Reader())
     assert "voice" not in controller.snapshot()

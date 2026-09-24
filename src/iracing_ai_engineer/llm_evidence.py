@@ -21,6 +21,7 @@ from .live_pit_observation import pit_observation_notice, validated_pit_observat
 from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import validated_stint
 from .live_strategy import strategy_notice, validated_strategy
+from .live_tire_age import tire_age_notice, validated_tire_age
 from .live_traffic import validated_traffic
 
 LLM_CONTEXT_CONTRACT_VERSION = "engineer-llm-context-v1"
@@ -403,6 +404,9 @@ def _live_pit_observation_facts(result, snapshot):
 def _live_stint_facts(result, snapshot):
     if not _live_frame_ready(snapshot):
         return
+    tire_age = validated_tire_age(snapshot)
+    if tire_age is not None and tire_age["origin"] is not None:
+        result["facts"].append(_entry("tire.driver_confirmed_age", tire_age_notice(snapshot)))
     value = validated_stint(snapshot)
     if value is not None:
         stint = value["stint"]

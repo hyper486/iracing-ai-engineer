@@ -151,6 +151,9 @@ class _Replay:
         self.capture_open = None
         self.capture_generation = -1
         self.capture_tail = deque(maxlen=128)
+        self.tire_assertions = 0
+        self.tire_tail = deque(maxlen=32)
+        self.last_tire_assertion = None
         self.evicted = 0
 
     def _finalize(self, entry):
@@ -315,6 +318,21 @@ class _Replay:
             self.capture_tail.append({**item, "byte_link_check": check})
         self.captures[item["status"]] += 1
 
+    def tire_confirmation(self, item):
+        # Fixed driver assertion only. The spotter trace does not contain the
+        # fields required to re-evaluate tire age or verify a service action.
+        _require(item["generation"] == self.generation)
+        row = item["assertion"]
+        key = (self.generation, row["decision_tick"], row["revision"])
+        if self.last_tire_assertion is not None:
+            previous = self.last_tire_assertion
+            # Session ticks may restart inside one transport connection; the
+            # owner revision continues increasing across those resets.
+            _require(key[0] > previous[0] or (key[0] == previous[0] and key[2] > previous[2]))
+        self.last_tire_assertion = key
+        self.tire_assertions += 1
+        self.tire_tail.append(item)
+
     def _check_capture(self, item):
         path = Path(self.capture_directory) / f"capture-{item['capture_id']}.jsonl"
         try:
@@ -358,6 +376,9 @@ class _Replay:
             "capture_left_open": self.capture_open is not None,
             "capture_byte_checks": dict(self.capture_checks),
             "captures_tail": list(self.capture_tail),
+            "tire_assertions": self.tire_assertions,
+            "tire_assertions_tail": list(self.tire_tail),
+            "tire_age_recomputed": False, "tire_service_verified": False,
         }
 
 
@@ -383,12 +404,14 @@ def _replay(path, capture_directory, cancelled):
             if not header:
                 _keys(value, "record contract_version run_id advisor_only executable "
                              "live_acceptance heard source_authenticity")
-                _require(value["record"] == "header" and value["contract_version"] == TRIAL_CONTRACT
+                _require(value["record"] == "header"
+                         and value["contract_version"] in (TRIAL_CONTRACT, "private-trial-audit-v1")
                          and _hex(value["run_id"], 32) and value["advisor_only"] is True
                          and value["executable"] is False and value["live_acceptance"] is False
                          and value["heard"] is False
                          and value["source_authenticity"] == "UNVERIFIED")
                 header = True
+                input_contract = value["contract_version"]
             elif value.get("record") == "footer":
                 _keys(value, "record entries stream_sha256 completion live_acceptance heard")
                 _require(_integer(value["entries"]) and value["entries"] == entries
@@ -400,7 +423,9 @@ def _replay(path, capture_directory, cancelled):
                 _keys(value, "record sequence lane payload")
                 _require(value["record"] == "entry" and _integer(value["sequence"], 1)
                          and value["sequence"] == entries + 1
-                         and _enum(value["lane"], ("detector", "audio", "capture")))
+                         and _enum(value["lane"], ("detector", "audio", "capture",
+                                                  "tire_confirmation")))
+                _require(value["lane"] != "tire_confirmation" or input_contract == TRIAL_CONTRACT)
                 validate_projection(value["lane"], value["payload"])
                 getattr(replay, value["lane"])(value["payload"])
                 entries += 1

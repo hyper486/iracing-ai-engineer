@@ -5,7 +5,23 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current service-comparison rebuild adds session-only four-tire timing,
+The current driver-confirmed installation rebuild adds parked native service
+assertions, a revocable post-exit counter origin, local tire answers and a fixed
+private assertion audit lane. This is not independently reviewed installation
+evidence, physical wear, tire-age replay or a live calibrated tire decision.
+See [the workflow and boundary](LIVE_TIRE_INSTALLATION.md).
+It passed **20 frozen checks** (twelve numerical, five native/runtime, three
+memory-only voice) with system-only child PATH and saved keys removed. The new
+check exercises the real mailbox, analysis owner, local question and withdrawal
+using invented frames. The binary hash/size matched the build receipt. It is
+unsigned; no SDK, real service, microphone/headphone or VR acceptance is added.
+Computer Use checked the source and final frozen synthetic settings windows:
+the three assertion buttons, unavailable state and explanations were visible;
+source scrolling also passed. Both QA windows were closed normally. Isolated
+native tests cover enabled/queued/moving button states and delegation.
+Existing installed copies, shortcuts and saved settings remain untouched.
+
+The preceding service-comparison rebuild added session-only four-tire timing,
 parallel/sequential service and explicit other overhead. Complete costs feed
 separate fuel/tire rejoin variants. **问换胎耗时 / 换胎会多花多久** is a local
 question, not a tire recommendation. See [the contract](LIVE_SERVICE_COMPARISON.md).

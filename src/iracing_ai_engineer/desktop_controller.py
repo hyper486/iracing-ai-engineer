@@ -445,6 +445,12 @@ class DesktopController:
                 raise ValueError("STRATEGY_SOURCE_NOT_READY")
             self._state.configure_strategy(parsed, pit_draft_binding=pit_draft_binding)
 
+    def confirm_tire_service(self, kind: str) -> None:
+        with self._lock:
+            if self._closing or self._configuring or self._lifecycle != "RUNNING":
+                raise ValueError("TIRE_CONFIRMATION_NOT_READY")
+            self._state.confirm_tire_service(kind)
+
     def set_recording(self, enabled: bool) -> None:
         if type(enabled) is not bool:
             raise ValueError("INVALID_RECORDING_SETTING")

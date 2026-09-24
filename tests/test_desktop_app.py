@@ -81,4 +81,5 @@ def test_real_native_self_test_without_key_sdk_or_network(monkeypatch):
         "SYNTHETIC_FUEL_STOP_QUERY", "SYNTHETIC_RETAINED_STATE_BOUNDS",
         "SYNTHETIC_STINT_OBSERVATION_QUERY", "SYNTHETIC_RAW_PACE_QUERY",
         "SYNTHETIC_SERVICE_COST_QUERY",
+        "SYNTHETIC_DRIVER_CONFIRMED_TIRES",
     }

@@ -213,6 +213,57 @@ def run_synthetic_capture_replay():
     return {"id": "SYNTHETIC_CAPTURE_RECOMPUTATION", "status": "PASS" if passed else "FAIL"}
 
 
+def run_synthetic_tire_confirmation():
+    """Synthetic driver assertion through the real mailbox, owner and local query."""
+    from .live_tire_age import validated_tire_age
+
+    now = [1.]
+    state = AppState(clock=lambda: now[0])
+    state.connection("CONNECTED")
+    analysis = _LiveAnalysis(state, LiveFuelConfig(), identifier="synthetic-tire-only",
+        tick_rate=60, car_count=3, generation=state.generation, allowed=lambda: True)
+    service = EngineerService(state.snapshot, clock=lambda: now[0], environ={})
+    passed = False
+    try:
+        for frame in synthetic_frames(8):
+            tick = frame.buffer_tick
+            if tick > 100:
+                break
+            values = {**frame.values, "LapCompleted": 3 + int(tick >= 80),
+                      "Lap": 4 + int(tick >= 80), "OnPitRoad": 10 <= tick < 65,
+                      "PlayerCarInPitStall": 12 <= tick < 50,
+                      "PitstopActive": 12 <= tick < 20,
+                      "Speed": 0. if 12 <= tick < 50 else 30.,
+                      "PlayerTireCompound": 0, "TireSetsUsed": 1}
+            frame = replace(frame, values=values)
+            now[0] = frame.captured_monotonic_s
+            analysis.process((frame, "Race", now[0], 1_200_000))
+            if tick == 35:
+                state.confirm_tire_service("FULL_NEW_SET")
+        value = state.snapshot()
+        observed = validated_tire_age(value)
+        if (observed is None or observed["counter_increase"] != 1
+                or value["tire_confirmation_status"] != "APPLIED"
+                or observed["origin"]["exit_tick"] != 65
+                or service.submit("轮胎怎么样")[0] != 202):
+            raise RuntimeError("SYNTHETIC_TIRE_CONFIRMATION")
+        answer = service.snapshot()["answer"]
+        if (answer["stale"] or "tire.driver_confirmed_age" not in answer["fact_ids"]
+                or service.snapshot()["requests_used"] != 0):
+            raise RuntimeError("SYNTHETIC_TIRE_LOCAL_QUERY")
+        state.invalidate_analysis(state.generation)
+        if not service.snapshot()["answer"]["stale"]:
+            raise RuntimeError("SYNTHETIC_TIRE_WITHDRAWAL")
+        passed = True
+    except Exception:
+        pass
+    finally:
+        service.close(wait=True)
+        analysis.close()
+        state.connection("STOPPED")
+    return {"id": "SYNTHETIC_DRIVER_CONFIRMED_TIRES", "status": "PASS" if passed else "FAIL"}
+
+
 def run_synthetic_pit_observation():
     """Real owner, local query and reviewed-draft guard; output aggregates only."""
     now = [1.]

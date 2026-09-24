@@ -1,7 +1,8 @@
 # Private proximity / audio trial replay
 
-Source implementation, not an updated EXE or a live acceptance receipt.
-Contract: `private-trial-audit-v1`. This is the proximity slice of Stage E;
+See [the current trial build](NATIVE_TRIAL_BUILD.md); this is not live acceptance.
+Contract: `private-trial-audit-v2`; the reader also accepts legacy v1 logs.
+Older binaries may reject v2. This is the proximity slice of Stage E;
 complete endurance strategy, device hearing and VR acceptance remain open.
 
 ## 使用方法
@@ -29,13 +30,14 @@ start this native trial journal.
 
 ## What is recorded
 
-The existing raw capture remains separate. The small journal has three lanes:
+The existing raw capture remains separate. The small journal has four lanes:
 
 | Lane | Fixed projection | Purpose |
 |---|---|---|
 | Detector | Reset/configuration, connection generation, ten proximity fields, capture/observation clocks, fixed decision rows | Recompute each frame, unavailable transition and time-driven withdrawal |
 | Audio | Fixed health/outcome codes, generation/epoch/candidate ID, software start delay, default/selected/unset output choice | Correlate attempts, starts, completions, cancellation, drops and failures |
 | Capture | Random local capture ID, connection generation, committed size and hash, open/complete/empty/incomplete state | Locate and optionally verify companion file bytes |
+| Tire confirmation | Generation, fixed assertion kind, revision, visit/request/decision ticks, lap/compound/set counters and session/player slots | Audit accepted driver assertions; not tire-age recomputation or verification of service contents |
 
 No driver name, `SessionInfo`, microphone PCM, recognized question, model answer,
 key, device/voice name or arbitrary exception text enters the journal. Fixed
@@ -44,6 +46,11 @@ SDK field types are projected to null only when that preserves detector
 admission semantics; an unrepresentable numeric trace fails journaling rather
 than silently asserting replay equivalence. These records still contain private
 session timing and car-slot context and must not be published as sanitized data.
+
+Tire assertions use an increasing owner revision across source/session resets;
+session ticks themselves may restart. Reports retain at most 32 assertion rows.
+They are not independently reviewed tire labels and are not automatically
+imported into performance models. See [the tire boundary](LIVE_TIRE_INSTALLATION.md).
 
 Detector records are captured under the same lock as the decision. The first
 clock observation and every state-changing poll are retained. Silent intervening

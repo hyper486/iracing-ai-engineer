@@ -53,6 +53,10 @@ Conditional whole-lap fuel-stop comparison is now connected to current fuel and
 session-scoped user assumptions. Conditional mapped pit/rejoin projection now
 connects hand-entered entry/exit/full-loss assumptions and observed phase tracks;
 conditional fuel/tire service components can now vary that loss per scenario.
+Native driver-confirmed tire installation now provides a separate, revocable
+counter origin and local question. It does not satisfy the offline reviewed
+label contract or admit a live degradation model; see
+[the explicit evidence boundary](LIVE_TIRE_INSTALLATION.md).
 Measured calibration, rule/tire-performance integration and real comparisons remain open. Stage D's
 bounded recent-lap model and local coaching questions are now implemented in source;
 this is descriptive evidence, not causal coaching or offline gate promotion.

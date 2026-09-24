@@ -23,8 +23,11 @@ completed laps as a new-tire origin. A fuel-only stop can retain old tires, and
 attachment at zero race laps does not prove a fresh set. Current source rejects
 those v1 tire contexts/models/beliefs; regenerate them from reviewed evidence,
 not by changing a version string or rehashing an old receipt. The M2 v1 path
-without a performance model is unchanged. The existing native trial EXE was
-not rebuilt for this offline-only correction and does not contain this update.
+without a performance model is unchanged. Later native trial builds include
+this offline correction; see [the current build boundary](NATIVE_TRIAL_BUILD.md).
+The new [driver-confirmed installation observation](LIVE_TIRE_INSTALLATION.md)
+has a different basis and is not automatically admitted as reviewed labels,
+calibration data or a live tire-performance decision.
 
 ## Matched input contract
 

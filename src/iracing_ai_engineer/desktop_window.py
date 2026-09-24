@@ -16,6 +16,7 @@ from .live_pit_observation import pit_observation_draft, pit_observation_notice
 from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import stint_notice
 from .live_strategy import StrategyParameters, strategy_notice, validated_strategy
+from .live_tire_age import confirmation_command, tire_age_notice
 from .live_traffic import validated_traffic
 from .llm_evidence import _live_frame_ready
 from .runtime_clock import monotonic_now
@@ -88,6 +89,7 @@ def trial_report_text(report: object) -> str:
             ("音频服务故障", outcomes.get("FAILED", 0)),
             ("已判定但未记录播放尝试", events.get("DETECTED_NO_RECORDED_ATTEMPT", 0)),
             ("无法关联的音频记录", value.get("unbound_audio_records")),
+            ("车手换胎确认记录（未核验服务、未重算胎龄）", value.get("tire_assertions")),
         ):
             if type(count) is int and 0 <= count <= 2**53:
                 result.append(f"{label}：{count}")
@@ -824,6 +826,23 @@ class DesktopWindow:
         frame.pack(fill="both", expand=True, pady=(7, 0))
 
     def _build_settings(self, parent) -> None:
+        ttk.Label(parent, text="轮胎安装确认 · 仅记录事实，不发送游戏指令").pack(anchor="w")
+        self.tire_age_var = tk.StringVar(self.root, "等待新鲜连续数据。")
+        ttk.Label(parent, textvariable=self.tire_age_var, style="Muted.TLabel",
+                  wraplength=920).pack(anchor="w", pady=4)
+        ttk.Label(parent, text="须先连续观测进站，在停车位静止且服务结束后确认。"
+                  "仅补油选择未换胎；部分换胎或不确定选择未知。断线后不会沿用。",
+                  style="Muted.TLabel", wraplength=920).pack(anchor="w")
+        tire_buttons = ttk.Frame(parent)
+        tire_buttons.pack(anchor="w", pady=6)
+        self.tire_confirmation_buttons = []
+        for label, kind in (("确认四胎全换新", "FULL_NEW_SET"),
+                            ("确认本次未换胎", "NO_TIRE_CHANGE"),
+                            ("部分换胎／未知", "PARTIAL_OR_UNKNOWN")):
+            button = self._button(tire_buttons, label, lambda k=kind: self._confirm_tires(k))
+            button.pack(side="left", padx=(0, 10))
+            self.tire_confirmation_buttons.append(button)
+        ttk.Separator(parent).pack(fill="x", pady=8)
         ttk.Label(parent, text="本次连接的补油、换胎耗时与出站比较 · 停车后设置").pack(anchor="w")
         ttk.Label(parent, text="进车后应用；换车、换会话、退车或断线后需重新确认，不自动保存。\n"
                   "容量使用本场有效容量；其余留空表示未知，不是零。手填假设不是实测标定。",
@@ -1277,6 +1296,20 @@ class DesktopWindow:
                      and callable(getattr(self.controller, "pit_observation_draft", None))
                      and pit_observation_draft(_mapping(snapshot.get("telemetry"))) is not None)
         self.pit_draft_button.state(["!disabled"] if can_draft else ["disabled"])
+        tire_snapshot = _mapping(snapshot.get("telemetry"))
+        status = tire_snapshot.get("tire_confirmation_status")
+        status_text = {"QUEUED": "待分析线程核对。",
+                       "REJECTED": "确认已过期或条件变化，请重新确认。"}
+        self.tire_age_var.set(status_text.get(status, "") + tire_age_notice(tire_snapshot))
+        can_confirm = (not all_disabled and view.lifecycle == "RUNNING"
+                       and status != "QUEUED"
+                       and callable(getattr(self.controller, "confirm_tire_service", None)))
+        try:
+            confirmation_command(tire_snapshot, "FULL_NEW_SET")
+        except ValueError:
+            can_confirm = False
+        for button in self.tire_confirmation_buttons:
+            button.state(["!disabled"] if can_confirm else ["disabled"])
         self.question_text.configure(state="disabled" if all_disabled else "normal")
         self._render_voice(_mapping(snapshot).get("voice"),
                            all_disabled=all_disabled or view.lifecycle != "RUNNING")
@@ -1329,6 +1362,13 @@ class DesktopWindow:
         if not self.question_text.get("1.0", "end-1c").strip():
             self.question_text.insert("1.0", "请复盘本次历史会话的有效证据、质量问题和分析边界。")
         self._submit("session")
+
+    def _confirm_tires(self, kind) -> None:
+        try:
+            self.controller.confirm_tire_service(kind)
+            self.request_var.set("轮胎确认已提交，等待下一帧核对；不是游戏换胎指令。")
+        except (TypeError, ValueError):
+            self.request_var.set("确认未接受：需连续观测进站，停在车位、服务结束后重试。")
 
     def _fill_pit_draft(self) -> None:
         try:

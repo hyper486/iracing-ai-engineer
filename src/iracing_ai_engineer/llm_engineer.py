@@ -24,6 +24,7 @@ from .live_queries import LOCAL_QUERY_INTERVAL_S, live_query_intent, render_live
 from .live_rejoin import rejoin_binding
 from .live_stint import stint_binding
 from .live_strategy import strategy_binding
+from .live_tire_age import tire_age_binding
 from .live_traffic import TRAFFIC_ANSWER_TTL_S, situation_binding
 from .llm_client import DeepSeekClient, LLMError
 from .llm_evidence import build_live_context, current_fuel_observation, load_session_context
@@ -85,7 +86,8 @@ def fallback_plan(context: Mapping, question: str) -> dict:
     facts = context["facts"]
     if topic == "strategy" and context.get("scope") == "live_snapshot":
         available = {item["id"] for item in facts}
-        observed = (("tire.observed_context", "tire.pace", "stint.observed")
+        observed = (("tire.driver_confirmed_age", "tire.observed_context",
+                     "tire.pace", "stint.observed")
                     if any(word in question.lower() for word in (
                         "轮胎", "本段", "配速", "tire", "tyre", "stint", "pace")) else ())
         if any(word in question.lower() for word in ("出站", "回场", "rejoin", "落在哪")):
@@ -162,7 +164,7 @@ def _binding(snapshot: Mapping) -> tuple:
         telemetry.get("lap_number"), monitor.get("binding_sha256"),
         situation_binding(snapshot), coaching_binding(snapshot),
         observation, strategy_binding(snapshot),
-        stint_binding(snapshot), rejoin_binding(snapshot),
+        (stint_binding(snapshot), tire_age_binding(snapshot)), rejoin_binding(snapshot),
         pit_observation_binding(snapshot),
     )
 
@@ -185,8 +187,9 @@ def _selected_binding(binding, fact_ids, intent=None):
     situation = _situation_answer(fact_ids, intent)
     driving = intent in ("driving", "pace") or any(
         key.startswith("driving.") or key == "tire.pace" for key in fact_ids)
-    stint = intent in ("stint", "tire") or any(key.startswith("stint.") or
-                                             key == "tire.observed_context" for key in fact_ids)
+    stint = intent in ("stint", "tire") or any(
+        key.startswith("stint.") or key in ("tire.observed_context", "tire.driver_confirmed_age")
+        for key in fact_ids)
     rejoin = intent == "rejoin" or any(key.startswith("rejoin.") for key in fact_ids)
     pit_observation = intent == "pit_observation" or any(
         key.startswith("pit_observation.") for key in fact_ids)

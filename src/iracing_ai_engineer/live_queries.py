@@ -95,6 +95,10 @@ def _situation_speech(facts, intent, fallback):
             return (f"{pit}{label} {float(observed[1]):.0f} 分钟，计圈增加 {observed[2]}；"
                     "不是胎龄。")
     if intent in ("tire", "pace"):
+        confirmed = re.search(r"计圈增加 ([0-9]+)", facts.get("tire.driver_confirmed_age", ""))
+        if intent == "tire" and confirmed:
+            return (f"按车手四胎换新确认，出站后计圈增加 {confirmed[1]}；"
+                    "不是磨损读数，是否值得换胎仍证据不足。")
         counter = re.search(r"计圈增加 ([0-9]+)", facts.get("tire.observed_context", ""))
         if intent == "tire" and counter:
             return f"计圈增加 {counter[1]}，胎组计数未变；不是胎龄，换胎证据不足。"
@@ -200,10 +204,12 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         "pit_permission": ("pit.permission", "pit.flags"),
         "driving": ("driving.location", "driving.loss", "driving.pattern", "driving.practice"),
         "stint": ("stint.observed",),
-        "tire": ("tire.observed_context", "tire.pace"),
+        "tire": ("tire.driver_confirmed_age", "tire.observed_context", "tire.pace"),
         "pace": ("tire.pace",),
     }
     chosen = [key for key in preferences[intent] if key in facts]
+    if intent == "tire" and "tire.driver_confirmed_age" in chosen:
+        chosen = [key for key in chosen if key != "tire.observed_context"]
     # A reserve alone is not an answer about range; it is a configuration value.
     if chosen == ["fuel.reserve"]:
         chosen = []

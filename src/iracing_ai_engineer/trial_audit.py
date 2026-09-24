@@ -17,11 +17,12 @@ from uuid import uuid4
 
 from .collector import JsonlHandleWriter, _canonical_json
 from .desktop_settings import SettingsStore
+from .live_tire_age import valid_confirmation_receipt
 from .live_worker import FrameWorker, payload_size
 from .runtime_clock import monotonic_now
 from .spotter import SPOTTER_FIELDS, SpotterConfig
 
-TRIAL_CONTRACT = "private-trial-audit-v1"
+TRIAL_CONTRACT = "private-trial-audit-v2"
 MAX_TRIAL_BYTES = 1024**3
 MAX_ENTRY_BYTES = 64 * 1024
 AUDIO_STATES = frozenset(("OFF", "PREPARING", "WAIT_DATA", "READY", "PLAYING", "PAUSED",
@@ -127,6 +128,11 @@ def validate_projection(lane, payload):
             numeric(*payload["event_id"])
         numeric(*(payload[key] for key in ("sequence", "revision", "now", "start_delay_ms",
                                           "enabled", "muted", "heard", "live_acceptance")))
+    elif lane == "tire_confirmation":
+        keys(payload, "generation assertion")
+        if (type(payload["generation"]) is not int or not 0 <= payload["generation"] <= 2**53
+                or not valid_confirmation_receipt(payload["assertion"])):
+            raise ValueError("TRIAL_PROJECTION_INVALID")
     elif lane == "capture":
         keys(payload, "status generation capture_id bytes sha256")
         choice(payload["status"], ("OPEN", "COMPLETE", "INCOMPLETE", "EMPTY"))
@@ -251,7 +257,7 @@ class TrialAudit:
 
     def offer(self, lane, payload):
         try:
-            if lane not in ("detector", "audio", "capture"):
+            if lane not in ("detector", "audio", "capture", "tire_confirmation"):
                 raise ValueError("TRIAL_LANE_INVALID")
             size = payload_size(payload, limit=MAX_ENTRY_BYTES)
             validate_projection(lane, payload)

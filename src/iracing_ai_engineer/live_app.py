@@ -49,6 +49,7 @@ from .live_strategy import (
     source_scope,
     strategy_binding,
 )
+from .live_tire_age import LiveTireAgeTracker, confirmation_command, unavailable_tire_age
 from .live_traffic import (
     bound_track_length_mm,
     project_live_traffic,
@@ -190,6 +191,7 @@ class AppState:
         self._strategy_failed = False
         self._rejoin_revision = 0
         self._pit_observation_revision = 0
+        self._tire_confirmation = None
         self._spotter = ProximitySpotter()
         self._spotter_failed = False
         self._trial = None
@@ -204,6 +206,8 @@ class AppState:
             "traffic": None,
             "driving": None,
             "stint": None,
+            "tire_age": None,
+            "tire_confirmation_status": "IDLE",
             "strategy": None,
             "motion": None,
             "rejoin": None,
@@ -231,6 +235,7 @@ class AppState:
         with self._lock:
             self._value.update(
                 connection=status, monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                tire_age=None, tire_confirmation_status="IDLE",
                 motion=None, rejoin=None, pit_observation=None,
                 speech=None,
                 session_type=None,
@@ -238,6 +243,7 @@ class AppState:
             self._updated = None
             self._observed_fuel_l = None
             self._generation += 1
+            self._tire_confirmation = None
             self._pit_observation_revision += 1
             self._clear_strategy()
             if status == "CONNECTED":
@@ -261,6 +267,39 @@ class AppState:
         """Immutable configuration snapshot; expensive projection stays off this lock."""
         with self._lock:
             return (self._strategy_parameters, self._strategy_scope, self._strategy_revision)
+
+    def confirm_tire_service(self, kind):
+        """One in-memory driver assertion; never a simulator/service command."""
+        workers, _ = self._worker_status()
+        with self._lock:
+            analysis = workers.get("analysis")
+            if (self._tire_confirmation is not None
+                    or self._value["tire_confirmation_status"] == "QUEUED"
+                    or (analysis is not None and (analysis["failed"]
+                        or analysis["generation"] != self._generation))):
+                raise ValueError("TIRE_CONFIRMATION_NOT_READY")
+            command = confirmation_command({
+                **self._value, "updated_age_s": (self.clock() - self._updated
+                                                 if self._updated is not None else None),
+            }, kind)
+            self._tire_confirmation = command
+            self._value["tire_confirmation_status"] = "QUEUED"
+
+    def take_tire_confirmation(self, generation):
+        with self._lock:
+            if generation != self._generation:
+                return None
+            command, self._tire_confirmation = self._tire_confirmation, None
+            return command
+
+    def complete_tire_confirmation(self, generation, receipt):
+        with self._lock:
+            if generation != self._generation:
+                return
+            self._value["tire_confirmation_status"] = "APPLIED" if receipt else "REJECTED"
+            trial = self._trial
+        if trial is not None and receipt is not None:
+            trial.offer("tire_confirmation", {"generation": generation, "assertion": receipt})
 
     def configure_strategy(self, parameters: StrategyParameters | None, *,
                            pit_draft_binding=None) -> None:
@@ -422,7 +461,9 @@ class AppState:
                 self._observed_fuel_l = None
                 self._situation_revision += 1
                 self._pit_observation_revision += 1
+                self._tire_confirmation = None
                 self._value.update(monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                                   tire_age=None, tire_confirmation_status="IDLE",
                                    motion=None, rejoin=None, pit_observation=None,
                                    speech=None)
                 self._clear_strategy()
@@ -458,7 +499,7 @@ class AppState:
     def publish(
         self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None,
         *, observed_at=None, generation=None, allowed=lambda: True, traffic=None, driving=None,
-        stint=None,
+        stint=None, tire_age=None,
         motion=None, rejoin=None, rejoin_configuration_revision=None, pit_observation=None,
     ) -> None:
         with self._lock:
@@ -527,6 +568,7 @@ class AppState:
                 traffic=copy.deepcopy(traffic),
                 driving=copy.deepcopy(driving),
                 stint=copy.deepcopy(stint),
+                tire_age=copy.deepcopy(tire_age),
                 motion=copy.deepcopy(motion),
                 rejoin=copy.deepcopy(rejoin),
                 pit_observation=copy.deepcopy(pit_observation),
@@ -561,6 +603,7 @@ class AppState:
             ):
                 # Defense in depth if a fault-notification callback could not run.
                 value.update(monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                             tire_age=None, tire_confirmation_status="IDLE",
                              motion=None, rejoin=None, pit_observation=None,
                              speech=None)
                 age = None
@@ -572,7 +615,8 @@ class AppState:
             value["pit_observation_revision"] = self._pit_observation_revision
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
                 value.update(connection="DISCONNECTED", fuel=None, monitor=None, traffic=None,
-                             driving=None, stint=None, strategy=None,
+                             driving=None, stint=None, strategy=None, tire_age=None,
+                             tire_confirmation_status="IDLE",
                              motion=None, rejoin=None, pit_observation=None,
                              speech=None)
                 if self._strategy_parameters is not None:
@@ -756,6 +800,10 @@ class _LiveAnalysis:
         except Exception:
             self._stint = None
         try:
+            self._tire_age = LiveTireAgeTracker(tick_rate)
+        except Exception:
+            self._tire_age = None
+        try:
             self._driving = LiveDrivingEngineer(tick_rate, clock=state.clock)
         except Exception:
             # A coaching-worker startup failure cannot disable fuel/traffic.
@@ -782,6 +830,21 @@ class _LiveAnalysis:
                 self._stint.feed(frame, self._monitor.latest_sample)
             except Exception:
                 self._stint.fail()
+        if progressed:
+            command = self._state.take_tire_confirmation(self._generation)
+            receipt = None
+            try:
+                if self._tire_age is not None:
+                    self._tire_age.feed(frame, self._monitor.latest_sample)
+                    if command is not None:
+                        receipt = self._tire_age.confirm(command)
+            except Exception:
+                if self._tire_age is not None:
+                    self._tire_age.fail()
+            if command is not None:
+                # Diagnostics cannot disable the independent analysis lanes.
+                with suppress(Exception):
+                    self._state.complete_tire_confirmation(self._generation, receipt)
         if progressed and self._driving is not None:
             try:
                 self._driving.feed(frame, self._monitor.latest_sample, track_length_mm)
@@ -798,6 +861,9 @@ class _LiveAnalysis:
             if (self._stint is not None
                     and snapshot.get("quality", {}).get("stale") is not False):
                 self._stint.reset("SOURCE_STALE")
+            if (self._tire_age is not None
+                    and snapshot.get("quality", {}).get("stale") is not False):
+                self._tire_age.reset("SOURCE_STALE")
             if (self._driving is not None
                     and snapshot.get("quality", {}).get("stale") is not False):
                 self._driving.reset("SOURCE_STALE")
@@ -825,6 +891,13 @@ class _LiveAnalysis:
                     rejoin = project_rejoin(rejoin_input)
                 except Exception:
                     self._rejoin_failed = True
+            try:
+                tire_age = (self._tire_age.snapshot(snapshot) if self._tire_age is not None
+                            else unavailable_tire_age(snapshot, "TIRE_PROCESSING_ERROR"))
+            except Exception:
+                if self._tire_age is not None:
+                    self._tire_age.fail()
+                tire_age = unavailable_tire_age(snapshot, "TIRE_PROCESSING_ERROR")
             try:
                 stint = (self._stint.snapshot(snapshot) if self._stint is not None
                          else unavailable_stint(snapshot, "STINT_PROCESSING_ERROR"))
@@ -855,7 +928,7 @@ class _LiveAnalysis:
                     self._traffic_failed = True
             self._state.publish(snapshot, fuel, intent, session_type, observed_at=observed,
                                 generation=self._generation, allowed=self._allowed, traffic=traffic,
-                                stint=stint,
+                                stint=stint, tire_age=tire_age,
                                 motion=motion, rejoin=rejoin,
                                 pit_observation=pit_observation,
                                 rejoin_configuration_revision=config_revision,
