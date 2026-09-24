@@ -12,6 +12,7 @@ from tkinter import filedialog, ttk
 from typing import Any
 
 from .live_driving import driving_notice, validated_driving
+from .live_pit_observation import pit_observation_draft, pit_observation_notice
 from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import stint_notice
 from .live_strategy import StrategyParameters, strategy_notice, validated_strategy
@@ -177,6 +178,7 @@ class DesktopView:
     strategy: str
     stint: str
     rejoin: str
+    pit_observation: str
 
 
 class DesktopPresenter:
@@ -491,6 +493,8 @@ class DesktopPresenter:
             spotter=spotter, traffic=traffic_text, driving=driving_text, strategy=strategy_text,
             stint=stint_notice(telemetry if fresh and _live_frame_ready(telemetry) else {}),
             rejoin=rejoin_text,
+            pit_observation=pit_observation_notice(
+                telemetry if fresh and _live_frame_ready(telemetry) else {}),
         )
 
 
@@ -504,6 +508,7 @@ class DesktopWindow:
     def __init__(self, root: tk.Tk, controller: Any) -> None:
         self.root, self.controller = root, controller
         self.presenter = DesktopPresenter()
+        self._pit_draft_binding = None
         self._closing = False
         self._destroyed = False
         self._after: str | None = None
@@ -741,7 +746,8 @@ class DesktopWindow:
         stint_buttons = ttk.Frame(parent)
         stint_buttons.pack(fill="x", pady=(0, 8))
         for label, question in (("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
-                                ("问配速", "配速变化"), ("问出站", "出站预测")):
+                                ("问配速", "配速变化"), ("问出站", "出站预测"),
+                                ("问耗时", "这次进站用了多久")):
             self._button(stint_buttons, label, lambda q=question: self._quick(q),
                          question=True).pack(side="left", padx=(0, 10))
         ttk.Label(parent, textvariable=self.request_var, wraplength=950,
@@ -788,6 +794,14 @@ class DesktopWindow:
             button = self._button(buttons, label, callback)
             button.pack(side="left", padx=(0, 8))
             self.strategy_buttons.append(button)
+        self.pit_draft_button = self._button(buttons, "从进站观测填写草稿", self._fill_pit_draft)
+        self.pit_draft_button.pack(side="left")
+        self._label(parent, "pit_observation", style="Muted.TLabel",
+                    wraplength=920).pack(anchor="w")
+        self.pit_draft_notice = tk.StringVar(
+            self.root, "草稿须停车且观测完整后填写；不会自动应用。")
+        ttk.Label(parent, textvariable=self.pit_draft_notice, style="Warn.TLabel",
+                  wraplength=920).pack(anchor="w", pady=4)
         ttk.Label(parent, text="右侧完整损失须包含所有停站服务，并相对留在赛道行驶计算；"
                   "须覆盖所比较的补油量，不能填左侧不含驻站的通道损失。\n"
                   "出站预测还需所有在赛道车辆两圈连续轨迹；赛事规则未核验，不设置游戏油量。",
@@ -1146,6 +1160,7 @@ class DesktopWindow:
             else "尚未确认已配置密钥；无密钥时使用本地解读。"
         )
         for key in ("connection", "spotter", "traffic", "driving", "strategy", "stint", "rejoin",
+                    "pit_observation",
                     "source", "context",
                     "advice", "learning", "recording",
                     "quality", "engineer_status", "engineer_error", "budget", "answer_header",
@@ -1176,6 +1191,10 @@ class DesktopWindow:
         if not callable(getattr(self.controller, "configure_strategy", None)):
             for button in self.strategy_buttons:
                 button.state(["disabled"])
+        can_draft = (not all_disabled and view.lifecycle == "RUNNING"
+                     and callable(getattr(self.controller, "pit_observation_draft", None))
+                     and pit_observation_draft(_mapping(snapshot.get("telemetry"))) is not None)
+        self.pit_draft_button.state(["!disabled"] if can_draft else ["disabled"])
         self.question_text.configure(state="disabled" if all_disabled else "normal")
         self._render_voice(_mapping(snapshot).get("voice"),
                            all_disabled=all_disabled or view.lifecycle != "RUNNING")
@@ -1229,6 +1248,19 @@ class DesktopWindow:
             self.question_text.insert("1.0", "请复盘本次历史会话的有效证据、质量问题和分析边界。")
         self._submit("session")
 
+    def _fill_pit_draft(self) -> None:
+        try:
+            draft = self.controller.pit_observation_draft()
+            if draft is None:
+                raise ValueError("PIT_DRAFT_UNAVAILABLE")
+            for key, value in draft["inputs"].items():
+                self.strategy_vars[key].set(str(value))
+            self._pit_draft_binding = draft["binding"]
+            self.pit_draft_notice.set("仅已填入草稿，尚未应用。SDK 边界不等于合流口，"
+                "估计不含边界外损失；请核对位置、补油/换胎/维修及下次条件后修改并确认。")
+        except Exception:
+            self.pit_draft_notice.set("观测草稿不可用：需停车、连续完整进出站及两圈历史基线。")
+
     def _configure_strategy(self, *, clear=False) -> None:
         if self._closing:
             return
@@ -1239,8 +1271,16 @@ class DesktopWindow:
             })
             if parameters is not None:
                 StrategyParameters(**parameters)
-            self.controller.configure_strategy(parameters)
+            if self._pit_draft_binding is not None and not clear:
+                self.controller.configure_strategy(
+                    parameters, pit_draft_binding=self._pit_draft_binding)
+            else:
+                self.controller.configure_strategy(parameters)
         except ValueError as exc:
+            if str(exc) == "PIT_DRAFT_EXPIRED":
+                self.pit_draft_notice.set("草稿已过期或车辆正在移动。请停车后重新取草稿；"
+                                          "也可清除参数后按本场条件重新填写。")
+                return
             self.action_var.set("请先进入本人车辆并等待新鲜遥测，再确认本次参数。"
                                 if str(exc) == "STRATEGY_SOURCE_NOT_READY" else
                                 "参数无效：容量 0.1–1000 升，速率 0.05–50 升/秒，"
@@ -1252,6 +1292,8 @@ class DesktopWindow:
             self.action_var.set("本次策略参数已清除。" if clear else
                                 "参数已应用于本次连接，可询问‘比较进站方案’或‘出站预测’；不会自动保存。")
             if clear:
+                self._pit_draft_binding = None
+                self.pit_draft_notice.set("草稿已清除；没有应用观测标定。")
                 for variable in self.strategy_vars.values():
                     variable.set("")
 

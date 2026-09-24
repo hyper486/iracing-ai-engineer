@@ -754,6 +754,55 @@ def _native_strategy_configuration(native_window):
     assert not controller.questions and not controller.voice_calls
 
 
+def _native_pit_observation_draft(native_window):
+    from iracing_ai_engineer.live_app import AppState, _LiveAnalysis
+    from iracing_ai_engineer.live_fuel import LiveFuelConfig
+    from iracing_ai_engineer.live_pit_observation import pit_observation_draft
+    from iracing_ai_engineer.live_strategy import StrategyParameters
+    from iracing_ai_engineer.synthetic_runtime import synthetic_pit_visit_frames
+
+    _, controller, window = native_window
+    now = [1.]
+    state = AppState(clock=lambda: now[0])
+    analysis = _LiveAnalysis(state, LiveFuelConfig(), identifier="synthetic-native-pit",
+        tick_rate=20, car_count=3, generation=state.generation, allowed=lambda: True)
+    try:
+        for frame in synthetic_pit_visit_frames():
+            now[0] = frame.captured_monotonic_s
+            analysis.process((frame, "Race", now[0], 1_200_000))
+        controller.value["telemetry"] = state.snapshot()
+        controller.pit_observation_draft = lambda: pit_observation_draft(state.snapshot())
+        controller.configure_strategy = lambda inputs, **kwargs: state.configure_strategy(
+            StrategyParameters(**inputs) if inputs is not None else None, **kwargs)
+        window._poll()
+        assert not window.pit_draft_button.instate(["disabled"])
+        assert "已记录一次进站" in window._vars["pit_observation"].get()
+        window.strategy_vars["tank_capacity_l"].set("100")
+        window.strategy_vars["pit_loss_low_s"].set("5")
+        window.strategy_vars["pit_loss_high_s"].set("6")
+        window.pit_draft_button.invoke()
+        assert state.strategy_inputs()[0] is None
+        assert window.strategy_vars["tank_capacity_l"].get() == "100"
+        assert window.strategy_vars["pit_loss_low_s"].get() == "5"
+        assert "尚未应用" in window.pit_draft_notice.get()
+        assert window.strategy_vars["complete_pit_loss_low_s"].get() == "13.7"
+        window._configure_strategy()
+        assert state.strategy_inputs()[0].complete_pit_loss_high_s == 14.3
+        state.invalidate_analysis(state.generation)
+        controller.value["telemetry"] = state.snapshot()
+        window._poll()
+        assert window.pit_draft_button.instate(["disabled"])
+        window._configure_strategy()
+        assert "新鲜遥测" in window.action_var.get()
+        window._configure_strategy(clear=True)
+        assert window._pit_draft_binding is None
+        assert all(not variable.get() for variable in window.strategy_vars.values())
+        assert not controller.questions and not controller.voice_calls
+    finally:
+        analysis.close()
+        state.connection("STOPPED")
+
+
 _NATIVE_SCENARIOS = {
     "settings": _native_settings, "question": _native_question,
     "close": _native_close, "validation": _native_validation,
@@ -765,6 +814,7 @@ _NATIVE_SCENARIOS = {
     "voice_initialization": _native_voice_delayed_initial_settings,
     "trial_replay": _native_trial_replay,
     "strategy_configuration": _native_strategy_configuration,
+    "pit_observation_draft": _native_pit_observation_draft,
 }
 
 

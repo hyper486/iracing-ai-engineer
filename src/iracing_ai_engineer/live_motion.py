@@ -67,7 +67,8 @@ def _progress(laps, fraction):
     )
 
 
-def _actor(index, progress, crossings, profiles, now):
+def profile_bounds(crossings, profiles, now):
+    """Validate two completed observed profiles, independent of the current phase."""
     if len(crossings) != 3 or len(profiles) != 2:
         return None
     if any(
@@ -101,6 +102,14 @@ def _actor(index, progress, crossings, profiles, now):
             or not durations[index_in_history][0] <= times[-1] <= durations[index_in_history][1]
         ):
             return None
+    return low, high
+
+
+def _actor(index, progress, crossings, profiles, now):
+    bounds = profile_bounds(crossings, profiles, now)
+    if bounds is None:
+        return None
+    _low, high = bounds
     observed_phase = now - sum(crossings[-1]) / 2
     predicted_phases = [phase_time(profile, progress % 1) for profile in profiles]
     tolerance = max(1_000_000, high * .01)
@@ -117,7 +126,7 @@ def _actor(index, progress, crossings, profiles, now):
             }
             for profile in profiles
         ],
-        "rate_range_laps_per_s": [round(1e6 / high, 9), round(1e6 / low, 9)],
+        "rate_range_laps_per_s": [round(1e6 / high, 9), round(1e6 / bounds[0], 9)],
     }
 
 

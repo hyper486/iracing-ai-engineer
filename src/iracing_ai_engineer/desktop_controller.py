@@ -11,6 +11,7 @@ from pathlib import Path
 from .desktop_settings import DesktopSettings, SettingsStore
 from .live_app import AppState, run_reader
 from .live_fuel import LiveFuelConfig
+from .live_pit_observation import pit_observation_draft
 from .live_queries import live_query_intent
 from .live_strategy import StrategyParameters
 from .llm_client import DeepSeekClient, LLMError
@@ -382,7 +383,14 @@ class DesktopController:
 
         self._schedule(replay)
 
-    def configure_strategy(self, parameters: dict | None) -> None:
+    def pit_observation_draft(self) -> dict | None:
+        """Fresh read only; no settings, SDK or strategy mutation."""
+        with self._lock:
+            if self._closing or self._configuring or self._lifecycle != "RUNNING":
+                return None
+            return pit_observation_draft(self._state.snapshot())
+
+    def configure_strategy(self, parameters: dict | None, *, pit_draft_binding=None) -> None:
         """Bounded in-memory assumptions; does not restart SDK or save settings."""
         if parameters is not None and type(parameters) is not dict:
             raise ValueError("STRATEGY_PARAMETERS_INVALID")
@@ -393,7 +401,7 @@ class DesktopController:
         with self._lock:
             if self._closing or self._configuring or self._lifecycle != "RUNNING":
                 raise ValueError("STRATEGY_SOURCE_NOT_READY")
-            self._state.configure_strategy(parsed)
+            self._state.configure_strategy(parsed, pit_draft_binding=pit_draft_binding)
 
     def set_recording(self, enabled: bool) -> None:
         if type(enabled) is not bool:

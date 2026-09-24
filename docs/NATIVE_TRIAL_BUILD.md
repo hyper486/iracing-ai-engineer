@@ -6,16 +6,30 @@ installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
 The rebuilt trial includes the offline reviewed tire-origin v2 correction and
-conditional mapped-rejoin lane. All 16 frozen numerical/Tk/memory-only speech
-checks passed. Native live tire questions remain bounded observations, not
-physical tire age or model-selected tire service. Use current
-source for offline finalization/verification; do not use an older packaged CLI
+conditional mapped-rejoin lane, plus historical pit-visit observations and the
+reviewed settings draft. Native live tire questions remain bounded observations,
+not physical tire age or model-selected tire service. Use current source for
+offline finalization/verification; do not use an older packaged CLI
 to regenerate tire-strategy evidence. See [the v2 contract](TIRE_PERFORMANCE_BELIEF.md).
 
-The four new session-only input fields and **问出站** shortcut were also checked
-visually in the frozen synthetic UI mode, including unavailable and expired
+The mapped-rejoin milestone's four session-only input fields and **问出站**
+shortcut were checked visually in the frozen synthetic UI mode, including unavailable and expired
 responses. The QA window was closed afterwards. No game, saved credentials,
 microphone or speaker was opened; installed copies and shortcuts were untouched.
+
+**问耗时 / 这次进站用了多久** reports a historical SDK-boundary elapsed interval.
+The optional **从进站观测填写草稿** button does not apply or persist parameters;
+review geometry, outside-boundary losses and next service conditions before
+explicit confirmation. See [the pit observation workflow](LIVE_PIT_OBSERVATION.md).
+
+The current rebuild passed all **17 frozen checks** (nine numerical, five
+native/runtime and three memory-only voice checks). The build receipt remains
+unsigned; the test receipt is `SYNTHETIC`, and both have `live_acceptance=false`.
+Saved credentials, installed copies and device preferences are not replaced
+by this build.
+Visible synthetic QA also checked the new draft control, unavailable response
+and expired-answer withdrawal, then closed the window normally. Positive draft
+population/confirmation is exercised separately by the isolated native test.
 
 ## What the integrated self-test actually exercises
 
@@ -31,6 +45,12 @@ guards; those guards are not six valid real driving laps or a live tire model.
 The added mapped-rejoin check uses invented entry/exit/full-loss assumptions,
 consistent per-car lap counters and the actual phase tracker/local answer path.
 It does not promote those assumptions to a real pit calibration.
+
+A ninth numerical check separately exercises an invented 1,921-frame pit visit,
+including finish-line wrap, through the real analysis owner and local question.
+It requires separate historical elapsed/net-loss evidence, a stopped-only draft,
+explicit confirmation and withdrawal after invalidation. It does not certify
+service contents, geometry or future pit costs.
 
 The existing checks additionally exercise hidden native Tk controls, local
 answer-worker shutdown, the window-close protocol, exact speech-model hashes
@@ -107,6 +127,9 @@ otherwise have been truncated; old packets cannot invalidate a newer answer.
    loss. All on-track cars need two completed observed phase profiles; unknown,
    distant or ambiguous scenarios remain unavailable. The forecast is conditional
    on historical pace, not a promise of a clear exit. See [setup and limits](LIVE_MAPPED_REJOIN.md).
+   After a normally completed pit visit, ask **这次进站用了多久**. A later stopped
+   review may use the observation draft; do not treat road elapsed time as net
+   loss, SDK boundaries as surveyed merges, or a prior service as the next cost.
 7. If something stays silent, preserve the ended private `trial-*.jsonl` and
    optional raw capture. Native **回放近车诊断日志…** separates no detector event,
    suppression and recorded playback outcomes without calling a model or

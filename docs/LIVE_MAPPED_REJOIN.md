@@ -23,6 +23,12 @@ verified event rules. No values are guessed. Settings are memory-only, bound to
 this source/player/session, and must be reconfirmed after its existing reset
 boundaries. Applying them neither restarts capture nor modifies game settings.
 
+An optional [historical pit-visit draft](LIVE_PIT_OBSERVATION.md) can prefill
+these four fields while stopped, after a complete observed service visit and
+two preceding profiles. It is not automatic calibration: review SDK boundaries,
+missing outside-boundary loss and future service comparability, edit as needed,
+then explicitly confirm. Filling alone never changes active strategy inputs.
+
 Ask **出站预测**, **进站后会落在哪**, **预测出站交通**, or use **问出站**. Exact
 routine questions stay local and make zero provider requests. The full answer
 shows each mapped entry distance, next-fill budget, subsequent fuel-stop count,

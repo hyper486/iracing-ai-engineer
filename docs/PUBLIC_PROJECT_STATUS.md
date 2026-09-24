@@ -38,13 +38,47 @@ required running dependency. The final goal remains active and unaccepted.
 | Private proximity / audio replay | Packaged local trial; synthetic checks | Bounded local journal, exact detector recomputation, software-playback correlation and optional capture byte links; not audio reproduction, source authentication or human hearing. |
 | Conditional live fuel-stop comparison | Packaged local trial; synthetic checks | Session-scoped hand-entered assumptions, shared complete-lap stop arithmetic, next-fill/stint budgets and local PTT; not mapped pit-entry timing, optimal strategy or future rejoin. |
 | Conditional mapped rejoin | Packaged local trial; synthetic checks | User-confirmed entry/exit/full net-loss assumptions, two completed per-car phase profiles, reachable fuel-window endpoints, physical neighbor ranges and local PTT; not measured calibration, optimal timing or live acceptance. |
+| Historical pit-visit observation | Native local question and reviewed draft | SDK-edge elapsed interval, preceding phase-profile net-loss estimate and tank net change; optional stopped-only, revision-bound form draft, never automatically applied or promoted to calibrated future service cost. |
 | Observed stint / tire-counter interval / raw pace | Packaged local trial; synthetic checks | Separate stint and tire observations, six consecutive clean-lap median comparison and local questions; not physical tire age, fuel-corrected degradation or a tire-change decision. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Conditional native mapped rejoin
+## Native historical pit observation and reviewed setup draft
+
+**问耗时 / 这次进站用了多久** now uses local fixed facts from a complete observed
+pit-road entry/exit. Timing survives unavailable fuel/opponent models; missing
+baseline or service signals cannot invent full loss or service contents. A
+two-profile historical counterfactual is separate from observed road time;
+negative estimates stay negative. SDK boundaries are not surveyed merge points,
+and outside-boundary braking/acceleration loss is not included.
+
+The native settings page can fill four rejoin fields from an eligible visit
+only while stopped. Filling does not apply/persist assumptions or touch other
+fields. User review and explicit confirmation remain required, with a fresh
+revision/source check at application. The result remains `USER_RULE`, not
+calibrated future pit cost. The local answer has a ten-second TTL and latched
+withdrawal, independent of fuel-model readiness. See
+[the contract and workflow](LIVE_PIT_OBSERVATION.md).
+
+The new slice has 59 synthetic observation/query/controller/PTT cases and one
+isolated native draft scenario. A separate 1,995-call malformed-snapshot sweep
+finished without uncaught exceptions after hardening the draft's source guard.
+The rebuilt unsigned local EXE passed all **17 frozen checks**, including the
+invented visit through the real owner/local-query/draft path. Visible synthetic
+QA confirmed the settings/shortcut layout, disabled unavailable draft, explicit
+no-data response and expired-answer withdrawal; the window was closed normally.
+No game, physical microphone/speaker, saved credentials or existing installation
+was opened or changed for this test. Real pit geometry/service calibration and
+in-car headset/VR acceptance remain open.
+
+Full regression passed **3,010 tests, with 44 skips**, in **561.25 seconds**.
+The skips retain their data/platform/private-deployment and explicit opt-in
+boundaries. Ruff, public-safety including history and exact staged-diff checks
+also passed. These gates are not real SDK/driver/headset acceptance.
+
+## Previous milestone: conditional native mapped rejoin
 
 The native window now has optional session-scoped pit-entry/exit and complete
 net-loss inputs plus **问出站 / 出站预测**. Current fuel-window endpoints map to
@@ -75,7 +109,7 @@ credentials and device preferences were not replaced. Full regression passed
 data/platform/private-deployment and explicit opt-in boundaries. No real race,
 microphone, headphone, calibrated service or VR acceptance is implied.
 
-The current **500-lap / 892,192-frame** virtual 60 Hz run passed all eight
+That milestone's **500-lap / 892,192-frame** virtual 60 Hz run passed all eight
 numerical checks in **208.094 wall seconds** for **14,869.85 virtual seconds**.
 It reached 8,400 ready mapped-rejoin publications and the local question path.
 Peak motion storage for the two active synthetic cars was 363 profile points;

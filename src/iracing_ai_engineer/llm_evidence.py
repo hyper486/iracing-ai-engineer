@@ -17,6 +17,7 @@ from typing import Any
 
 from .engineer_session import validate_engineer_session
 from .live_driving import driving_notice, validated_driving, validated_pace
+from .live_pit_observation import pit_observation_notice, validated_pit_observation
 from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import validated_stint
 from .live_strategy import strategy_notice, validated_strategy
@@ -331,6 +332,38 @@ def _live_rejoin_facts(result, snapshot):
                 + short_gap("前", ahead) + "，" + short_gap("后", behind) + "。非指令。"))
 
 
+def _live_pit_observation_facts(result, snapshot):
+    value = validated_pit_observation(snapshot) if _live_frame_ready(snapshot) else None
+    if value is None or value["status"] != "OBSERVED":
+        result["notices"].append(_entry("PIT_OBSERVATION_UNAVAILABLE",
+            pit_observation_notice(snapshot if value is not None else {})))
+        return
+    observation = value["observation"]
+    def interval(values):
+        # Expand decimal presentation; never narrow edge/sampling uncertainty.
+        return f"{math.floor(values[0] * 10) / 10:.1f} 到 {math.ceil(values[1] * 10) / 10:.1f}"
+    elapsed = interval(observation["pit_road_elapsed_range_s"])
+    facts = result["facts"]
+    facts.append(_entry("pit_observation.brief", f"本次站内耗时 {elapsed} 秒，不是未来进站损失。"))
+    facts.append(_entry("pit_observation.elapsed",
+        f"SDK 进出站边界之间历时 {elapsed} 秒，包含站内停留；不是完整进站损失标定。"))
+    loss = observation["net_loss_estimate_range_s"]
+    if loss is not None:
+        facts.append(_entry("pit_observation.baseline",
+            f"减去此前两圈同路段的历史用时后，净损失估计为 {interval(loss)} 秒。"
+            "历史圈不保证与本次油重、轮胎、天气或交通匹配。"))
+    fuel = observation["observed_net_tank_change_l"]
+    if fuel is not None:
+        facts.append(_entry("pit_observation.fuel_change",
+            f"入站后至出站采样的油箱净变化 {fuel:+.2f} 升；不是加油机实际交付量。"))
+    facts.append(_entry("pit_observation.limits",
+        "仅当前连续观测段内最近一次完整进站；SDK 边界不保证是真实合流口。"
+        "不含边界外减速与加速损失，不推断换胎、维修或下一次服务耗时。"))
+    result["notices"].append(_entry("PIT_OBSERVATION_NOT_CALIBRATION",
+        "进站观测仅覆盖历史 SDK 进出站边界；不含边界外损失，"
+        "未匹配下次油重、轮胎、服务或交通，不是未来完整进站损失标定。"))
+
+
 def _live_stint_facts(result, snapshot):
     if not _live_frame_ready(snapshot):
         return
@@ -382,6 +415,7 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     _live_driving_facts(result, snapshot)
     _live_strategy_facts(result, snapshot)
     _live_rejoin_facts(result, snapshot)
+    _live_pit_observation_facts(result, snapshot)
     _live_stint_facts(result, snapshot)
     monitor = _mapping(snapshot.get("monitor"))
     fuel = _mapping(snapshot.get("fuel"))

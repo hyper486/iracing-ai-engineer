@@ -12,12 +12,14 @@ import math
 import os
 import time
 from collections import Counter
+from dataclasses import replace
 
 import numpy as np
 
 from .live_app import AppState, _LiveAnalysis
 from .live_driving import MAX_JOB_BYTES, MAX_LAPS, MAX_ROWS, validated_driving, validated_pace
 from .live_fuel import LiveFuelConfig
+from .live_pit_observation import pit_observation_draft, validated_pit_observation
 from .live_rejoin import validated_rejoin
 from .live_stint import validated_stint
 from .live_strategy import StrategyParameters, validated_strategy
@@ -116,6 +118,70 @@ def process_private_bytes():
             kernel.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
         raise RuntimeError("SYNTHETIC_MEMORY_UNAVAILABLE")
     return int(counters.PrivateUsage)
+
+
+def synthetic_pit_visit_frames():
+    """Uniform invented warmup and one stopped-service visit, including wrap."""
+    base = next(synthetic_frames(8, rate=20))
+    for tick in range(1921):
+        i = tick - 1519
+        pit = 0 < i <= 400
+        position = (tick / 400 if i <= 0 else
+                    3.7975 + .0015 * (min(i, 100) + max(i - 300, 0)) if pit else 4.1)
+        values = {**base.values, "SessionTick": tick, "SessionTime": tick / 20,
+                  "Lap": math.floor(position) + 1, "LapCompleted": math.floor(position),
+                  "LapDistPct": position % 1, "OnPitRoad": pit,
+                  "PitstopActive": pit and 100 <= i <= 300,
+                  "PlayerCarInPitStall": pit and 100 <= i <= 300,
+                  "FuelLevel": 50. if i == 401 else 30.,
+                  "Speed": 0. if i == 401 or pit and 100 <= i <= 300 else 30.}
+        yield replace(base, buffer_tick=tick, values=values, captured_monotonic_s=1 + tick / 20)
+
+
+def run_synthetic_pit_observation():
+    """Real owner, local query and reviewed-draft guard; output aggregates only."""
+    now = [1.]
+    state = AppState(clock=lambda: now[0])
+    state.connection("CONNECTED")
+    state.start_spotter(20)
+    analysis = _LiveAnalysis(state, LiveFuelConfig(), identifier="synthetic-pit-visit-only",
+        tick_rate=20, car_count=3, generation=state.generation, allowed=lambda: True)
+    service = EngineerService(state.snapshot, clock=lambda: now[0], environ={})
+    passed = False
+    try:
+        for frame in synthetic_pit_visit_frames():
+            now[0] = frame.captured_monotonic_s
+            state.feed_spotter(frame)
+            analysis.process((frame, "Race", now[0], 1_200_000))
+            if analysis._driving is not None and not analysis._driving._worker.wait_idle(10):
+                raise RuntimeError("SYNTHETIC_COACHING_TIMEOUT")
+        value = state.snapshot()
+        observed = validated_pit_observation(value)
+        draft = pit_observation_draft(value)
+        if (observed is None or observed["status"] != "OBSERVED" or draft is None
+                or observed["observation"]["pit_road_elapsed_range_s"] != [19.95, 20.05]
+                or state.strategy_inputs()[0] is not None
+                or service.submit("这次进站用了多久")[0] != 202):
+            raise RuntimeError("SYNTHETIC_PIT_OBSERVATION")
+        answer = service.snapshot()["answer"]
+        if (answer["stale"] or "pit_observation.elapsed" not in answer["fact_ids"]
+                or service.snapshot()["requests_used"] != 0):
+            raise RuntimeError("SYNTHETIC_PIT_QUERY")
+        parameters = StrategyParameters(tank_capacity_l=100., **draft["inputs"])
+        state.configure_strategy(parameters, pit_draft_binding=draft["binding"])
+        if state.strategy_inputs()[0] != parameters:
+            raise RuntimeError("SYNTHETIC_PIT_DRAFT")
+        state.invalidate_analysis(state.generation)
+        if not service.snapshot()["answer"]["stale"]:
+            raise RuntimeError("SYNTHETIC_PIT_WITHDRAWAL")
+        passed = True
+    except Exception:
+        pass
+    finally:
+        service.close(wait=True)
+        analysis.close()
+        state.connection("STOPPED")
+    return {"id": "SYNTHETIC_PIT_OBSERVATION_DRAFT", "status": "PASS" if passed else "FAIL"}
 
 
 def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):

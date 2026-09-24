@@ -165,12 +165,21 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   blocking independent proximity. Synthetic source/model/PTT/native checks do
   not establish measured pit calibration or race acceptance. See
   [the mapped-rejoin contract](LIVE_MAPPED_REJOIN.md).
-  The rebuilt unsigned local EXE passed 16 frozen checks; the new 500-lap
+  That mapped-rejoin build passed 16 frozen checks; its 500-lap
   virtual run reached the mapped question path with bounded motion storage.
   This build also contains the offline tire-origin correction, without admitting
   physical tire/service advice to the native live lane. Installed copies and
   shortcuts were not replaced.
-- Next: obtain reviewed matched tire/service evidence and connect calibrated
+- Implemented: the native historical pit-visit lane observes SDK entry/exit
+  brackets, elapsed time and a two-profile historical net-loss estimate.
+  Local **问耗时** and a stopped-only,
+  revision-bound setup draft reduce manual transcription, without promoting
+  one visit to a calibrated future cost. See
+  [the observation contract](LIVE_PIT_OBSERVATION.md).
+  The new unsigned local EXE passed all 17 frozen checks, including the real
+  owner/local-question/draft path using invented data. This is not actual pit
+  calibration, real-device hearing or VR acceptance.
+- Still open: obtain reviewed matched tire/service evidence and connect calibrated
   performance/service costs to endurance strategy. Check selected microphone
   and headphones, wheel/PTT, actual proximity latency and VR performance in a
   user-driven session. A local TTS duration is not output or end-to-end latency;
