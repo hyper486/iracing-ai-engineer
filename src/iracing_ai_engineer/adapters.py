@@ -3094,9 +3094,9 @@ class _CollectorValidator:
             session_epoch_count=self.current_session_epoch + 1,
             first_buffer_tick=self.first_buffer_tick,
             last_buffer_tick=self.last_buffer_tick,
-            tick_rate_hz_values=tuple(
-                self.schemas[index].tick_rate_hz for index in sorted(self.schemas)
-            ),
+            tick_rate_hz_values=tuple(sorted({
+                schema.tick_rate_hz for schema in self.schemas.values()
+            })),
             first_capture_monotonic_us=self.first_capture_monotonic_us,
             last_capture_monotonic_us=self.last_capture_monotonic_us,
             capture_span_us=capture_span_us,

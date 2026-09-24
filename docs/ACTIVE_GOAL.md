@@ -58,6 +58,10 @@ this is descriptive evidence, not causal coaching or offline gate promotion.
 Stage E now has a bounded private proximity/capture/audio journal and silent
 native replay in source. It reproduces detector decisions and correlates
 recorded software playback; it does not certify hearing or live source origin.
+The separate native capture-replay tab now recomputes sealed raw captures using
+the real fuel/corner/stint/pit owners, with historical-only bounded cards and no
+live-question/voice promotion. It cancels when the simulator connects and never
+borrows current strategy assumptions. See [the workflow](NATIVE_CAPTURE_REPLAY.md).
 Stage B hardware acceptance, D's real-lap acceptance, E's actual in-car trial
 and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.

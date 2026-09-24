@@ -534,7 +534,9 @@ def _native_validation(native_window) -> None:
 
 def _native_voice_defaults_and_configuration(native_window) -> None:
     _, controller, window = native_window
-    assert [window.notebook.tab(tab, "text") for tab in window.notebook.tabs()][-1] == "语音与 VR"
+    assert [window.notebook.tab(tab, "text") for tab in window.notebook.tabs()][-2:] == [
+        "语音与 VR", "采集复盘",
+    ]
     assert not window.voice_enabled_var.get() and not window.voice_auto_fuel_var.get()
     assert window._vars["voice_status"].get() == "按住说话已关闭"
     assert window.voice_key_var.get() == "F9" and window.voice_volume_var.get() == 0.7
@@ -803,6 +805,27 @@ def _native_pit_observation_draft(native_window):
         state.connection("STOPPED")
 
 
+def _native_capture_replay(native_window):
+    from unittest.mock import patch
+
+    _, controller, window = native_window
+    calls = []
+    controller.replay_capture = calls.append
+    controller.cancel_capture_replay = lambda: calls.append("cancel")
+    with patch("iracing_ai_engineer.desktop_window.filedialog.askopenfilename",
+               return_value="C:/Users/racer/capture-synthetic.jsonl"):
+        window._load_capture()
+    window._cancel_capture()
+    assert calls == [Path("C:/Users/racer/capture-synthetic.jsonl"), "cancel"]
+    controller.value["capture_report"] = {"status": "RUNNING"}
+    window._poll()
+    assert "后台校验并重算" in window.capture_text.get("1.0", "end")
+    controller.value["capture_report"] = {"status": "REJECTED", "reason": "CANCELLED"}
+    window._poll()
+    assert "没有接受部分结果" in window.capture_text.get("1.0", "end")
+    assert not controller.questions and not controller.voice_calls
+
+
 _NATIVE_SCENARIOS = {
     "settings": _native_settings, "question": _native_question,
     "close": _native_close, "validation": _native_validation,
@@ -815,6 +838,7 @@ _NATIVE_SCENARIOS = {
     "trial_replay": _native_trial_replay,
     "strategy_configuration": _native_strategy_configuration,
     "pit_observation_draft": _native_pit_observation_draft,
+    "capture_replay": _native_capture_replay,
 }
 
 

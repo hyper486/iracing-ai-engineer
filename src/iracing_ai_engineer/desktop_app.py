@@ -92,7 +92,11 @@ def run_self_test() -> dict:
     import tkinter as tk
 
     from .desktop_window import DesktopWindow
-    from .synthetic_runtime import run_synthetic_pit_observation, run_synthetic_runtime
+    from .synthetic_runtime import (
+        run_synthetic_capture_replay,
+        run_synthetic_pit_observation,
+        run_synthetic_runtime,
+    )
 
     checks = []
     callback_errors = []
@@ -105,6 +109,9 @@ def run_self_test() -> dict:
         checks.append(run_synthetic_pit_observation())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_PIT_OBSERVATION_FAILED")
+        checks.append(run_synthetic_capture_replay())
+        if checks[-1]["status"] != "PASS":
+            raise ValueError("SYNTHETIC_CAPTURE_REPLAY_FAILED")
         import irsdk
 
         if not hasattr(irsdk, "IRSDK"):

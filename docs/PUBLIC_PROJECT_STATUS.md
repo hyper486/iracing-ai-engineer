@@ -36,6 +36,7 @@ required running dependency. The final goal remains active and unaccepted.
 | Current physical traffic / pit-state questions | Packaged local trial; synthetic checks | Bound ahead/behind distance, player permission and flag facts in native display/PTT; independent of fuel readiness, not time gaps or optimal pit/rejoin advice. |
 | Incremental recent-lap coaching | Packaged local trial; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
 | Private proximity / audio replay | Packaged local trial; synthetic checks | Bounded local journal, exact detector recomputation, software-playback correlation and optional capture byte links; not audio reproduction, source authentication or human hearing. |
+| Native raw capture recomputation | Packaged historical-only local trial; synthetic checks | Separate native tab reuses fuel/corner/stint/pit owners on sealed private captures, with bounded cards and cancellation. No current-state, provider, voice or live-acceptance promotion. |
 | Conditional live fuel-stop comparison | Packaged local trial; synthetic checks | Session-scoped hand-entered assumptions, shared complete-lap stop arithmetic, next-fill/stint budgets and local PTT; not mapped pit-entry timing, optimal strategy or future rejoin. |
 | Conditional mapped rejoin | Packaged local trial; synthetic checks | User-confirmed entry/exit/full net-loss assumptions, two completed per-car phase profiles, reachable fuel-window endpoints, physical neighbor ranges and local PTT; not measured calibration, optimal timing or live acceptance. |
 | Historical pit-visit observation | Native local question and reviewed draft | SDK-edge elapsed interval, preceding phase-profile net-loss estimate and tank net change; optional stopped-only, revision-bound form draft, never automatically applied or promoted to calibrated future service cost. |
@@ -44,6 +45,26 @@ required running dependency. The final goal remains active and unaccepted.
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Native sealed capture recomputation
+
+The **采集复盘** tab directly accepts completed private raw captures, so one
+recorded session can support repeated local numerical diagnosis. It reuses the
+existing collector validator and native analytical owners, preserving quality
+boundaries and missing evidence. Results are historical-only, bounded to 128
+recent cards and four latest category cards, never attached to current questions
+or audio. Offline-only execution cancels when a simulator connection appears.
+User-entered strategy assumptions are not recorded in these clips and are not
+silently borrowed from current settings. See [the workflow](NATIVE_CAPTURE_REPLAY.md).
+
+Source tests exercise invented sealed clips, including a 403-field file from
+the actual app recorder, not authentic live acceptance. A discovered validator
+bug is corrected: the tick-rate set is now sorted/unique even when schema epochs
+repeat or reduce the rate. Schema changes still preserve their quality boundary.
+The rebuilt unsigned EXE passed all **18 frozen checks**, adding a temporary
+invented sealed capture through the real historical owner. Existing installed
+copies and device/API settings remain untouched.
+The final endurance goal and real microphone/output/VR trial remain open.
 
 ## Native historical pit observation and reviewed setup draft
 

@@ -243,6 +243,57 @@ def test_replay_runs_as_background_job_and_exposes_no_path_or_provider_call(
     assert "private file" not in str(controller.snapshot())
 
 
+@pytest.mark.parametrize("stop_kind", ["cancel", "connect", "close"])
+def test_capture_replay_is_separate_cancellable_and_never_replaces_live_state(
+    tmp_path, created, monkeypatch, stop_kind,
+):
+    from iracing_ai_engineer import capture_replay
+
+    entered, proceed = threading.Event(), threading.Event()
+
+    def delayed(path, *, cancelled):
+        entered.set()
+        assert proceed.wait(3)
+        assert cancelled()
+        raise capture_replay.CaptureReplayError("CANCELLED")
+
+    monkeypatch.setattr(capture_replay, "replay_capture", delayed)
+    controller = created(store=Store(tmp_path), reader=Reader())
+    controller.start()
+    assert controller._reader_function.entered.wait(1)
+    service, state = controller._service, controller._state
+    assert controller.capture_directory == tmp_path / "captures"
+    controller.replay_capture(tmp_path / "PRIVATE CAPTURE.jsonl")
+    assert entered.wait(1)
+    try:
+        assert controller.snapshot()["capture_report"]["status"] == "RUNNING"
+        assert controller.snapshot()["engineer"]["requests_used"] == 0
+        if stop_kind == "cancel":
+            controller.cancel_capture_replay()
+            with pytest.raises(ValueError, match="DESKTOP_BUSY"):
+                controller.replay_capture(tmp_path / "another.jsonl")
+            assert controller._capture_replay_cancel.is_set()
+        elif stop_kind == "connect":
+            state.connection("CONNECTED")
+        else:
+            controller.close()
+    finally:
+        proceed.set()
+    wait_for(lambda: not controller._configuring)
+    assert controller._service is service and controller._state is state
+    assert controller._session_path is None
+    assert controller.snapshot()["capture_report"]["reason"] == "CANCELLED"
+    assert "PRIVATE CAPTURE" not in str(controller.snapshot())
+
+
+def test_capture_replay_refuses_connected_sdk_before_work(tmp_path, created):
+    controller = created(store=Store(tmp_path), reader=Reader())
+    controller._state.connection("CONNECTED")
+    with pytest.raises(ValueError, match="REQUIRES_OFFLINE"):
+        controller.replay_capture(tmp_path / "missing.jsonl")
+    assert controller._job is None and controller._capture_report is None
+
+
 @pytest.fixture
 def created():
     controllers = []

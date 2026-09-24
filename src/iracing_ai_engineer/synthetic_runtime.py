@@ -1,8 +1,9 @@
 """Explicit, hardware-free exercise of the installed live numerical pipeline.
 
-All frames are invented in memory. Internal SDK-shaped tags exercise production
+All frames are invented. Internal SDK-shaped tags exercise production
 guards, not source authenticity. Only aggregate SYNTHETIC results escape this
-module: no capture, SDK transport, provider, credentials, microphone or playback.
+module. The explicit capture self-test writes only invented temporary data;
+there is no SDK transport, provider, credentials, microphone or playback.
 Accelerated time is paced at lap-worker boundaries; this is not a latency test.
 """
 
@@ -136,6 +137,62 @@ def synthetic_pit_visit_frames():
                   "FuelLevel": 50. if i == 401 else 30.,
                   "Speed": 0. if i == 401 or pit and 100 <= i <= 300 else 30.}
         yield replace(base, buffer_tick=tick, values=values, captured_monotonic_s=1 + tick / 20)
+
+
+def write_synthetic_capture(path, frames, *, complete=True, metadata=True):
+    """Explicit fixture writer; never records hardware or opens an existing file."""
+    from itertools import chain
+
+    from .collector import CollectorSample, JsonlHandleWriter, LiveCollector
+    from .sdk_probe import FIELD_EXPECTED_TYPES, VariableDescriptor
+    from .telemetry import SourceKind
+
+    frames = iter(frames)
+    first = next(frames)
+    descriptors, offset = [], 0
+    dtypes = {1: "bool", 2: "int32", 3: "uint32_or_bitfield", 4: "float32", 5: "float64"}
+    for name, value in first.values.items():
+        scalar = value[0] if type(value) is list else value
+        code = min(FIELD_EXPECTED_TYPES.get(name, {1 if type(scalar) is bool else
+                                                  2 if type(scalar) is int else 5}))
+        count = len(value) if type(value) is list else 1
+        descriptors.append(VariableDescriptor(name, code, dtypes[code], offset, count,
+                                               False, "", "invented fixture"))
+        offset += 8 * count
+    info = {"WeekendInfo": {"SimMode": "full", "TrackLength": "1.2 km"},
+            "SessionInfo": {"Sessions": [{"SessionNum": 0, "SessionType": "Race"}]}}
+    with path.open("x+b", buffering=0) as handle, JsonlHandleWriter(handle) as writer:
+        collector = LiveCollector(writer, source_id="synthetic-only", session_id="synthetic-only",
+                                  expected_source_kind=SourceKind.SDK_LIVE,
+                                  include_driver_info=False)
+        for frame in chain((first,), frames):
+            collector.ingest(CollectorSample(frame, tuple(descriptors), 20,
+                info if metadata else None, "FULL" if metadata else "UNAVAILABLE"))
+        if complete:
+            collector.finish()
+
+
+def run_synthetic_capture_replay():
+    """Actual sealed file -> validator -> owner -> historical-only summary."""
+    from pathlib import Path
+    from tempfile import TemporaryDirectory
+
+    from .capture_replay import replay_capture
+
+    passed = False
+    try:
+        with TemporaryDirectory(prefix="aeis-synthetic-replay-") as directory:
+            path = Path(directory) / "invented.jsonl"
+            write_synthetic_capture(path, synthetic_pit_visit_frames())
+            result = replay_capture(path)
+            facts = result["latest"]["pit"]["facts"]
+            passed = (result["status"] == "RECOMPUTED" and result["frames"] == 1921
+                      and result["source_kind"] == "OFFLINE_REPLAY"
+                      and not result["live_acceptance"] and not result["provider_called"]
+                      and any(row["id"] == "pit_observation.elapsed" for row in facts))
+    except Exception:
+        pass
+    return {"id": "SYNTHETIC_CAPTURE_RECOMPUTATION", "status": "PASS" if passed else "FAIL"}
 
 
 def run_synthetic_pit_observation():

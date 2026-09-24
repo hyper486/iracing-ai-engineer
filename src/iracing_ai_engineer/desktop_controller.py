@@ -59,6 +59,8 @@ class DesktopController:
         self._trial_failed = False
         self._last_trial = {"status": "DISABLED", "reason": "NOT_STARTED", "bytes": 0}
         self._trial_report = None
+        self._capture_report = None
+        self._capture_replay_cancel = threading.Event()
         self._service_epoch = 0
         self._notice = "原生桌面窗口；不会启动游戏或发送车辆、进站控制指令。"
         self._lifecycle = "STOPPED"
@@ -215,6 +217,7 @@ class DesktopController:
                 "lifecycle": self._lifecycle,
                 "notice": self._notice,
                 "trial_report": self._trial_report,
+                "capture_report": self._capture_report,
                 "settings": {
                     **asdict(self._settings),
                     "key_configured": bool(self._api_key),
@@ -382,6 +385,45 @@ class DesktopController:
                 self._notice = "本地诊断回放结束；未播放音频，不代表真实驾驶验收。"
 
         self._schedule(replay)
+
+    @property
+    def capture_directory(self) -> Path:
+        return self._store.root.parent / "captures"
+
+    def cancel_capture_replay(self) -> None:
+        self._capture_replay_cancel.set()
+
+    def replay_capture(self, path: Path) -> None:
+        if not isinstance(path, Path):
+            raise ValueError("INVALID_CAPTURE_PATH")
+
+        def connected():
+            return self._state.spotter_snapshot().get("connection") == "CONNECTED"
+
+        def replay():
+            from .capture_replay import CaptureReplayError, replay_capture
+            with self._lock:
+                self._capture_report = {"status": "RUNNING"}
+                self._notice = "正在离线重算采集；不播放声音、不调用模型，可取消。"
+            try:
+                report = replay_capture(path, cancelled=lambda: (
+                    self._closing or self._capture_replay_cancel.is_set() or connected()))
+            except CaptureReplayError as error:
+                report = {"status": "REJECTED", "reason": error.code,
+                          "heard": False, "live_acceptance": False}
+            with self._lock:
+                self._capture_report = report
+                self._notice = "原始采集复盘结束；仅历史重算，不进入实时问答或语音。"
+
+        with self._lock:
+            if connected():
+                raise ValueError("CAPTURE_REPLAY_REQUIRES_OFFLINE")
+            # Clear only after checking the shared job; a second click must not
+            # undo cancellation of an already running replay.
+            if self._closing or self._configuring:
+                raise ValueError("DESKTOP_BUSY")
+            self._capture_replay_cancel.clear()
+            self._schedule(replay)
 
     def pit_observation_draft(self) -> dict | None:
         """Fresh read only; no settings, SDK or strategy mutation."""

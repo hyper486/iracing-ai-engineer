@@ -114,6 +114,61 @@ def trial_report_text(report: object) -> str:
     return "\n".join(result)
 
 
+def capture_report_text(report: object) -> str:
+    """Render only the separate historical recomputation contract."""
+    value = _mapping(report)
+    if value.get("status") == "RUNNING":
+        return "正在后台校验并重算。结果将在完整校验后显示，可随时取消。"
+    if value.get("status") == "REJECTED":
+        if value.get("reason") == "CANCELLED":
+            return "复盘已取消（也可能因检测到游戏连接）；没有接受部分结果。"
+        return "文件未被接受：需已正常结束的本机原始采集，且通过完整性与隐私路径检查。"
+    if not (value.get("contract_version") == "native-capture-replay-v1"
+            and value.get("status") == "RECOMPUTED"
+            and value.get("source_kind") == "OFFLINE_REPLAY"
+            and value.get("live_acceptance") is False):
+        return "选择本机 capture-*.jsonl。复用燃油、弯道与进站算法，不联网、不播放声音。"
+    result = ["历史重算 · 不是当前赛况，也不是原始播报复现",
+              "仅证明文件内部一致；来源未独立认证，不代表真实驾驶或人耳听到。",
+              "原采集未保存手填策略参数，因此不推算进站方案、出站位置或换胎。",
+              "弯道结果是观测与练习假设，不保证提速，不能据此推断路肩或路线。"]
+    for key, label in (("frames", "输入帧"), ("segments", "独立连续段"),
+                       ("evicted_cards", "超出上限而省略的历史卡片")):
+        count = value.get(key)
+        if type(count) is int and 0 <= count <= 2**53:
+            result.append(f"{label}：{count}")
+    events = _mapping(value.get("events"))
+    for key, label in (("source_stale", "断流"), ("duplicate_tick_conflict", "重复帧冲突"),
+                       ("tick_drop", "丢帧事件"), ("session_reset", "会话重置"),
+                       ("schema_changed", "字段变更"),
+                       ("replay_clock_boundary", "采集时钟边界")):
+        count = events.get(key)
+        if type(count) is int and count > 0:
+            result.append(f"{label}：{count}")
+    labels = {"fuel": "燃油", "driving": "弯道", "stint": "连续观测与配速", "pit": "进站观测"}
+    latest = _mapping(value.get("latest"))
+    for group, label in labels.items():
+        if group not in latest:
+            result.append(f"{label}：未获得可用证据。")
+    cards = value.get("cards")
+    if isinstance(cards, list):
+        result.append("\n最近历史卡片（新到旧；‘当前’均指该历史采样时刻）：")
+        for card in reversed(cards[-128:]):
+            card = _mapping(card)
+            group = card.get("group")
+            if type(group) is not str or group not in labels:
+                continue
+            result.append("\n" + labels[group] + " · 连续段 "
+                          + format_number(card.get("segment"), digits=0)
+                          + " · 当时已完成圈 "
+                          + format_number(card.get("lap_completed"), digits=0)
+                          + " · 段内 " + format_number(card.get("segment_elapsed_s"), " 秒"))
+            facts = card.get("facts")
+            if isinstance(facts, list):
+                result.extend(_text(_mapping(fact).get("text"), limit=1000) for fact in facts[:8])
+    return "\n".join(result)
+
+
 def validate_question(question: object) -> str:
     """Mirror the service's bounded text input without sending or saving it."""
     if type(question) is not str:
@@ -645,15 +700,17 @@ class DesktopWindow:
                   wraplength=980).pack(anchor="w")
         self.notebook = ttk.Notebook(outer)
         self.notebook.pack(fill="both", expand=True, pady=(8, 0))
-        live, engineer, settings, voice = (ttk.Frame(self.notebook) for _ in range(4))
+        live, engineer, settings, voice, replay = (ttk.Frame(self.notebook) for _ in range(5))
         self.notebook.add(live, text="实时燃油与质量")
         self.notebook.add(engineer, text="工程师问答与复盘")
         self.notebook.add(settings, text="模型与本地设置")
         self.notebook.add(voice, text="语音与 VR")
+        self.notebook.add(replay, text="采集复盘")
         self._build_live(self._scroll_page(live))
         self._build_engineer(self._scroll_page(engineer))
         self._build_settings(self._scroll_page(settings))
         self._build_voice(self._scroll_page(voice))
+        self._build_capture_replay(replay)
 
     @staticmethod
     def _scroll_page(parent):
@@ -847,6 +904,19 @@ class DesktopWindow:
         self._button(parent, "回放近车诊断日志…", self._load_trial).pack(anchor="w", pady=6)
         frame, self.trial_text = self._readonly_text(parent, height=10)
         frame.pack(fill="both", expand=True, pady=6)
+
+    def _build_capture_replay(self, parent) -> None:
+        controls = ttk.Frame(parent, padding=12)
+        controls.pack(fill="x")
+        self._button(controls, "复盘原始采集…", self._load_capture).pack(side="left")
+        self._button(controls, "取消复盘", self._cancel_capture).pack(side="left", padx=8)
+        ttk.Label(parent, text="退出游戏前，先在设置页关闭录制并等待保存；退出后再复盘。"
+                  "直接断开游戏可能留下不完整文件。\n"
+                  "重算仅离线运行，最多显示 128 张历史卡片。"
+                  "近车判定与音频审计请使用“模型与本地设置”中的“回放近车诊断日志”。",
+                  style="Muted.TLabel", wraplength=920).pack(anchor="w", padx=12, pady=6)
+        frame, self.capture_text = self._readonly_text(parent, height=12)
+        frame.pack(fill="both", expand=True, padx=12, pady=8)
 
     def _build_voice(self, parent) -> None:
         self._label(parent, "voice_status", style="Warn.TLabel").pack(anchor="w")
@@ -1179,6 +1249,7 @@ class DesktopWindow:
         self._replace_text(self.issues_text, view.issues)
         self._replace_text(self.answer_text, view.answer_text)
         self._replace_text(self.trial_text, trial_report_text(snapshot.get("trial_report")))
+        self._replace_text(self.capture_text, capture_report_text(snapshot.get("capture_report")))
         all_disabled = self._closing or view.lifecycle in ("STOPPING", "STOPPED")
         for control in self._controls:
             control.state(["disabled"] if all_disabled else ["!disabled"])
@@ -1352,6 +1423,29 @@ class DesktopWindow:
                 self.action_var.set("暂时无法回放，请等待当前后台操作完成。")
             else:
                 self.action_var.set("正在后台核对日志；不播放声音、不调用模型。")
+
+    def _load_capture(self) -> None:
+        if self._closing:
+            return
+        directory = getattr(self.controller, "capture_directory", None)
+        name = filedialog.askopenfilename(
+            parent=self.root, title="选择正常结束的原始采集（仅离线重算）",
+            filetypes=[("本机原始采集 JSONL", "capture-*.jsonl")],
+            **({"initialdir": str(directory)} if isinstance(directory, Path) else {}),
+        )
+        if name:
+            try:
+                self.controller.replay_capture(Path(name))
+            except Exception:
+                self.action_var.set("请先退出游戏，并等待当前后台操作结束后再复盘。")
+            else:
+                self.action_var.set("原始采集仅在本地重算；不发送给 DeepSeek，不进入实时语音。")
+
+    def _cancel_capture(self) -> None:
+        try:
+            self.controller.cancel_capture_replay()
+        except Exception:
+            self.action_var.set("当前没有可取消的复盘。")
 
     def _recording(self) -> None:
         if self._closing:

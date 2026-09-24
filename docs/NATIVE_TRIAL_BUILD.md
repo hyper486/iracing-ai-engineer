@@ -7,7 +7,9 @@ installed copies and shortcuts are not automatically upgraded; build output is
 
 The rebuilt trial includes the offline reviewed tire-origin v2 correction and
 conditional mapped-rejoin lane, plus historical pit-visit observations and the
-reviewed settings draft. Native live tire questions remain bounded observations,
+reviewed settings draft. The new **采集复盘** tab also recomputes completed raw
+captures in a separate offline-only owner; see [the workflow](NATIVE_CAPTURE_REPLAY.md).
+Native live tire questions remain bounded observations,
 not physical tire age or model-selected tire service. Use current source for
 offline finalization/verification; do not use an older packaged CLI
 to regenerate tire-strategy evidence. See [the v2 contract](TIRE_PERFORMANCE_BELIEF.md).
@@ -22,7 +24,7 @@ The optional **从进站观测填写草稿** button does not apply or persist pa
 review geometry, outside-boundary losses and next service conditions before
 explicit confirmation. See [the pit observation workflow](LIVE_PIT_OBSERVATION.md).
 
-The current rebuild passed all **17 frozen checks** (nine numerical, five
+The preceding pit-observation rebuild passed all **17 frozen checks** (nine numerical, five
 native/runtime and three memory-only voice checks). The build receipt remains
 unsigned; the test receipt is `SYNTHETIC`, and both have `live_acceptance=false`.
 Saved credentials, installed copies and device preferences are not replaced
@@ -52,6 +54,18 @@ It requires separate historical elapsed/net-loss evidence, a stopped-only draft,
 explicit confirmation and withdrawal after invalidation. It does not certify
 service contents, geometry or future pit costs.
 
+A tenth numerical check writes an invented 1,921-frame temporary capture,
+validates it and recomputes the pit observation using the separate historical
+owner. It cleans up only its own temporary fixture. No saved capture is opened,
+and no live-shaped state leaves the owner. The capture-replay rebuild passed
+all **18 frozen checks**: ten numerical, five native/runtime and three memory-only
+voice checks, on the isolated system-only child PATH with saved keys removed.
+It remains unsigned and `live_acceptance=false`; existing installations were
+not replaced.
+Visible synthetic QA checked the final packaged replay tab, the finish-recording
+instruction and the file/cancel controls, then closed the window normally.
+That layout check did not open a real capture or an audio device.
+
 The existing checks additionally exercise hidden native Tk controls, local
 answer-worker shutdown, the window-close protocol, exact speech-model hashes
 and Chinese TTS-to-STT in memory. Neither test opens a microphone or speaker,
@@ -59,8 +73,9 @@ loads saved credentials, starts an SDK transport or operates the simulator.
 The receipt remains `SYNTHETIC`, `live_acceptance=false`.
 
 Internal SDK-shaped fixture tags exercise production admission guards. They
-are not proof of source authenticity and are never exported as a capture,
-sealed SDK receipt or accepted driving evidence. Output is aggregate only.
+are not proof of source authenticity or accepted driving evidence. The explicit
+capture check creates only an invented temporary collector file for its own
+recomputation; it never publishes that file. Self-test output is aggregate only.
 
 ## Numerical resource diagnostic
 
