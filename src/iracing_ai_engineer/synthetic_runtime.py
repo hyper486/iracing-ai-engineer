@@ -139,18 +139,11 @@ def synthetic_pit_visit_frames():
         yield replace(base, buffer_tick=tick, values=values, captured_monotonic_s=1 + tick / 20)
 
 
-def write_synthetic_capture(path, frames, *, complete=True, metadata=True):
-    """Explicit fixture writer; never records hardware or opens an existing file."""
-    from itertools import chain
-
-    from .collector import CollectorSample, JsonlHandleWriter, LiveCollector
+def synthetic_descriptors(values):
+    """Descriptors for explicitly invented fixture values, never live discovery."""
     from .sdk_probe import FIELD_EXPECTED_TYPES, SDK_TYPE_NAMES, VariableDescriptor
-    from .telemetry import SourceKind
-
-    frames = iter(frames)
-    first = next(frames)
     descriptors, offset = [], 0
-    for name, value in first.values.items():
+    for name, value in values.items():
         scalar = value[0] if type(value) is list else value
         code = min(FIELD_EXPECTED_TYPES.get(name, {0 if type(scalar) is bytes else
                                                   1 if type(scalar) is bool else
@@ -159,6 +152,19 @@ def write_synthetic_capture(path, frames, *, complete=True, metadata=True):
         descriptors.append(VariableDescriptor(name, code, SDK_TYPE_NAMES[code], offset, count,
                                                False, "", "invented fixture"))
         offset += 8 * count
+    return tuple(descriptors)
+
+
+def write_synthetic_capture(path, frames, *, complete=True, metadata=True):
+    """Explicit fixture writer; never records hardware or opens an existing file."""
+    from itertools import chain
+
+    from .collector import CollectorSample, JsonlHandleWriter, LiveCollector
+    from .telemetry import SourceKind
+
+    frames = iter(frames)
+    first = next(frames)
+    descriptors = synthetic_descriptors(first.values)
     info = {"WeekendInfo": {"SimMode": "full", "TrackLength": "1.2 km"},
             "SessionInfo": {"Sessions": [{"SessionNum": 0, "SessionType": "Race"}]}}
     with path.open("x+b", buffering=0) as handle, JsonlHandleWriter(handle) as writer:
@@ -262,6 +268,86 @@ def run_synthetic_tire_confirmation():
         analysis.close()
         state.connection("STOPPED")
     return {"id": "SYNTHETIC_DRIVER_CONFIRMED_TIRES", "status": "PASS" if passed else "FAIL"}
+
+
+def write_synthetic_tire_trial(directory):
+    """Explicit private fixture: real recorder/journal and three driver assertions."""
+    from .collector import CollectorSample
+    from .live_app import _RecordingSink
+    from .trial_audit import TrialAudit
+
+    now = [1.]
+    state = AppState(clock=lambda: now[0])
+    recorder = analysis = journal = None
+    complete = False
+    try:
+        journal = TrialAudit(directory / "trials", clock=lambda: now[0])
+        state.attach_trial(journal)
+        state.connection("CONNECTED")
+        state.start_spotter(20)
+        recorder = _RecordingSink(directory / "captures", identifier="synthetic-tire-replay-only",
+            max_bytes=32 * 1024**2, audit=state.audit_capture, generation=state.generation)
+        analysis = _LiveAnalysis(state, LiveFuelConfig(), identifier="synthetic-tire-replay-only",
+            tick_rate=20, car_count=3, generation=state.generation, allowed=lambda: True)
+        metadata = {"WeekendInfo": {"SimMode": "full", "TrackLength": "1.2 km"},
+                    "SessionInfo": {"Sessions": [{"SessionNum": 0, "SessionType": "Race"}]}}
+        descriptors = None
+        for frame in synthetic_frames(8, rate=20):
+            tick = frame.buffer_tick
+            if tick > 300:
+                break
+            phase = tick % 100
+            values = {**frame.values, "LapCompleted": 3 + tick // 80, "Lap": 4 + tick // 80,
+                      "OnPitRoad": 10 <= phase < 65,
+                      "PlayerCarInPitStall": 12 <= phase < 50,
+                      "PitstopActive": 12 <= phase < 20,
+                      "Speed": 0. if 12 <= phase < 50 else 30.,
+                      "PlayerTireCompound": 0, "TireSetsUsed": 1}
+            frame = replace(frame, values=values)
+            descriptors = descriptors or synthetic_descriptors(values)
+            now[0] = frame.captured_monotonic_s
+            state.feed_spotter(frame)
+            recorder.process(CollectorSample(frame, descriptors, 20, metadata, "FULL"))
+            analysis.process((frame, "Race", now[0], 1_200_000))
+            kind = {35: "FULL_NEW_SET", 135: "NO_TIRE_CHANGE", 235: "PARTIAL_OR_UNKNOWN"}.get(tick)
+            if kind is not None:
+                state.confirm_tire_service(kind)
+        recorder.finish()
+        complete = True
+        return (directory / "captures" / f"capture-{recorder._recorder.capture_id}.jsonl",
+                directory / "trials" / journal.snapshot()["file_name"])
+    finally:
+        if analysis is not None:
+            analysis.close()
+        if recorder is not None:
+            recorder.close()
+        state.attach_trial(None)
+        state.connection("STOPPED")
+        if journal is not None:
+            journal.close(complete=complete)
+
+
+def run_synthetic_tire_capture_replay():
+    """Temporary invented pair only; no real captures, SDK, cloud or audio I/O."""
+    import tempfile
+    from pathlib import Path
+
+    from .capture_replay import replay_capture
+
+    passed = False
+    try:
+        with tempfile.TemporaryDirectory(prefix="aeis-synthetic-tire-") as directory:
+            capture, journal = write_synthetic_tire_trial(Path(directory))
+            result = replay_capture(capture, journal=journal)
+            tires = result["tire_replay"]
+            passed = (tires["applied"] == 3 and tires["rejected"] == 0
+                      and any(row["counter_increase"] == 2 for row in tires["states"])
+                      and tires["states"][-1]["state"] == "UNKNOWN"
+                      and tires["tire_service_verified"] is False
+                      and "tire" in result["latest"])
+    except Exception:
+        pass
+    return {"id": "SYNTHETIC_TIRE_CAPTURE_REPLAY", "status": "PASS" if passed else "FAIL"}
 
 
 def run_synthetic_pit_observation():

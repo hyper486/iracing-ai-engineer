@@ -1,8 +1,8 @@
 # Private proximity / audio trial replay
 
 See [the current trial build](NATIVE_TRIAL_BUILD.md); this is not live acceptance.
-Contract: `private-trial-audit-v2`; the reader also accepts legacy v1 logs.
-Older binaries may reject v2. This is the proximity slice of Stage E;
+Contract: `private-trial-audit-v3`; the reader also accepts legacy v1/v2 logs.
+Older binaries may reject v3. This is the proximity slice of Stage E;
 complete endurance strategy, device hearing and VR acceptance remain open.
 
 ## 使用方法
@@ -37,7 +37,7 @@ The existing raw capture remains separate. The small journal has four lanes:
 | Detector | Reset/configuration, connection generation, ten proximity fields, capture/observation clocks, fixed decision rows | Recompute each frame, unavailable transition and time-driven withdrawal |
 | Audio | Fixed health/outcome codes, generation/epoch/candidate ID, software start delay, default/selected/unset output choice | Correlate attempts, starts, completions, cancellation, drops and failures |
 | Capture | Random local capture ID, connection generation, committed size and hash, open/complete/empty/incomplete state | Locate and optionally verify companion file bytes |
-| Tire confirmation | Generation, fixed assertion kind, revision, visit/request/decision ticks, lap/compound/set counters and session/player slots | Audit accepted driver assertions; not tire-age recomputation or verification of service contents |
+| Tire confirmation | Generation, fixed assertion kind, revision, visit/request/decision ticks, lap/compound/set counters, session/player slots and exact-frame anchor | Audit accepted driver assertions; optional separate capture replay can recompute the counter, not verify service contents |
 
 No driver name, `SessionInfo`, microphone PCM, recognized question, model answer,
 key, device/voice name or arbitrary exception text enters the journal. Fixed
@@ -51,6 +51,8 @@ Tire assertions use an increasing owner revision across source/session resets;
 session ticks themselves may restart. Reports retain at most 32 assertion rows.
 They are not independently reviewed tire labels and are not automatically
 imported into performance models. See [the tire boundary](LIVE_TIRE_INSTALLATION.md).
+The v3 frame anchor supports [paired raw-capture recomputation](TIRE_CAPTURE_REPLAY.md).
+This assertion-only journal view still does not replay tire age or service actions.
 
 Detector records are captured under the same lock as the decision. The first
 clock observation and every state-changing poll are retained. Silent intervening

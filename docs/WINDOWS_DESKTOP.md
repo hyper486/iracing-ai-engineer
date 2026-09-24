@@ -72,6 +72,11 @@ are not automatically replaced; run the newly built `dist/AEIS-Engineer.exe`.
 确认目前须在停车时点原生按钮，尚无语音确认指令；驾驶中只用 PTT 提问。
 详见 [安装确认与限制](LIVE_TIRE_INSTALLATION.md)。
 
+赛后可在 **采集复盘 → 复盘采集＋换胎确认…** 依次选择完整原始采集和同次完整
+诊断日志。新日志按文件哈希及精确帧绑定，重算人工确认后的计圈、进站暂停和
+失效原因；旧日志缺少绑定时明确拒绝，不补猜。结果仅供历史复盘，不进入当前
+语音或策略，也不是换胎真实性或磨损证明。见 [配对回放说明](TIRE_CAPTURE_REPLAY.md)。
+
 ## VR 语音设置（无需在驾驶时打字）
 
 停车时打开第四个页签 **语音与 VR**：

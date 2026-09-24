@@ -21,8 +21,9 @@ from .live_tire_age import valid_confirmation_receipt
 from .live_worker import FrameWorker, payload_size
 from .runtime_clock import monotonic_now
 from .spotter import SPOTTER_FIELDS, SpotterConfig
+from .tire_frame_binding import valid_frame_anchor
 
-TRIAL_CONTRACT = "private-trial-audit-v2"
+TRIAL_CONTRACT = "private-trial-audit-v3"
 MAX_TRIAL_BYTES = 1024**3
 MAX_ENTRY_BYTES = 64 * 1024
 AUDIO_STATES = frozenset(("OFF", "PREPARING", "WAIT_DATA", "READY", "PLAYING", "PAUSED",
@@ -59,7 +60,7 @@ def _number(value):
     return type(value) in (int, float) and -2**53 <= value <= 2**53 and math.isfinite(value)
 
 
-def validate_projection(lane, payload):
+def validate_projection(lane, payload, *, contract=TRIAL_CONTRACT):
     """Allow only the fixed, numeric/enum diagnostic surface before persistence.
 
     Replay additionally validates types, continuity and detector recomputation.
@@ -129,7 +130,12 @@ def validate_projection(lane, payload):
         numeric(*(payload[key] for key in ("sequence", "revision", "now", "start_delay_ms",
                                           "enabled", "muted", "heard", "live_acceptance")))
     elif lane == "tire_confirmation":
-        keys(payload, "generation assertion")
+        if contract == "private-trial-audit-v2":
+            keys(payload, "generation assertion")
+        else:
+            keys(payload, "generation assertion anchor")
+            if not valid_frame_anchor(payload["anchor"]):
+                raise ValueError("TRIAL_PROJECTION_INVALID")
         if (type(payload["generation"]) is not int or not 0 <= payload["generation"] <= 2**53
                 or not valid_confirmation_receipt(payload["assertion"])):
             raise ValueError("TRIAL_PROJECTION_INVALID")

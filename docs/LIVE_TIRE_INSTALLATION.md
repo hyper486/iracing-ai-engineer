@@ -58,19 +58,22 @@ confirmation. Uncertainty is allowed to remain unknown for the entire session.
 ## Private audit and model boundary
 
 When the existing private recording option is enabled, accepted assertions go
-to a fixed numeric/enum lane in `private-trial-audit-v2`. It records connection
+to a fixed numeric/enum lane in `private-trial-audit-v3`. It records connection
 generation plus assertion kind, owner revision, visit/request/decision ticks,
-lap counter, compound/set counter and session/player slot. No free text,
+lap counter, compound/set counter and session/player slot, plus a fixed-field
+frame hash and integer capture clock for paired replay. No free text,
 question transcript, driver name or secret is accepted. Recording failure
 cannot interrupt tire tracking or the other engineering lanes.
 
-The journal reader accepts legacy v1 logs. New v2 logs require an updated
+The journal reader accepts legacy v1/v2 logs. New v3 logs require an updated
 reader; older binaries may reject them. Reports show the number and a bounded
 tail of assertions. **This journal replay does not recompute tire age or verify
 service contents.** Its replay-match label still applies only to the proximity
-detector. Full capture + assertion replay and independently reviewed service
-label export remain open; an assertion is not automatically promoted to the
-offline reviewed history or used to calibrate degradation.
+detector. The separate [paired capture replay](TIRE_CAPTURE_REPLAY.md) now binds
+the full capture bytes and exact assertion frames, then recomputes the counter
+under current rules. Independently reviewed service-label export remains open;
+an assertion is not automatically promoted to the offline reviewed history or
+used to calibrate degradation.
 
 Native admission of an exact event-matched, independently calibrated tire
 performance model, its benefit-versus-service/rejoin comparison, authentic

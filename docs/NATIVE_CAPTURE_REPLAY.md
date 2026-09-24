@@ -23,6 +23,12 @@ source authentication. It does not promote live, strategy or driving acceptance.
 5. Use **取消复盘** to stop. Connecting to the simulator or closing the app also
    cancels; partial results are never promoted to a completed report.
 
+For the driver-confirmed tire counter, use **复盘采集＋换胎确认…** and choose
+the completed capture plus its complete v3 trial journal. Exact byte/frame
+binding precedes historical recomputation, and the report shows suspension and
+withdrawal reasons. Legacy unanchored assertions are not guessed. See
+[the paired workflow and limits](TIRE_CAPTURE_REPLAY.md).
+
 No historical card is copied into the live question service or spoken. No
 DeepSeek request, SDK transport, microphone, speaker, simulator launch or control
 command is involved. Existing model/device settings and live state are unchanged.
@@ -50,12 +56,15 @@ gates. No clock, metadata, clean lap or reference geometry is invented.
 
 Only allowlisted fixed fact templates escape the private owner. Results are
 withheld until the entire file and its unchanged identity pass validation.
-At most 128 recent cards and four latest category cards are retained; evictions
+At most 128 recent cards and five latest category cards are retained; evictions
 are counted. Missing facts stay unavailable, and historical "current" means
 the time shown on that card. Fuel cards show observed amount and learned burn,
 not a reconstructed historical pit instruction or finish plan. The capture
 does not contain the user's historical strategy inputs, so capacity, pit loss,
 service/rules and rejoin assumptions are not borrowed from today's settings.
+
+Paired tire replay additionally retains at most 128 state changes. Raw-only
+replay never assumes that a pit exit installed fresh tires.
 
 Reports are in-memory only, labeled `OFFLINE_REPLAY`, `UNVERIFIED`,
 `live_acceptance=false`, with no raw identifiers or metadata. Recomputing an

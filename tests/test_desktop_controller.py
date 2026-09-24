@@ -304,6 +304,26 @@ def test_capture_replay_is_separate_cancellable_and_never_replaces_live_state(
     assert "PRIVATE CAPTURE" not in str(controller.snapshot())
 
 
+def test_paired_capture_replay_passes_explicit_journal_without_persisting(tmp_path, created,
+                                                                     monkeypatch):
+    from iracing_ai_engineer import capture_replay
+
+    calls = []
+    def recompute(path, *, journal, cancelled):
+        calls.append((path, journal, cancelled()))
+        return {"status": "RECOMPUTED", "source_kind": "OFFLINE_REPLAY"}
+
+    monkeypatch.setattr(capture_replay, "replay_capture", recompute)
+    store = Store(tmp_path)
+    controller = created(store=store, reader=Reader())
+    capture, journal = tmp_path / "capture-invented.jsonl", tmp_path / "trial-invented.jsonl"
+    controller.replay_capture(capture, journal=journal)
+    wait_for(lambda: not controller._configuring)
+    assert calls == [(capture, journal, False)] and not store.saved
+    with pytest.raises(ValueError, match="INVALID_CAPTURE_PATH"):
+        controller.replay_capture(capture, journal="not-a-path")
+
+
 def test_capture_replay_refuses_connected_sdk_before_work(tmp_path, created):
     controller = created(store=Store(tmp_path), reader=Reader())
     controller._state.connection("CONNECTED")

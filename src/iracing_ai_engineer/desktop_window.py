@@ -124,6 +124,15 @@ def capture_report_text(report: object) -> str:
     if value.get("status") == "REJECTED":
         if value.get("reason") == "CANCELLED":
             return "复盘已取消（也可能因检测到游戏连接）；没有接受部分结果。"
+        if value.get("reason") == "TIRE_ANCHOR_REQUIRED":
+            return "旧换胎确认缺少精确帧绑定，不能重算胎组；仍可单独复盘采集或近车日志。"
+        if value.get("reason") in ("TIRE_CAPTURE_NOT_LINKED", "TIRE_ASSERTION_UNMATCHED",
+                                   "TIRE_ASSERTION_AMBIGUOUS"):
+            return "采集与确认日志未完整对应唯一数据帧；请选同次完整文件。未显示部分胎组结果。"
+        if value.get("reason") == "TIRE_JOURNAL_INCOMPLETE":
+            return "确认日志未正常结束；不能用于胎组重算。仍可单独检查已完成的采集。"
+        if value.get("reason") == "TIRE_REPLAY_LIMIT":
+            return "确认记录超过本次复盘上限，未截断后冒充完整结果。"
         return "文件未被接受：需已正常结束的本机原始采集，且通过完整性与隐私路径检查。"
     if not (value.get("contract_version") == "native-capture-replay-v1"
             and value.get("status") == "RECOMPUTED"
@@ -147,7 +156,42 @@ def capture_report_text(report: object) -> str:
         count = events.get(key)
         if type(count) is int and count > 0:
             result.append(f"{label}：{count}")
+    tires = _mapping(value.get("tire_replay"))
+    if (tires.get("contract_version") == "tire-capture-replay-v1"
+            and tires.get("capture_bytes_linked") is True
+            and tires.get("tire_service_verified") is False
+            and tires.get("live_acceptance") is False):
+        result.extend(("\n胎组历史：文件已对应，按当前规则重算；人工确认不等于已核验服务或胎耗。",
+                       "未复现原线程时序；旧界面修订号不用于冒充当前重算状态。"))
+        for key, label in (("assertions", "已定位确认"), ("applied", "按当前规则接受"),
+                           ("rejected", "当前规则未接受"), ("evicted_states", "较早状态已省略")):
+            result.append(label + "：" + format_number(tires.get(key), digits=0))
+        reasons = {
+            "SOURCE_NOT_READY": "数据未就绪", "REQUIRED_DATA_UNAVAILABLE": "关键字段缺失",
+            "CONTINUITY_CHANGED": "连续性或身份变化", "SOURCE_STALE": "数据过期",
+            "INSTALLATION_NOT_CONFIRMED": "起点未确认", "TIRE_CONTEXT_CHANGED": "胎组信息变化",
+            "SERVICE_NOT_CONFIRMED": "本次服务尚未确认",
+            "SERVICE_CHANGED_AFTER_CONFIRMATION": "确认后服务状态变化",
+            "DRIVER_CONFIRMED_OBSERVATION": "人工确认后的连续记录",
+            "INSTALLATION_UNKNOWN": "安装起点未知", "AWAITING_OBSERVED_EXIT": "等待连续出站",
+            "TIRE_PROCESSING_ERROR": "轮胎分析故障",
+            "REPLAY_ASSERTION_NOT_ADMITTED": "当前重算条件不接受该确认",
+            "CAPTURE_SEGMENT_BOUNDARY": "采集连续段结束",
+        }
+        states = tires.get("states")
+        if isinstance(states, list):
+            result.append("胎组状态变化（新到旧，最多 128 条；计数不是完整行驶圈数）：")
+            for row in reversed(states[-128:]):
+                row = _mapping(row)
+                reason = row.get("reason")
+                if type(reason) is str and reason in reasons:
+                    result.append("段 " + format_number(row.get("segment"), digits=0)
+                        + " · 第 " + format_number(row.get("lap_completed"), digits=0)
+                        + " 圈 · " + reasons[reason] + " · 计圈增加 "
+                        + format_number(row.get("counter_increase"), digits=0))
     labels = {"fuel": "燃油", "driving": "弯道", "stint": "连续观测与配速", "pit": "进站观测"}
+    if tires:
+        labels["tire"] = "人工确认的胎组计圈"
     latest = _mapping(value.get("latest"))
     for group, label in labels.items():
         if group not in latest:
@@ -939,10 +983,13 @@ class DesktopWindow:
         controls = ttk.Frame(parent, padding=12)
         controls.pack(fill="x")
         self._button(controls, "复盘原始采集…", self._load_capture).pack(side="left")
+        self._button(controls, "复盘采集＋换胎确认…",
+                     lambda: self._load_capture(with_tires=True)).pack(side="left", padx=8)
         self._button(controls, "取消复盘", self._cancel_capture).pack(side="left", padx=8)
         ttk.Label(parent, text="退出游戏前，先在设置页关闭录制并等待保存；退出后再复盘。"
                   "直接断开游戏可能留下不完整文件。\n"
                   "重算仅离线运行，最多显示 128 张历史卡片。"
+                  "胎组重算另选同次完整诊断日志；旧日志缺少帧绑定时不补猜。\n"
                   "近车判定与音频审计请使用“模型与本地设置”中的“回放近车诊断日志”。",
                   style="Muted.TLabel", wraplength=920).pack(anchor="w", padx=12, pady=6)
         frame, self.capture_text = self._readonly_text(parent, height=12)
@@ -1481,7 +1528,7 @@ class DesktopWindow:
             else:
                 self.action_var.set("正在后台核对日志；不播放声音、不调用模型。")
 
-    def _load_capture(self) -> None:
+    def _load_capture(self, *, with_tires=False) -> None:
         if self._closing:
             return
         directory = getattr(self.controller, "capture_directory", None)
@@ -1491,8 +1538,21 @@ class DesktopWindow:
             **({"initialdir": str(directory)} if isinstance(directory, Path) else {}),
         )
         if name:
+            journal = None
+            if with_tires:
+                trial_directory = getattr(self.controller, "trial_directory", None)
+                selected = filedialog.askopenfilename(
+                    parent=self.root, title="选择同次完整诊断日志（含换胎确认）",
+                    filetypes=[("本机诊断日志 JSONL", "trial-*.jsonl")],
+                    **({"initialdir": str(trial_directory)}
+                       if isinstance(trial_directory, Path) else {}),
+                )
+                if not selected:
+                    return
+                journal = Path(selected)
             try:
-                self.controller.replay_capture(Path(name))
+                self.controller.replay_capture(Path(name), **(
+                    {"journal": journal} if journal is not None else {}))
             except Exception:
                 self.action_var.set("请先退出游戏，并等待当前后台操作结束后再复盘。")
             else:

@@ -7,6 +7,7 @@ Results are withheld until the terminal receipt and file identity both pass.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections import Counter, OrderedDict
 from pathlib import Path
@@ -19,6 +20,8 @@ from .live_traffic import bound_track_length_mm
 from .llm_evidence import build_live_context
 from .sdk_probe import RawSdkFrame
 from .spotter import SPOTTER_FIELDS
+from .tire_capture_replay import ERRORS as TIRE_ERRORS
+from .tire_capture_replay import TireReplayError, TireReplayJoin
 from .trial_replay import TrialReplayError, _plain_file
 
 MAX_CAPTURE_BYTES = 4 * 1024**3
@@ -35,11 +38,13 @@ _GROUPS = {
     "driving": ("driving.location", "driving.loss", "driving.pattern", "driving.practice",
                 "driving.learning_progress"),
     "stint": ("stint.observed", "tire.observed_context", "tire.pace"),
+    "tire": ("tire.driver_confirmed_age",),
     "pit": ("pit_observation.elapsed", "pit_observation.baseline",
             "pit_observation.fuel_change", "pit_observation.limits"),
 }
 _ERRORS = frozenset(("INVALID", "FILE_UNSAFE", "FILE_CHANGED", "TOO_LARGE", "IO_FAILED",
                      "CANCELLED", "CLOCK_REQUIRED", "SOURCE_UNSUPPORTED", "RUNTIME_FAULT"))
+_ERRORS |= TIRE_ERRORS
 
 
 class CaptureReplayError(ValueError):
@@ -62,12 +67,15 @@ class _Replay:
         self.cards = OrderedDict()
         self.latest = {}
         self.last_pit = None
+        self.tires = None
 
     def check_cancelled(self):
         if self.cancelled():
             raise CaptureReplayError("CANCELLED")
 
     def reset(self):
+        if self.tires is not None and self.model is not None:
+            self.tires.boundary(self.frames, self.segment)
         if self.model is not None:
             self.model.close()
         self.model = self.state = None
@@ -122,6 +130,8 @@ class _Replay:
         self.model.process((frame, bound_session_type(self.metadata, self.metadata_update, frame),
                             observed, bound_track_length_mm(
                                 self.metadata, self.metadata_update, frame)))
+        if self.tires is not None:
+            self.tires.after_frame(frame, captured, self.model, self.frames + 1, self.segment)
         # Pace accelerated input only at actual lap-worker boundaries. This is
         # not a replay of original thread scheduling or an audio latency test.
         driving = self.model._driving
@@ -142,6 +152,10 @@ class _Replay:
 
     def summarize(self):
         value = self.state.snapshot()
+        if self.tires is not None and self.model._tire_age is not None:
+            # A matched assertion is applied after this frame's normal feed.
+            # Refresh only the separate offline copy at publication boundaries.
+            value["tire_age"] = self.model._tire_age.snapshot(value.get("monitor") or {})
         self.publications += 1
         facts = {item["id"]: item["text"] for item in build_live_context(value)["facts"]}
         telemetry = (value.get("monitor") or {}).get("telemetry") or {}
@@ -185,22 +199,43 @@ class _Replay:
             "latest": dict(self.latest), "evicted_cards": self.evicted,
             "completion_status": evidence.completion_status,
             "strategy_parameters": "NOT_RECORDED_NOT_APPLIED",
+            "tire_replay": self.tires.finish() if self.tires is not None else None,
         }
 
 
-def replay_capture(path: Path, *, cancelled=lambda: False) -> dict:
+def replay_capture(path: Path, *, journal: Path | None = None, cancelled=lambda: False) -> dict:
     """Read one sealed private clip; never publish partial or live-shaped data."""
     replay = _Replay(cancelled)
     validator = _new_collector_validator(stale_after_s=.5, opponent_error_policy="degrade",
                                          require_receipt=True)
     try:
         replay.check_cancelled()
+        if journal is not None:
+            replay.tires = TireReplayJoin(journal, cancelled)
         with _plain_file(path, MAX_CAPTURE_BYTES) as (handle, size):
+            expected_digest = None
+            if replay.tires is not None:
+                digest = hashlib.sha256()
+                remaining = size
+                while remaining:
+                    replay.check_cancelled()
+                    chunk = handle.read(min(MAX_LINE_BYTES, remaining))
+                    if not chunk:
+                        raise CaptureReplayError("FILE_CHANGED")
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+                if handle.read(1):
+                    raise CaptureReplayError("FILE_CHANGED")
+                expected_digest = digest.hexdigest()
+                replay.tires.select(expected_digest, size)
+                handle.seek(0)
+            consumed_digest = hashlib.sha256()
             line_number, consumed = 0, 0
             while line := handle.readline(MAX_LINE_BYTES + 1):
                 replay.check_cancelled()
                 line_number += 1
                 consumed += len(line)
+                consumed_digest.update(line)
                 if len(line) > MAX_LINE_BYTES or consumed > size:
                     raise CaptureReplayError("TOO_LARGE")
                 record = _load_record(line.decode("utf-8"), line_number)
@@ -208,8 +243,12 @@ def replay_capture(path: Path, *, cancelled=lambda: False) -> dict:
                 replay.consume(record, validator)
             evidence = validator.finish()
             replay.check_cancelled()
+            if expected_digest is not None and consumed_digest.hexdigest() != expected_digest:
+                raise CaptureReplayError("FILE_CHANGED")
             report = replay.report(evidence, size)
         return report  # Identity check above must complete before exposing facts.
+    except TireReplayError as error:
+        raise CaptureReplayError(error.code) from None
     except CaptureReplayError:
         raise
     except TrialReplayError as error:

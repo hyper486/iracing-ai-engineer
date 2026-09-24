@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,6 +25,7 @@ from iracing_ai_engineer.live_tire_age import (
 from iracing_ai_engineer.llm_engineer import _binding, _selected_binding
 from iracing_ai_engineer.llm_evidence import build_live_context
 from iracing_ai_engineer.synthetic_runtime import run_synthetic_tire_confirmation, synthetic_frames
+from iracing_ai_engineer.tire_frame_binding import tire_frame_anchor
 from iracing_ai_engineer.trial_audit import TrialAudit, detector_reset, validate_projection
 from iracing_ai_engineer.trial_replay import replay_trial
 
@@ -51,6 +53,7 @@ class Rig:
                         read_errors=read_errors, captured_monotonic_s=self.tick / 60 + 1)
         assert self.monitor.feed(frame)
         self.tracker.feed(frame, self.monitor.latest_sample)
+        self.frame = frame
         monitor = self.monitor.snapshot()
         self.value = {"contract_version": "experimental-live-fuel-app-v1",
                       "source_mode": "LIVE", "connection": "CONNECTED", "generation": 1,
@@ -322,7 +325,8 @@ def test_private_assertion_journal_records_bounded_enums_not_service_proof(tmp_p
     journal = TrialAudit(tmp_path)
     path = tmp_path / journal.snapshot()["file_name"]
     journal.offer("detector", detector_reset(1, 60))
-    journal.offer("tire_confirmation", {"generation": 1, "assertion": receipt})
+    journal.offer("tire_confirmation", {"generation": 1, "assertion": receipt,
+                                        "anchor": tire_frame_anchor(rig.frame)})
     journal.close(complete=True)
     report = replay_trial(path)
     assert report["tire_assertions"] == 1 and report["tire_age_recomputed"] is False
@@ -331,6 +335,28 @@ def test_private_assertion_journal_records_bounded_enums_not_service_proof(tmp_p
     with pytest.raises(ValueError):
         validate_projection("tire_confirmation", {"generation": 1,
                             "assertion": {**receipt, "transcript": "SYNTHETIC_PRIVATE_TEXT"}})
+
+
+def test_confirmation_journal_enqueue_is_atomic_with_generation_reset():
+    rig = Rig()
+    rig.park()
+    receipt, calls = rig.confirm(), []
+    state = live_app.AppState()
+    state.connection("CONNECTED")
+
+    def offer(lane, payload):
+        acquired = state._lock.acquire(blocking=False)
+        if acquired:
+            state._lock.release()
+        assert not acquired
+        calls.append((lane, payload))
+
+    state.attach_trial(SimpleNamespace(offer=offer))
+    state.complete_tire_confirmation(state.generation, receipt, rig.frame)
+    assert calls == [("tire_confirmation", {"generation": state.generation,
+        "assertion": receipt, "anchor": tire_frame_anchor(rig.frame)})]
+    state.complete_tire_confirmation(state.generation - 1, receipt, rig.frame)
+    assert len(calls) == 1
 
 
 def test_real_mailbox_owner_local_query_and_withdrawal_synthetic_self_test():

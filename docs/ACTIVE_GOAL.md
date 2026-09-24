@@ -67,6 +67,9 @@ The separate native capture-replay tab now recomputes sealed raw captures using
 the real fuel/corner/stint/pit owners, with historical-only bounded cards and no
 live-question/voice promotion. It cancels when the simulator connects and never
 borrows current strategy assumptions. See [the workflow](NATIVE_CAPTURE_REPLAY.md).
+An optional exact-byte/frame-bound capture + v3 assertion replay now recomputes
+the driver-confirmed tire counter and its withdrawal history under current rules;
+it is not independently reviewed installation evidence or original scheduling.
 Stage B hardware acceptance, D's real-lap acceptance, E's actual in-car trial
 and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.

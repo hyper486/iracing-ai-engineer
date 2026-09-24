@@ -382,7 +382,7 @@ class _Replay:
         }
 
 
-def _replay(path, capture_directory, cancelled):
+def _replay(path, capture_directory, cancelled, *, entry_visitor=None):
     replay = _Replay(capture_directory, cancelled)
     digest = hashlib.sha256()
     entries, header, complete = 0, False, False
@@ -405,7 +405,8 @@ def _replay(path, capture_directory, cancelled):
                 _keys(value, "record contract_version run_id advisor_only executable "
                              "live_acceptance heard source_authenticity")
                 _require(value["record"] == "header"
-                         and value["contract_version"] in (TRIAL_CONTRACT, "private-trial-audit-v1")
+                         and value["contract_version"] in (
+                             TRIAL_CONTRACT, "private-trial-audit-v1", "private-trial-audit-v2")
                          and _hex(value["run_id"], 32) and value["advisor_only"] is True
                          and value["executable"] is False and value["live_acceptance"] is False
                          and value["heard"] is False
@@ -425,9 +426,14 @@ def _replay(path, capture_directory, cancelled):
                          and value["sequence"] == entries + 1
                          and _enum(value["lane"], ("detector", "audio", "capture",
                                                   "tire_confirmation")))
-                _require(value["lane"] != "tire_confirmation" or input_contract == TRIAL_CONTRACT)
-                validate_projection(value["lane"], value["payload"])
+                _require(value["lane"] != "tire_confirmation"
+                         or input_contract != "private-trial-audit-v1")
+                validate_projection(value["lane"], value["payload"], contract=input_contract)
                 getattr(replay, value["lane"])(value["payload"])
+                if entry_visitor is not None:
+                    # The consumer is internal and bounded. Nothing it gathers
+                    # is trusted/exposed until this entire read and seal pass.
+                    entry_visitor(value["lane"], value["payload"])
                 entries += 1
             digest.update(raw)
     _require(header)

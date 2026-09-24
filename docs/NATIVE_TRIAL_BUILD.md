@@ -5,10 +5,27 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current driver-confirmed installation rebuild adds parked native service
+The current paired tire-counter replay rebuild adds **复盘采集＋换胎确认…**
+to the native capture tab. It binds the exact complete capture bytes and v3
+confirmation-frame anchors, then recomputes the current tire owner's historical
+counter/suspension/withdrawal states. Old unanchored assertions are not guessed.
+See [the paired workflow and limits](TIRE_CAPTURE_REPLAY.md).
+It passed **21 frozen checks** (thirteen numerical, five native/runtime, three
+memory-only voice) with system-only child PATH and saved keys removed. The new
+check records and seals invented frames plus all three assertion kinds through
+the actual owners, then requires exact paired replay and final withdrawal.
+The binary hash/size matched the build receipt. Computer Use checked the new
+button and instructions in both source and final frozen synthetic windows;
+both were closed normally. Isolated native tests cover both selected paths,
+second-picker cancellation and report rendering. No SDK, actual service,
+microphone/headphone or VR acceptance is added. The binary remains unsigned;
+installed copies, shortcuts and saved settings remain untouched.
+
+The preceding driver-confirmed installation rebuild added parked native service
 assertions, a revocable post-exit counter origin, local tire answers and a fixed
-private assertion audit lane. This is not independently reviewed installation
-evidence, physical wear, tire-age replay or a live calibrated tire decision.
+private assertion audit lane. That milestone did not add independently reviewed
+installation evidence, physical wear, tire-age replay or a live calibrated tire
+decision. Paired current-code replay is now implemented above.
 See [the workflow and boundary](LIVE_TIRE_INSTALLATION.md).
 It passed **20 frozen checks** (twelve numerical, five native/runtime, three
 memory-only voice) with system-only child PATH and saved keys removed. The new

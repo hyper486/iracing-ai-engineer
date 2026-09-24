@@ -96,6 +96,7 @@ def run_self_test() -> dict:
         run_synthetic_capture_replay,
         run_synthetic_pit_observation,
         run_synthetic_runtime,
+        run_synthetic_tire_capture_replay,
         run_synthetic_tire_confirmation,
     )
 
@@ -113,6 +114,9 @@ def run_self_test() -> dict:
         checks.append(run_synthetic_tire_confirmation())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_TIRE_CONFIRMATION_FAILED")
+        checks.append(run_synthetic_tire_capture_replay())
+        if checks[-1]["status"] != "PASS":
+            raise ValueError("SYNTHETIC_TIRE_CAPTURE_REPLAY_FAILED")
         checks.append(run_synthetic_capture_replay())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_CAPTURE_REPLAY_FAILED")

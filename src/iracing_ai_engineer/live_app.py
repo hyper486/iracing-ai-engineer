@@ -63,6 +63,7 @@ from .runtime_clock import monotonic_now
 from .sdk_probe import SdkProbeUnavailable, WindowsPyirsdkTransport
 from .spotter import SPOTTER_FIELDS, ProximitySpotter
 from .telemetry import SourceKind
+from .tire_frame_binding import tire_frame_anchor
 from .trial_audit import detector_reset, frame_projection
 
 FRESHNESS_S = 2.0
@@ -292,14 +293,23 @@ class AppState:
             command, self._tire_confirmation = self._tire_confirmation, None
             return command
 
-    def complete_tire_confirmation(self, generation, receipt):
+    def complete_tire_confirmation(self, generation, receipt, frame=None):
         with self._lock:
             if generation != self._generation:
                 return
             self._value["tire_confirmation_status"] = "APPLIED" if receipt else "REJECTED"
             trial = self._trial
-        if trial is not None and receipt is not None:
-            trial.offer("tire_confirmation", {"generation": generation, "assertion": receipt})
+            if trial is not None and receipt is not None:
+                # Like detector events, enqueue under the generation lock so
+                # a reconnect cannot place its RESET before this older receipt.
+                # This is bounded projection/queue work, never file I/O.
+                try:
+                    anchor = tire_frame_anchor(frame)
+                except Exception:
+                    trial.fail()
+                    return
+                trial.offer("tire_confirmation", {"generation": generation, "assertion": receipt,
+                                                   "anchor": anchor})
 
     def configure_strategy(self, parameters: StrategyParameters | None, *,
                            pit_draft_binding=None) -> None:
@@ -844,7 +854,7 @@ class _LiveAnalysis:
             if command is not None:
                 # Diagnostics cannot disable the independent analysis lanes.
                 with suppress(Exception):
-                    self._state.complete_tire_confirmation(self._generation, receipt)
+                    self._state.complete_tire_confirmation(self._generation, receipt, frame)
         if progressed and self._driving is not None:
             try:
                 self._driving.feed(frame, self._monitor.latest_sample, track_length_mm)

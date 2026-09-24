@@ -179,7 +179,7 @@ def test_metadata_projection_replays(trial, change, reason):
     trial.state.feed_spotter(replace(frame(1), **change))
     trial.close()
     assert reason in replay_trial(trial.path)["health_transitions"]
-    assert b"private" not in trial.path.read_bytes().replace(b"private-trial-audit-v2", b"")
+    assert b"private" not in trial.path.read_bytes().replace(b"private-trial-audit-v3", b"")
 
 
 def test_projection_never_copies_extra_sdk_values_or_identity():

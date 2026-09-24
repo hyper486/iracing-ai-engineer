@@ -393,8 +393,8 @@ class DesktopController:
     def cancel_capture_replay(self) -> None:
         self._capture_replay_cancel.set()
 
-    def replay_capture(self, path: Path) -> None:
-        if not isinstance(path, Path):
+    def replay_capture(self, path: Path, *, journal: Path | None = None) -> None:
+        if not isinstance(path, Path) or (journal is not None and not isinstance(journal, Path)):
             raise ValueError("INVALID_CAPTURE_PATH")
 
         def connected():
@@ -406,8 +406,10 @@ class DesktopController:
                 self._capture_report = {"status": "RUNNING"}
                 self._notice = "正在离线重算采集；不播放声音、不调用模型，可取消。"
             try:
-                report = replay_capture(path, cancelled=lambda: (
-                    self._closing or self._capture_replay_cancel.is_set() or connected()))
+                report = replay_capture(path,
+                    **({"journal": journal} if journal is not None else {}),
+                    cancelled=lambda: (
+                        self._closing or self._capture_replay_cancel.is_set() or connected()))
             except CaptureReplayError as error:
                 report = {"status": "REJECTED", "reason": error.code,
                           "heard": False, "live_acceptance": False}

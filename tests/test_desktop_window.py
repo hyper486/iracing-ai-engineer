@@ -838,6 +838,18 @@ def _native_capture_replay(native_window):
     window._poll()
     assert "没有接受部分结果" in window.capture_text.get("1.0", "end")
     assert not controller.questions and not controller.voice_calls
+    calls.clear()
+    controller.replay_capture = lambda path, **kwargs: calls.append((path, kwargs))
+    with patch("iracing_ai_engineer.desktop_window.filedialog.askopenfilename",
+               side_effect=["C:/Users/racer/capture-synthetic.jsonl",
+                            "C:/Users/racer/trial-synthetic.jsonl"]):
+        window._load_capture(with_tires=True)
+    assert calls == [(Path("C:/Users/racer/capture-synthetic.jsonl"), {
+        "journal": Path("C:/Users/racer/trial-synthetic.jsonl")})]
+    with patch("iracing_ai_engineer.desktop_window.filedialog.askopenfilename",
+               side_effect=["C:/Users/racer/capture-synthetic.jsonl", ""]):
+        window._load_capture(with_tires=True)
+    assert len(calls) == 1  # Cancelling either picker starts no partial replay.
 
 
 def _native_tire_confirmation(native_window):
