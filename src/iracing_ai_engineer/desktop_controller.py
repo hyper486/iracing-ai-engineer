@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import threading
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import asdict, replace
 from pathlib import Path
 
@@ -60,6 +61,8 @@ class DesktopController:
         self._last_trial = {"status": "DISABLED", "reason": "NOT_STARTED", "bytes": 0}
         self._trial_report = None
         self._capture_report = None
+        self._tire_review_plan = self._tire_review_sources = None
+        self._tire_review_export = None
         self._capture_replay_cancel = threading.Event()
         self._service_epoch = 0
         self._notice = "原生桌面窗口；不会启动游戏或发送车辆、进站控制指令。"
@@ -218,6 +221,7 @@ class DesktopController:
                 "notice": self._notice,
                 "trial_report": self._trial_report,
                 "capture_report": self._capture_report,
+                "tire_review_export": self._tire_review_export,
                 "settings": {
                     **asdict(self._settings),
                     "key_configured": bool(self._api_key),
@@ -393,29 +397,49 @@ class DesktopController:
     def cancel_capture_replay(self) -> None:
         self._capture_replay_cancel.set()
 
-    def replay_capture(self, path: Path, *, journal: Path | None = None) -> None:
+    def replay_capture(self, path: Path, *, journal: Path | None = None,
+                       for_tire_review=False) -> None:
         if not isinstance(path, Path) or (journal is not None and not isinstance(journal, Path)):
             raise ValueError("INVALID_CAPTURE_PATH")
+        if for_tire_review and journal is None:
+            raise ValueError("TIRE_REVIEW_REQUIRES_PAIR")
 
         def connected():
             return self._state.spotter_snapshot().get("connection") == "CONNECTED"
 
         def replay():
-            from .capture_replay import CaptureReplayError, replay_capture
+            from .capture_replay import (
+                CaptureReplayError,
+                replay_capture,
+                replay_capture_for_tire_review,
+            )
             with self._lock:
                 self._capture_report = {"status": "RUNNING"}
+                self._tire_review_plan = self._tire_review_sources = None
+                self._tire_review_export = None
                 self._notice = "正在离线重算采集；不播放声音、不调用模型，可取消。"
+            plan = None
             try:
-                report = replay_capture(path,
-                    **({"journal": journal} if journal is not None else {}),
-                    cancelled=lambda: (
-                        self._closing or self._capture_replay_cancel.is_set() or connected()))
+                def cancelled():
+                    return self._closing or self._capture_replay_cancel.is_set() or connected()
+                if for_tire_review:
+                    report, plan = replay_capture_for_tire_review(path, journal=journal,
+                                                                  cancelled=cancelled)
+                else:
+                    report = replay_capture(path,
+                        **({"journal": journal} if journal is not None else {}),
+                        cancelled=cancelled)
             except CaptureReplayError as error:
                 report = {"status": "REJECTED", "reason": error.code,
                           "heard": False, "live_acceptance": False}
             with self._lock:
                 self._capture_report = report
+                if plan is not None and not cancelled():
+                    self._tire_review_plan = plan
+                    self._tire_review_sources = (path, journal)
                 self._notice = "原始采集复盘结束；仅历史重算，不进入实时问答或语音。"
+                if self._tire_review_plan is not None:
+                    self._notice = "出站审核草稿已就绪；点击“审核并导出…”逐项审核，不会自动批准。"
 
         with self._lock:
             if connected():
@@ -426,6 +450,56 @@ class DesktopController:
                 raise ValueError("DESKTOP_BUSY")
             self._capture_replay_cancel.clear()
             self._schedule(replay)
+
+    def tire_review_plan(self):
+        """Private UI-only copy; never exposed to core snapshot/model context."""
+        with self._lock:
+            if (self._closing or self._configuring
+                    or self._state.spotter_snapshot().get("connection") == "CONNECTED"):
+                return None
+            return deepcopy(self._tire_review_plan)
+
+    @property
+    def tire_review_directory(self):
+        return self._store.root.parent / "tire-reviews"
+
+    def export_tire_review(self, *, plan_sha256, decisions, attested):
+        from .tire_review import export_reviewed_tires
+
+        # Copy before dispatch: Tk edits must not mutate the admitted job.
+        choices = deepcopy(decisions)
+        with self._lock:
+            plan = self.tire_review_plan()
+            if plan is None or plan["plan_sha256"] != plan_sha256:
+                raise ValueError("TIRE_REVIEW_PLAN_UNAVAILABLE")
+            if attested is not True:
+                raise ValueError("TIRE_REVIEW_ATTESTATION_REQUIRED")
+            capture, journal = self._tire_review_sources
+            self._capture_replay_cancel.clear()
+
+            def export():
+                def cancelled():
+                    return (self._closing or self._capture_replay_cancel.is_set()
+                        or self._state.spotter_snapshot().get("connection") == "CONNECTED")
+                with self._lock:
+                    self._tire_review_export = {"status": "RUNNING"}
+                    self._notice = "正在重新核对采集及本地证据，生成新的私有审核记录；可取消。"
+                try:
+                    result = export_reviewed_tires(capture, journal,
+                        expected_plan_sha256=plan_sha256, decisions=choices, attested=attested,
+                        directory=self.tire_review_directory, cancelled=cancelled)
+                except Exception:
+                    result = {"status": "REJECTED", "live_acceptance": False}
+                with self._lock:
+                    self._tire_review_export = result
+                    if result["status"] == "EXPORTED_SELF_ATTESTED":
+                        self._notice = ("已保存人工自述审核记录到私有 tire-reviews/"
+                            + result["directory_name"]
+                            + "；不认证真实换胎、轮胎磨损或比赛验收。")
+                    else:
+                        self._notice = ("未完成审核导出：请检查逐项选择、独立证据及离线状态；"
+                                        "未覆盖旧记录。")
+            self._schedule(export)
 
     def pit_observation_draft(self) -> dict | None:
         """Fresh read only; no settings, SDK or strategy mutation."""

@@ -876,6 +876,65 @@ def _native_tire_confirmation(native_window):
     assert not controller.questions and not controller.voice_calls
 
 
+def _native_tire_review(native_window):
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from iracing_ai_engineer.desktop_tire_review import TireReviewWindow
+
+    root, controller, window = native_window
+    calls = []
+    controller.tire_review_plan = lambda: None
+    window._review_tires()
+    assert "准备换胎审核" in window.action_var.get()
+    controller.replay_capture = lambda path, **kw: calls.append((path, kw))
+    with patch("iracing_ai_engineer.desktop_window.filedialog.askopenfilename",
+               side_effect=["C:/Users/racer/capture-synthetic.jsonl",
+                            "C:/Users/racer/trial-synthetic.jsonl"]):
+        window._load_capture(with_tires=True, for_tire_review=True)
+    assert calls[-1][1]["for_tire_review"] is True
+    plan = {"plan_sha256": "a" * 64, "exits": [
+        {"ordinal": i + 1, "decision_tick": 65 + 100 * i, "laps_completed": i,
+         "driver_assertion": "FULL_NEW_SET", "assertion_recomputed": True} for i in range(2)]}
+    exports = []
+    reviewer = TireReviewWindow(root, SimpleNamespace(
+        export_tire_review=lambda **kw: exports.append(kw)), plan)
+    try:
+        root.update()
+        assert not reviewer.kind.get() and not reviewer.attested.get()
+        from tkinter import ttk
+        style = ttk.Style(root)
+        assert style.lookup("TireReview.Treeview", "fieldbackground") == "#152130"
+        assert style.lookup("TireReview.Treeview", "foreground") == "#edf3f8"
+        reviewer.window.geometry("780x650")
+        root.update()
+        assert reviewer.export_button.winfo_rooty() + reviewer.export_button.winfo_height() <= (
+            reviewer.window.winfo_rooty() + reviewer.window.winfo_height())
+        reviewer._submit()
+        assert not exports and "逐项选择" in reviewer.notice.get()
+        reviewer.kind.set("整套四条新胎")
+        with patch("iracing_ai_engineer.desktop_tire_review.filedialog.askopenfilename",
+                   return_value="C:/Users/racer/invented-service-evidence.txt"):
+            reviewer._choose_evidence()
+        reviewer.offset.set("bad")
+        assert reviewer._save() is False
+        reviewer.offset.set("0")
+        assert reviewer._save()
+        reviewer.tree.selection_set("2")
+        root.update()
+        assert reviewer.current == 2 and not reviewer.kind.get()
+        reviewer.kind.set("未审核（不建立标签）")
+        reviewer.attested.set(True)
+        reviewer._submit()
+        assert len(exports) == 1 and exports[0]["attested"] is True
+        assert exports[0]["decisions"][0]["evidence_offset_s"] == 0
+        assert exports[0]["decisions"][1]["kind"] == "UNREVIEWED"
+        assert not controller.questions and not controller.voice_calls
+    finally:
+        if reviewer.window.winfo_exists():
+            reviewer.window.destroy()
+
+
 _NATIVE_SCENARIOS = {
     "settings": _native_settings, "question": _native_question,
     "close": _native_close, "validation": _native_validation,
@@ -890,6 +949,7 @@ _NATIVE_SCENARIOS = {
     "pit_observation_draft": _native_pit_observation_draft,
     "capture_replay": _native_capture_replay,
     "tire_confirmation": _native_tire_confirmation,
+    "tire_review": _native_tire_review,
 }
 
 

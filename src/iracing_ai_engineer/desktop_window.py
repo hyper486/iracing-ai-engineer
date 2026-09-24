@@ -133,6 +133,8 @@ def capture_report_text(report: object) -> str:
             return "确认日志未正常结束；不能用于胎组重算。仍可单独检查已完成的采集。"
         if value.get("reason") == "TIRE_REPLAY_LIMIT":
             return "确认记录超过本次复盘上限，未截断后冒充完整结果。"
+        if value.get("reason") in ("TIRE_REVIEW_UNAVAILABLE", "TIRE_REVIEW_LIMIT"):
+            return "无法建立审核草稿：需单一会话、完整可定位的出站记录，且不超过 256 次。"
         return "文件未被接受：需已正常结束的本机原始采集，且通过完整性与隐私路径检查。"
     if not (value.get("contract_version") == "native-capture-replay-v1"
             and value.get("status") == "RECOMPUTED"
@@ -986,6 +988,9 @@ class DesktopWindow:
         self._button(controls, "复盘采集＋换胎确认…",
                      lambda: self._load_capture(with_tires=True)).pack(side="left", padx=8)
         self._button(controls, "取消复盘", self._cancel_capture).pack(side="left", padx=8)
+        self._button(controls, "准备换胎审核…",
+            lambda: self._load_capture(with_tires=True, for_tire_review=True)).pack(side="left")
+        self._button(controls, "审核并导出…", self._review_tires).pack(side="left", padx=8)
         ttk.Label(parent, text="退出游戏前，先在设置页关闭录制并等待保存；退出后再复盘。"
                   "直接断开游戏可能留下不完整文件。\n"
                   "重算仅离线运行，最多显示 128 张历史卡片。"
@@ -1528,7 +1533,7 @@ class DesktopWindow:
             else:
                 self.action_var.set("正在后台核对日志；不播放声音、不调用模型。")
 
-    def _load_capture(self, *, with_tires=False) -> None:
+    def _load_capture(self, *, with_tires=False, for_tire_review=False) -> None:
         if self._closing:
             return
         directory = getattr(self.controller, "capture_directory", None)
@@ -1552,11 +1557,28 @@ class DesktopWindow:
                 journal = Path(selected)
             try:
                 self.controller.replay_capture(Path(name), **(
-                    {"journal": journal} if journal is not None else {}))
+                    {"journal": journal} if journal is not None else {}), **(
+                    {"for_tire_review": True} if for_tire_review else {}))
             except Exception:
                 self.action_var.set("请先退出游戏，并等待当前后台操作结束后再复盘。")
             else:
                 self.action_var.set("原始采集仅在本地重算；不发送给 DeepSeek，不进入实时语音。")
+
+    def _review_tires(self):
+        if self._closing:
+            return
+        from .desktop_tire_review import TireReviewWindow
+
+        getter = getattr(self.controller, "tire_review_plan", None)
+        plan = getter() if getter is not None else None
+        if plan is None:
+            self.action_var.set("请先退出游戏，点击“准备换胎审核…”并等待核对完成。")
+            return
+        prior = getattr(self, "_tire_review_window", None)
+        if prior is not None and prior.window.winfo_exists():
+            prior.window.lift()
+            return
+        self._tire_review_window = TireReviewWindow(self.root, self.controller, plan)
 
     def _cancel_capture(self) -> None:
         try:

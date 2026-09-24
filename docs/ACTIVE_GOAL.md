@@ -70,6 +70,11 @@ borrows current strategy assumptions. See [the workflow](NATIVE_CAPTURE_REPLAY.m
 An optional exact-byte/frame-bound capture + v3 assertion replay now recomputes
 the driver-confirmed tire counter and its withdrawal history under current rules;
 it is not independently reviewed installation evidence or original scheduling.
+The native post-session review now exports the existing offline tire-service
+history from explicitly reviewed exits and retained local evidence. No kind or
+attestation is preselected; receipts remain self-attested, not authenticated.
+See [the manual workflow](TIRE_SERVICE_REVIEW.md). It does not supply real labels
+or a calibrated/live tire model by itself.
 Stage B hardware acceptance, D's real-lap acceptance, E's actual in-car trial
 and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.

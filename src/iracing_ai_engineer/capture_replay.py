@@ -22,6 +22,7 @@ from .sdk_probe import RawSdkFrame
 from .spotter import SPOTTER_FIELDS
 from .tire_capture_replay import ERRORS as TIRE_ERRORS
 from .tire_capture_replay import TireReplayError, TireReplayJoin
+from .tire_review import TireReviewDraft, TireReviewError
 from .trial_replay import TrialReplayError, _plain_file
 
 MAX_CAPTURE_BYTES = 4 * 1024**3
@@ -45,6 +46,7 @@ _GROUPS = {
 _ERRORS = frozenset(("INVALID", "FILE_UNSAFE", "FILE_CHANGED", "TOO_LARGE", "IO_FAILED",
                      "CANCELLED", "CLOCK_REQUIRED", "SOURCE_UNSUPPORTED", "RUNTIME_FAULT"))
 _ERRORS |= TIRE_ERRORS
+_ERRORS |= {"TIRE_REVIEW_UNAVAILABLE", "TIRE_REVIEW_LIMIT"}
 
 
 class CaptureReplayError(ValueError):
@@ -205,6 +207,17 @@ class _Replay:
 
 def replay_capture(path: Path, *, journal: Path | None = None, cancelled=lambda: False) -> dict:
     """Read one sealed private clip; never publish partial or live-shaped data."""
+    return _replay_capture(path, journal=journal, cancelled=cancelled)[0]
+
+
+def replay_capture_for_tire_review(path: Path, *, journal: Path, cancelled=lambda: False):
+    """Separate private projection, never included in a question/voice snapshot."""
+    if journal is None:
+        raise CaptureReplayError("TIRE_REVIEW_UNAVAILABLE")
+    return _replay_capture(path, journal=journal, cancelled=cancelled, review=TireReviewDraft())
+
+
+def _replay_capture(path, *, journal, cancelled, review=None):
     replay = _Replay(cancelled)
     validator = _new_collector_validator(stale_after_s=.5, opponent_error_policy="degrade",
                                          require_receipt=True)
@@ -212,6 +225,8 @@ def replay_capture(path: Path, *, journal: Path | None = None, cancelled=lambda:
         replay.check_cancelled()
         if journal is not None:
             replay.tires = TireReplayJoin(journal, cancelled)
+            if review is not None:
+                replay.tires.assertion_observer = review.assertion
         with _plain_file(path, MAX_CAPTURE_BYTES) as (handle, size):
             expected_digest = None
             if replay.tires is not None:
@@ -239,14 +254,20 @@ def replay_capture(path: Path, *, journal: Path | None = None, cancelled=lambda:
                 if len(line) > MAX_LINE_BYTES or consumed > size:
                     raise CaptureReplayError("TOO_LARGE")
                 record = _load_record(line.decode("utf-8"), line_number)
-                validator.process(record, line_number=line_number)
+                sample = validator.process(record, line_number=line_number)
+                if review is not None and sample is not None:
+                    review.feed(sample)
                 replay.consume(record, validator)
             evidence = validator.finish()
             replay.check_cancelled()
             if expected_digest is not None and consumed_digest.hexdigest() != expected_digest:
                 raise CaptureReplayError("FILE_CHANGED")
             report = replay.report(evidence, size)
-        return report  # Identity check above must complete before exposing facts.
+            plan = (review.finish(evidence, validator, consumed_digest.hexdigest())
+                    if review else None)
+        return report, plan  # Identity check above must complete before exposing facts.
+    except TireReviewError as error:
+        raise CaptureReplayError(str(error)) from None
     except TireReplayError as error:
         raise CaptureReplayError(error.code) from None
     except CaptureReplayError:

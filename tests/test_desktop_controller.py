@@ -324,6 +324,54 @@ def test_paired_capture_replay_passes_explicit_journal_without_persisting(tmp_pa
         controller.replay_capture(capture, journal="not-a-path")
 
 
+def test_tire_review_private_copy_source_revalidation_and_job_cancellation(tmp_path, created,
+                                                                          monkeypatch):
+    from iracing_ai_engineer import capture_replay, tire_review
+
+    plan = {"plan_sha256": "a" * 64, "exits": [{"ordinal": 1}]}
+    monkeypatch.setattr(capture_replay, "replay_capture_for_tire_review", lambda *a, **kw: (
+        {"status": "RECOMPUTED"}, plan))
+    store = Store(tmp_path)
+    controller = created(store=store, reader=Reader())
+    capture, journal = tmp_path / "capture.jsonl", tmp_path / "trial.jsonl"
+    with pytest.raises(ValueError, match="REQUIRES_PAIR"):
+        controller.replay_capture(capture, for_tire_review=True)
+    controller.replay_capture(capture, journal=journal, for_tire_review=True)
+    wait_for(lambda: not controller._configuring)
+    copied = controller.tire_review_plan()
+    copied["exits"].clear()
+    assert controller.tire_review_plan()["exits"] == [{"ordinal": 1}]
+    assert "plan_sha256" not in str(controller.snapshot())
+    with pytest.raises(ValueError, match="PLAN_UNAVAILABLE"):
+        controller.export_tire_review(plan_sha256="wrong", decisions=[], attested=True)
+    with pytest.raises(ValueError, match="ATTESTATION"):
+        controller.export_tire_review(plan_sha256="a" * 64, decisions=[], attested=False)
+    entered, release, calls = threading.Event(), threading.Event(), []
+
+    def exporter(*args, **kwargs):
+        entered.set()
+        assert release.wait(2)
+        calls.append((args, kwargs["decisions"], kwargs["cancelled"]()))
+        raise ValueError("SYNTHETIC_PRIVATE_ERROR")
+
+    monkeypatch.setattr(tire_review, "export_reviewed_tires", exporter)
+    choices = [{"ordinal": 1}]
+    controller.export_tire_review(plan_sha256="a" * 64, decisions=choices, attested=True)
+    assert entered.wait(2)
+    choices.clear()
+    assert controller.tire_review_plan() is None
+    controller.cancel_capture_replay()
+    release.set()
+    wait_for(lambda: not controller._configuring)
+    assert calls == [((capture, journal), [{"ordinal": 1}], True)]
+    assert controller.snapshot()["tire_review_export"]["status"] == "REJECTED"
+    assert "SYNTHETIC_PRIVATE_ERROR" not in str(controller.snapshot()) and not store.saved
+    controller._state.connection("CONNECTED")
+    assert controller.tire_review_plan() is None
+    with pytest.raises(ValueError, match="PLAN_UNAVAILABLE"):
+        controller.export_tire_review(plan_sha256="a" * 64, decisions=[], attested=True)
+
+
 def test_capture_replay_refuses_connected_sdk_before_work(tmp_path, created):
     controller = created(store=Store(tmp_path), reader=Reader())
     controller._state.connection("CONNECTED")

@@ -79,6 +79,9 @@ and partial service, wrong hashes/clocks, duplicates, missing/legacy assertions,
 rejection, cancellation, bounds and repeatability. They do not establish that
 the telemetry came from iRacing or that tires were actually changed.
 
-Independently reviewed service-label export, event-matched live performance-model
-admission, calibrated benefit-versus-service/rejoin decisions and real driver/VR
-acceptance remain open. This feature does not weaken those evidence gates.
+A separate [native manual review and export](TIRE_SERVICE_REVIEW.md) now uses
+these paired files to locate exits and create self-attested service-history
+inputs after explicit human review. It does not fabricate real evidence or
+authenticate the reviewer. Event-matched live performance-model admission,
+calibrated benefit-versus-service/rejoin decisions and real driver/VR acceptance
+remain open. This feature does not weaken those evidence gates.

@@ -46,10 +46,40 @@ required running dependency. The final goal remains active and unaccepted.
 | Observed stint / tire-counter interval / raw pace | Packaged local trial; synthetic checks | Separate stint and tire observations, six consecutive clean-lap median comparison and local questions; not physical tire age, fuel-corrected degradation or a tire-change decision. |
 | Driver-confirmed tire installation | Native assertion and continuous counter origin | Explicit parked service assertion, observed exit, strict withdrawal, local question and private assertion audit. Not SDK service truth, independently reviewed history or a live performance-model decision. |
 | Paired tire-counter replay | Exact capture-byte and confirmation-frame binding | Current-code historical counter/state recomputation from a sealed capture and v3 journal; legacy unanchored assertions are refused. Not service authentication or original scheduling. |
+| Native tire-service review/export | Explicit self-attested workflow | Same-capture exit and identity/source pins, per-row human dispositions, independent local evidence and private CreateNew export. Not automatic approval, reviewer/service authentication or live model admission. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Native tire-service review/export
+
+The native capture tab now has a manual post-session workflow that produces
+the existing offline tire-service-history format. It maps actual captured
+off-pit samples, not the earlier confirmation tick, and derives the same adapter
+input-evidence and event-identity hashes as the strategy consumer. Every row
+requires an explicit disposition; reviewed rows require independent retained
+local evidence. Choices and the human declaration start empty/unchecked.
+Partial and unreviewed service retain the existing tire-age withdrawal behavior.
+
+Export revalidates the pair and plan, hashes bounded local evidence, creates new
+private review/history files and does not overwrite originals. The exported
+history can be passed to the existing finalizer/verifier; it does not load a
+live model. Receipts explicitly remain self-attested and unauthenticated.
+See [the complete workflow and limits](TIRE_SERVICE_REVIEW.md).
+
+Full regression passed **3,273 tests, with 44 skips**, in **739.30 seconds**.
+The final layout correction also passed an isolated native review rerun.
+The unsigned rebuilt EXE passed **22 frozen checks** (fourteen numerical,
+five native/runtime, three memory-only voice) with a system-only child PATH
+and saved keys removed; its size/hash matched the receipt. Computer Use found
+and corrected low-contrast unselected table rows and a clipped export button.
+Corrected source and final frozen inspection confirmed visible rows, blank
+choices, unchecked declaration and the export control; the frozen UI refused
+submission without review inputs. Both final QA windows were closed normally.
+Ruff, public-safety including history and exact staged/diff review passed.
+Real SDK/service, microphone/headphone and VR acceptance remain open. Installed
+copies, shortcuts and saved settings are unchanged.
 
 ## Paired tire-counter replay
 
@@ -62,8 +92,9 @@ also prevents a reconnect from reordering an older receipt after a reset.
 
 Legacy v1/v2 journals remain readable; old unanchored tire assertions cannot be
 used for paired recomputation. A mismatch or incomplete pair returns no partial
-tire result. Reviewed service labels and live tire-performance integration remain
-open. See [the complete workflow and boundary](TIRE_CAPTURE_REPLAY.md).
+tire result. The manual export workflow is now implemented above; obtaining real
+reviewed labels and live tire-performance integration remain open.
+See [the complete workflow and boundary](TIRE_CAPTURE_REPLAY.md).
 
 Full regression passed **3,249 tests, with 44 skips**, in **626.87 seconds**.
 Ruff, public-safety including history and exact staged-file/diff review passed.
@@ -88,7 +119,8 @@ That milestone's v2 assertion lane was fixed numeric/enum data. Its updated
 replay accepted v1 logs and reported assertions without claiming tire-age
 recomputation or verified service contents. This is not yet live calibrated
 tire-benefit integration. Paired v3 replay is now implemented above; reviewed
-label export remains open. See [the workflow and limits](LIVE_TIRE_INSTALLATION.md).
+label export is now available through the separate explicit manual workflow.
+See [the workflow and limits](LIVE_TIRE_INSTALLATION.md).
 
 At that installation milestone, full regression passed
 **3,221 tests, with 44 skips**, in **623.84 seconds**.

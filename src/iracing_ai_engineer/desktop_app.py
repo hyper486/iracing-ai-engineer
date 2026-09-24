@@ -79,6 +79,13 @@ class _SelfTestController:
     def set_recording(self, enabled):
         raise ValueError("SELF_TEST_ONLY")
 
+    def tire_review_plan(self):
+        from .synthetic_runtime import synthetic_tire_review_plan
+        return synthetic_tire_review_plan()
+
+    def export_tire_review(self, **kwargs):
+        raise ValueError("SELF_TEST_ONLY")
+
     def close(self):
         self.service.close()
         self.closed = True
@@ -98,6 +105,7 @@ def run_self_test() -> dict:
         run_synthetic_runtime,
         run_synthetic_tire_capture_replay,
         run_synthetic_tire_confirmation,
+        run_synthetic_tire_review,
     )
 
     checks = []
@@ -117,6 +125,9 @@ def run_self_test() -> dict:
         checks.append(run_synthetic_tire_capture_replay())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_TIRE_CAPTURE_REPLAY_FAILED")
+        checks.append(run_synthetic_tire_review())
+        if checks[-1]["status"] != "PASS":
+            raise ValueError("SYNTHETIC_TIRE_REVIEW_EXPORT_FAILED")
         checks.append(run_synthetic_capture_replay())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_CAPTURE_REPLAY_FAILED")

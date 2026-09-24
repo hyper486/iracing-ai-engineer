@@ -350,6 +350,52 @@ def run_synthetic_tire_capture_replay():
     return {"id": "SYNTHETIC_TIRE_CAPTURE_REPLAY", "status": "PASS" if passed else "FAIL"}
 
 
+def synthetic_tire_review_plan():
+    """Display-only invented QA rows, not exportable by the self-test controller."""
+    return {"plan_sha256": "0" * 64, "synthetic_demo": True, "exits": [
+        {"ordinal": i + 1, "decision_tick": 65 + i * 100, "laps_completed": 3 + i,
+         "tire_compound": 0, "tire_sets_used": 1,
+         "driver_assertion": kind, "assertion_recomputed": True} for i, kind in enumerate(
+            ("FULL_NEW_SET", "NO_TIRE_CHANGE", "PARTIAL_OR_UNKNOWN"))]}
+
+
+def run_synthetic_tire_review():
+    """Invented human choices/evidence in our own temporary directory only."""
+    import json
+    import tempfile
+    from pathlib import Path
+
+    from .capture_replay import replay_capture_for_tire_review
+    from .tire_review import export_reviewed_tires
+    from .tire_service_history import validate_service_history
+
+    passed = False
+    try:
+        with tempfile.TemporaryDirectory(prefix="aeis-synthetic-review-") as directory:
+            root = Path(directory)
+            capture, journal = write_synthetic_tire_trial(root)
+            _, plan = replay_capture_for_tire_review(capture, journal=journal)
+            evidence = root / "synthetic-only.txt"
+            evidence.write_text("Invented self-test evidence, not actual service.",
+                                encoding="utf-8")
+            choices = [{"ordinal": row["ordinal"], "kind": "PARTIAL_OR_UNKNOWN",
+                        "evidence_path": evidence, "evidence_offset_s": None}
+                       for row in plan["exits"]]
+            result = export_reviewed_tires(capture, journal,
+                expected_plan_sha256=plan["plan_sha256"], decisions=choices, attested=True,
+                directory=root / "exports")
+            history = json.loads((root / "exports" / result["directory_name"]
+                                  / "service-history.json").read_text("utf-8"))
+            validate_service_history(history, expected_history_sha256=result["history_sha256"],
+                expected_identity_sha256=plan["identity_sha256"],
+                expected_source_receipt_sha256=plan["source_receipt_sha256"])
+            passed = (result["reviewed_events"] == 3 and result["live_acceptance"] is False
+                      and all(row["kind"] == "PARTIAL_OR_UNKNOWN" for row in history["events"]))
+    except Exception:
+        pass
+    return {"id": "SYNTHETIC_TIRE_REVIEW_EXPORT", "status": "PASS" if passed else "FAIL"}
+
+
 def run_synthetic_pit_observation():
     """Real owner, local query and reviewed-draft guard; output aggregates only."""
     now = [1.]

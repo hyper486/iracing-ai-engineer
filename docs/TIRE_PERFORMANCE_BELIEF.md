@@ -167,7 +167,12 @@ The reviewer must establish all four newly installed tires, or an unchanged
 set, from retained service evidence. A pit checkbox/request, counter increment,
 pit exit, or assumed starting set alone is insufficient. Hashes bind the label;
 they do not make a false label true or turn a synthetic record into SDK evidence.
-There is no automatic labeling UI or unattended confirmation in this slice.
+The [native manual review workflow](TIRE_SERVICE_REVIEW.md) can now generate this
+exact format from a matched capture/journal pair, with explicit per-exit choices
+and retained local evidence. It never preselects a kind or attestation. Its
+review receipts state `SELF_ATTESTED_NOT_AUTHENTICATED`; the history provenance
+remains a caller-supplied review trust boundary, not service authentication.
+There is no automatic labeling or unattended approval of real records.
 
 The same held capture is replayed to match every label to its pit-road edge,
 tick, completed laps, compound and counter. A first-frame label cannot claim an

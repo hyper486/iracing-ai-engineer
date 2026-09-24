@@ -5,7 +5,23 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current paired tire-counter replay rebuild adds **复盘采集＋换胎确认…**
+The current tire-service review rebuild adds **准备换胎审核… / 审核并导出…**.
+It locates observed exits in an exact pair, requires explicit per-row human
+decisions/evidence and an unchecked-by-default attestation, then exports the
+existing offline service-history format plus self-attested review receipts.
+See [the workflow and limits](TIRE_SERVICE_REVIEW.md). It does not authenticate
+service or admit a live tire model. The unsigned rebuilt EXE passed **22 frozen
+checks** (fourteen numerical, five native/runtime, three memory-only voice)
+with a system-only child PATH and saved keys removed; its hash/size matched the
+build receipt. The new check creates invented pair/choices/evidence in its own
+temporary directory, exports and validates the existing history contract.
+Computer Use checked the corrected source and final frozen review window;
+visible rows, blank choices, unchecked declaration and the export button were
+confirmed. The frozen window refused submission without required review inputs.
+Both final QA windows were closed normally. No actual service, SDK, microphone,
+headphone or VR acceptance was added. Installed copies/settings remain untouched.
+
+The preceding paired tire-counter replay rebuild added **复盘采集＋换胎确认…**
 to the native capture tab. It binds the exact complete capture bytes and v3
 confirmation-frame anchors, then recomputes the current tire owner's historical
 counter/suspension/withdrawal states. Old unanchored assertions are not guessed.

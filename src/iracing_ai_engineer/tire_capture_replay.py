@@ -43,6 +43,7 @@ class TireReplayJoin:
         self.states = deque(maxlen=MAX_STATES)
         self.state_count = self.applied = self.rejected = self.rebased = 0
         self.last_state = None
+        self.assertion_observer = None
         report = _replay(path, None, cancelled, entry_visitor=self._visit)
         if report["complete"] is not True:
             raise TireReplayError("TIRE_JOURNAL_INCOMPLETE")
@@ -110,6 +111,8 @@ class TireReplayJoin:
                         owner.reset("REPLAY_ASSERTION_NOT_ADMITTED")
                 else:
                     self.applied += 1
+                if self.assertion_observer is not None:
+                    self.assertion_observer(row, receipt is not None)
         self.observe(owner, ordinal, segment)
 
     def _append(self, row, signature):

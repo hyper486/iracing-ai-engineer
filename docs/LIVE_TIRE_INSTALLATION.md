@@ -71,9 +71,10 @@ tail of assertions. **This journal replay does not recompute tire age or verify
 service contents.** Its replay-match label still applies only to the proximity
 detector. The separate [paired capture replay](TIRE_CAPTURE_REPLAY.md) now binds
 the full capture bytes and exact assertion frames, then recomputes the counter
-under current rules. Independently reviewed service-label export remains open;
-an assertion is not automatically promoted to the offline reviewed history or
-used to calibrate degradation.
+under current rules. A separate [native manual review](TIRE_SERVICE_REVIEW.md)
+can now export service labels after explicit human dispositions and retained
+independent local evidence. These are self-attested inputs, not authenticated
+truth; an assertion is never automatically promoted or used to calibrate degradation.
 
 Native admission of an exact event-matched, independently calibrated tire
 performance model, its benefit-versus-service/rejoin comparison, authentic
