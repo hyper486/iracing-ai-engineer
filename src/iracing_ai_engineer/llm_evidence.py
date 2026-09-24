@@ -261,7 +261,7 @@ def _live_strategy_facts(result, snapshot):
                             if item["id"] != "STRATEGY_UNAVAILABLE"]
     result["notices"].append(_entry("STRATEGY_CONDITIONAL",
         "燃油比较本身使用本次连接手填参数及完整圈预算；未定位进站口，不是进站圈指令。"
-        "未核验赛事规则、轮胎服务或出站交通，不保证最优。"))
+        "未核验赛事规则或物理胎耗；服务耗时仍是手填假设，不保证最优。"))
     facts = result["facts"]
     window = (f"从提问位置起的完整圈预算：{plan['fuel_stops']} 停，首停可行区间为 "
               f"{plan['earliest_laps_from_now']} 至 {plan['latest_laps_from_now']} 整圈后。"
@@ -286,6 +286,28 @@ def _live_strategy_facts(result, snapshot):
             facts.append(_entry(f"strategy.{name}_time",
                 f"{row['laps_from_now']} 整圈后方案，按手填速率和通道损失估算，"
                 f"仅通道与泵油时间损失 {loss[0]:.1f} 至 {loss[1]:.1f} 秒；不含其他停站服务。"))
+        options = row["service_options"]
+        if len(options) == 2:
+            fuel_only, tires = options
+            timing = snapshot["strategy_configuration"]["inputs"]["fuel_tire_service_timing"]
+            label = "并行" if timing == "PARALLEL" else "串行"
+            complete = tires["complete_loss_range_s"]
+            limit = (f"含手填其他开销后，两方案完整损失分别为 "
+                     f"{fuel_only['complete_loss_range_s'][0]:.1f}–"
+                     f"{fuel_only['complete_loss_range_s'][1]:.1f} 秒和 "
+                     f"{complete[0]:.1f}–{complete[1]:.1f} 秒。" if complete is not None else
+                     "未确认其他开销，不能把此驻站时间当成完整进站损失。")
+            facts.append(_entry(f"strategy.{name}_service",
+                f"{row['laps_from_now']} 整圈后方案，按手填{label}服务："
+                f"仅补油驻站 {fuel_only['stationary_service_time_s']:.1f} 秒；"
+                f"补油加四轮换胎驻站 {tires['stationary_service_time_s']:.1f} 秒，"
+                f"额外 {tires['extra_tire_time_s']:.1f} 秒。" + limit
+                + "不判断轮胎是否安全、是否该换或换后能快多少。"))
+            if not any(item["id"] == "strategy.service_brief" for item in facts):
+                facts.append(_entry("strategy.service_brief",
+                    f"手填{label}服务：早方案补油需 {fuel_only['fuel_time_s']:.1f} 秒，"
+                    f"四轮换胎使驻站额外 {tires['extra_tire_time_s']:.1f} 秒。"
+                    "只是耗时，不是换胎建议。"))
 
 
 def _live_rejoin_facts(result, snapshot):
@@ -299,11 +321,17 @@ def _live_rejoin_facts(result, snapshot):
     result["notices"].append(_entry("REJOIN_CONDITIONAL",
         "出站推演以手填进出站位置、完整进站损失及历史分段配速为条件，不是实测标定、"
         "置信区间、比赛排名或进站指令。不能保证其他车未来不进站或不改变配速。"))
+    cost_assumption = (
+        "完整损失逐方案计算为通道净损失，加补油/换胎作业，再加额外且不重叠的其他开销；"
+        "仅补油是算术对照，不是安全留胎建议。"
+        if inputs["other_service_low_s"] is not None else
+        f"含所有停站服务的固定总损失为 {inputs['complete_pit_loss_low_s']:.1f} 至 "
+        f"{inputs['complete_pit_loss_high_s']:.1f} 秒，须覆盖所比较的补油量；"
+        "此固定范围不区分换胎方案。")
     facts.append(_entry("rejoin.assumptions",
         f"手填进站口位于圈长 {inputs['pit_entry_fraction']:.4f}，"
         f"出站口位于 {inputs['pit_exit_fraction']:.4f}；相对留在赛道行驶，"
-        f"含所有停站服务的总损失为 {inputs['complete_pit_loss_low_s']:.1f} 至 "
-        f"{inputs['complete_pit_loss_high_s']:.1f} 秒，须覆盖所比较的补油量。"
+        + cost_assumption +
         "使用当前在赛道各车最近两圈的分段时间轨迹；"
         f"未纳入 {snapshot['motion']['excluded_count']} 个站内或无赛道位置槽位，"
         "不能据此宣称出站畅通；未核验赛事规则或物理胎耗。"))
@@ -315,9 +343,14 @@ def _live_rejoin_facts(result, snapshot):
             return side + "秒差范围较宽"
         return f"{side}{math.floor(bounds[0])}至{math.ceil(bounds[1])}秒"
 
-    for name, row in zip(("early", "late"), value["scenarios"], strict=False):
-        timing = "早方案" if name == "early" else "晚方案"
-        label = f"{timing}（约 {row['distance_to_entry_laps']:.2f} 圈后到进站口）"
+    for row in value["scenarios"]:
+        timing = "早方案" if row["endpoint"] == "early" else "晚方案"
+        option = row["service_option"]
+        suffix, service_label = {"UNSPECIFIED": ("", ""),
+                                 "FUEL_ONLY": ("_fuel", "仅补油对照"),
+                                 "FOUR_TIRES": ("_tires", "补油加四轮换胎")}[option]
+        name = row["endpoint"] + suffix
+        label = f"{timing}{service_label}（约 {row['distance_to_entry_laps']:.2f} 圈后到进站口）"
         if row["status"] != "READY":
             facts.append(_entry(f"rejoin.{name}", label + "：暂不能确定出站邻车关系或距离过远。"))
             continue
@@ -326,10 +359,13 @@ def _live_rejoin_facts(result, snapshot):
                 f"后车约 {math.floor(behind[0])} 至 {math.ceil(behind[1])} 秒")
         facts.append(_entry(f"rejoin.{name}", label + "：" + gaps
             + f"；补油预算 {row['fuel_add_l']:.1f} 升，之后还有 {row['further_stops']} 停。"
+            + f"完整损失假设 {row['complete_loss_range_s'][0]:.1f} 至 "
+            f"{row['complete_loss_range_s'][1]:.1f} 秒。"
             "秒差是沿赛道分段行驶时间，不代表名次。"))
         if not any(item["id"] == "rejoin.brief" for item in facts):
-            facts.append(_entry("rejoin.brief", f"手填{timing}，"
-                + short_gap("前", ahead) + "，" + short_gap("后", behind) + "。非指令。"))
+            facts.append(_entry("rejoin.brief", f"手填{timing}{service_label}，"
+                + short_gap("前", ahead) + "，" + short_gap("后", behind)
+                + ("。不判断留胎，非指令。" if suffix else "。非指令。")))
 
 
 def _live_pit_observation_facts(result, snapshot):

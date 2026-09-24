@@ -748,9 +748,19 @@ def _native_strategy_configuration(native_window):
     window._configure_strategy()
     assert len(calls) == 2
     assert StrategyParameters(**calls[-1]) == StrategyParameters(50, 2, 20, 24, .8, .05, 30, 35)
+    # Complete component mode is explicit; no default zero for missing overhead.
+    for name, text in (("complete_pit_loss_low_s", ""), ("complete_pit_loss_high_s", ""),
+                       ("other_service_low_s", "0"), ("other_service_high_s", "2"),
+                       ("tire_change_time_s", "20"), ("fuel_tire_service_timing", "并行")):
+        window.strategy_vars[name].set(text)
+    window._configure_strategy()
+    assert len(calls) == 3
+    assert StrategyParameters(**calls[-1]) == StrategyParameters(
+        50, 2, 20, 24, .8, .05, tire_change_time_s=20, fuel_tire_service_timing="PARALLEL",
+        other_service_low_s=0, other_service_high_s=2)
     window.strategy_vars["tank_capacity_l"].set("nan")
     window._configure_strategy()
-    assert len(calls) == 2 and "参数无效" in window.action_var.get()
+    assert len(calls) == 3 and "参数无效" in window.action_var.get()
     window._configure_strategy(clear=True)
     assert calls[-1] is None and all(not var.get() for var in window.strategy_vars.values())
     assert not controller.questions and not controller.voice_calls
@@ -782,10 +792,14 @@ def _native_pit_observation_draft(native_window):
         window.strategy_vars["tank_capacity_l"].set("100")
         window.strategy_vars["pit_loss_low_s"].set("5")
         window.strategy_vars["pit_loss_high_s"].set("6")
+        window.strategy_vars["other_service_low_s"].set("0")
+        window.strategy_vars["other_service_high_s"].set("0")
         window.pit_draft_button.invoke()
         assert state.strategy_inputs()[0] is None
         assert window.strategy_vars["tank_capacity_l"].get() == "100"
         assert window.strategy_vars["pit_loss_low_s"].get() == "5"
+        assert not window.strategy_vars["other_service_low_s"].get()
+        assert not window.strategy_vars["other_service_high_s"].get()
         assert "尚未应用" in window.pit_draft_notice.get()
         assert window.strategy_vars["complete_pit_loss_low_s"].get() == "13.7"
         window._configure_strategy()

@@ -41,12 +41,37 @@ required running dependency. The final goal remains active and unaccepted.
 | Native raw capture recomputation | Packaged historical-only local trial; synthetic checks | Separate native tab reuses fuel/corner/stint/pit owners on sealed private captures, with bounded cards and cancellation. No current-state, provider, voice or live-acceptance promotion. |
 | Conditional live fuel-stop comparison | Packaged local trial; synthetic checks | Session-scoped hand-entered assumptions, shared complete-lap stop arithmetic, next-fill/stint budgets and local PTT; not mapped pit-entry timing, optimal strategy or future rejoin. |
 | Conditional mapped rejoin | Packaged local trial; synthetic checks | User-confirmed entry/exit/full net-loss assumptions, two completed per-car phase profiles, reachable fuel-window endpoints, physical neighbor ranges and local PTT; not measured calibration, optimal timing or live acceptance. |
+| Conditional fuel / tire service comparison | Native settings and local questions; synthetic checks | Parallel/sequential four-tire costs, explicit other overhead and scenario-specific complete loss feed up to four mapped rejoin variants. Not tire condition, calibrated performance benefit or a keep/change recommendation. |
 | Historical pit-visit observation | Native local question and reviewed draft | SDK-edge elapsed interval, preceding phase-profile net-loss estimate and tank net change; optional stopped-only, revision-bound form draft, never automatically applied or promoted to calibrated future service cost. |
 | Observed stint / tire-counter interval / raw pace | Packaged local trial; synthetic checks | Separate stint and tire observations, six consecutive clean-lap median comparison and local questions; not physical tire age, fuel-corrected degradation or a tire-change decision. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Conditional service costs connected to rejoin
+
+The native comparison now connects next-stop fuel, entered four-tire service
+time and mapped traffic. Parallel and sequential work produce different
+incremental costs. Complete component mode requires explicit additional
+overhead, even when zero; missing cost is never silently assumed away. Fixed
+complete totals remain supported as a separate mode. Each mapped fuel/tire
+variant receives its own loss range, neighbor envelope and withdrawal reason.
+
+The local **换胎会多花多久** question and **问换胎耗时** shortcut give a short
+conditional answer without waiting for DeepSeek. Full native text retains the
+assumptions and does not turn the fuel-only counterfactual into safe tire
+retention advice. See [the setup, formulas and limits](LIVE_SERVICE_COMPARISON.md).
+
+Full regression passed **3,144 tests, with 44 skips**, in **610.51 seconds**;
+the focused suite passed 515 tests. Ruff, public-safety including history and
+exact staged-file/diff review passed. The unsigned rebuilt EXE passed all
+**19 frozen checks** under a system-only child PATH with saved keys removed.
+Visible synthetic source/frozen settings QA checked the new fields; source QA
+also checked Chinese choices, scrolling and explanation. It did not open the
+SDK, audio devices, private captures or provider. Installed copies, shortcuts
+and saved settings were not replaced. Real service calibration, tire-benefit
+integration, hearing and VR acceptance remain open.
 
 ## Full-schema char capture compatibility
 

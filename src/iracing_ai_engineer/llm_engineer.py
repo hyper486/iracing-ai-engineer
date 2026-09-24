@@ -71,8 +71,8 @@ def _topic(question: str) -> str:
     for topic, words in (
         ("driving", ("弯", "刹车", "油门", "路肩", "循迹", "驾驶", "丢时间", "改进", "练习",
                      "brak", "corner", "throttle")),
-        ("strategy", ("策略", "进站", "轮胎", "交通", "回场", "本段", "配速", "stint", "pace",
-                      "出站", "rejoin", "pit", "tire", "tyre", "traffic")),
+        ("strategy", ("策略", "进站", "轮胎", "换胎", "交通", "回场", "本段", "配速", "stint",
+                      "pace", "出站", "rejoin", "pit", "tire", "tyre", "traffic")),
         ("fuel", ("油", "fuel", "laps", "几圈")),
     ):
         if any(word in text for word in words):
@@ -89,7 +89,10 @@ def fallback_plan(context: Mapping, question: str) -> dict:
                     if any(word in question.lower() for word in (
                         "轮胎", "本段", "配速", "tire", "tyre", "stint", "pace")) else ())
         if any(word in question.lower() for word in ("出站", "回场", "rejoin", "落在哪")):
-            observed = ("rejoin.early", "rejoin.late", "rejoin.assumptions", *observed)
+            observed = ("rejoin.early", "rejoin.late", "rejoin.early_fuel", "rejoin.early_tires",
+                        "rejoin.late_fuel", "rejoin.late_tires", "rejoin.assumptions", *observed)
+        if any(word in question.lower() for word in ("换胎耗时", "服务", "service", "多花")):
+            observed = ("strategy.early_service", "strategy.late_service", *observed)
         if any(word in question.lower() for word in ("进站耗时", "这次进站用了", "last pit")):
             observed = ("pit_observation.elapsed", "pit_observation.baseline",
                         "pit_observation.fuel_change", "pit_observation.limits", *observed)
@@ -168,7 +171,7 @@ def _situation_answer(fact_ids, intent=None):
     # An unavailable-traffic response still belongs to this lane. Otherwise
     # unrelated bad-fuel intervals would cancel its fault notice every 0.5 s.
     return intent in ("traffic", "ahead", "behind", "pit_permission", "pit", "pit_plan",
-                      "rejoin", "pit_observation") or any(
+                      "rejoin", "pit_observation", "service") or any(
         key.startswith(("traffic.", "pit.", "strategy.", "rejoin.", "pit_observation."))
         for key in fact_ids)
 
@@ -187,7 +190,7 @@ def _selected_binding(binding, fact_ids, intent=None):
     rejoin = intent == "rejoin" or any(key.startswith("rejoin.") for key in fact_ids)
     pit_observation = intent == "pit_observation" or any(
         key.startswith("pit_observation.") for key in fact_ids)
-    strategy = rejoin or intent in ("pit", "pit_plan") or any(
+    strategy = rejoin or intent in ("pit", "pit_plan", "service") or any(
         key.startswith("strategy.") for key in fact_ids)
     if not situation and not driving and not stint:
         return binding[:6]

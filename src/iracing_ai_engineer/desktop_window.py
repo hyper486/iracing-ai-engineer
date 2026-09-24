@@ -804,6 +804,7 @@ class DesktopWindow:
         stint_buttons.pack(fill="x", pady=(0, 8))
         for label, question in (("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
                                 ("问配速", "配速变化"), ("问出站", "出站预测"),
+                                ("问换胎耗时", "换胎会多花多久"),
                                 ("问耗时", "这次进站用了多久")):
             self._button(stint_buttons, label, lambda q=question: self._quick(q),
                          question=True).pack(side="left", padx=(0, 10))
@@ -823,9 +824,9 @@ class DesktopWindow:
         frame.pack(fill="both", expand=True, pady=(7, 0))
 
     def _build_settings(self, parent) -> None:
-        ttk.Label(parent, text="本次连接的燃油进站比较 · 停车后设置").pack(anchor="w")
+        ttk.Label(parent, text="本次连接的补油、换胎耗时与出站比较 · 停车后设置").pack(anchor="w")
         ttk.Label(parent, text="进车后应用；换车、换会话、退车或断线后需重新确认，不自动保存。\n"
-                  "容量请使用本场规则允许的有效容量。出站四项可一起留空；手填假设不是实测标定。",
+                  "容量使用本场有效容量；其余留空表示未知，不是零。手填假设不是实测标定。",
                   style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=6)
         grid = ttk.Frame(parent)
         grid.pack(fill="x")
@@ -834,14 +835,21 @@ class DesktopWindow:
             ("refuel_rate_l_per_s", "加油速率（升/秒，可选）"),
             ("pit_loss_low_s", "通道损失下限（秒，不含驻站）"),
             ("pit_loss_high_s", "通道损失上限（秒，与下限一起填）"),
+            ("tire_change_time_s", "四轮换胎耗时（秒，可选）"),
+            ("fuel_tire_service_timing", "油胎作业方式（与换胎耗时一起填）"),
             ("pit_entry_fraction", "进站口圈长比例（0 至小于 1）"),
             ("pit_exit_fraction", "出站口圈长比例（0 至小于 1）"),
-            ("complete_pit_loss_low_s", "完整进站损失下限（秒）"),
-            ("complete_pit_loss_high_s", "完整进站损失上限（秒）"),
+            ("other_service_low_s", "分项模式：其他开销下限（秒）"),
+            ("other_service_high_s", "分项模式：其他开销上限（秒）"),
+            ("complete_pit_loss_low_s", "或固定模式：完整损失下限（秒）"),
+            ("complete_pit_loss_high_s", "或固定模式：完整损失上限（秒）"),
         )):
-            column, row = (row // 4) * 2, row % 4
+            column, row = (row // 6) * 2, row % 6
             ttk.Label(grid, text=label).grid(row=row, column=column, sticky="w", pady=3)
-            entry = ttk.Entry(grid, textvariable=self.strategy_vars[key], width=10)
+            entry = (ttk.Combobox(grid, textvariable=self.strategy_vars[key], width=8,
+                                 state="readonly", values=("", "并行", "串行"))
+                     if key == "fuel_tire_service_timing" else
+                     ttk.Entry(grid, textvariable=self.strategy_vars[key], width=10))
             entry.grid(row=row, column=column + 1, padx=10, pady=3)
             self._controls.append(entry)
         buttons = ttk.Frame(parent)
@@ -859,8 +867,11 @@ class DesktopWindow:
             self.root, "草稿须停车且观测完整后填写；不会自动应用。")
         ttk.Label(parent, textvariable=self.pit_draft_notice, style="Warn.TLabel",
                   wraplength=920).pack(anchor="w", pady=4)
-        ttk.Label(parent, text="右侧完整损失须包含所有停站服务，并相对留在赛道行驶计算；"
-                  "须覆盖所比较的补油量，不能填左侧不含驻站的通道损失。\n"
+        ttk.Label(parent, text="分项模式：通道净损失 + 油胎作业 + 其他开销。其他开销须明确覆盖"
+                  "所有额外且不重叠的驻站时间（举升、维修、排队等），没有也要填 0 / 0。\n"
+                  "固定模式：清空其他开销，填含全部服务的完整净损失范围；不区分换胎方案。"
+                  "两种模式不能混填。换胎作业含什么必须与其他开销对齐，不能重复计时。\n"
+                  "并行取油胎较长时间；串行相加。仅补油是算术对照，不是安全留胎建议。\n"
                   "出站预测还需所有在赛道车辆两圈连续轨迹；赛事规则未核验，不设置游戏油量。",
                   style="Muted.TLabel",
                   wraplength=920).pack(anchor="w")
@@ -1326,8 +1337,11 @@ class DesktopWindow:
                 raise ValueError("PIT_DRAFT_UNAVAILABLE")
             for key, value in draft["inputs"].items():
                 self.strategy_vars[key].set(str(value))
+            for key in ("other_service_low_s", "other_service_high_s"):
+                self.strategy_vars[key].set("")
             self._pit_draft_binding = draft["binding"]
-            self.pit_draft_notice.set("仅已填入草稿，尚未应用。SDK 边界不等于合流口，"
+            self.pit_draft_notice.set("已填固定总损失草稿并清空其他开销，尚未应用。"
+                "SDK 边界不等于合流口，"
                 "估计不含边界外损失；请核对位置、补油/换胎/维修及下次条件后修改并确认。")
         except Exception:
             self.pit_draft_notice.set("观测草稿不可用：需停车、连续完整进出站及两圈历史基线。")
@@ -1337,7 +1351,9 @@ class DesktopWindow:
             return
         try:
             parameters = (None if clear else {
-                key: float(variable.get().strip()) if variable.get().strip() else None
+                key: ({"并行": "PARALLEL", "串行": "SEQUENTIAL", "": None}.get(
+                    variable.get().strip(), "INVALID") if key == "fuel_tire_service_timing" else
+                    float(variable.get().strip()) if variable.get().strip() else None)
                 for key, variable in self.strategy_vars.items()
             })
             if parameters is not None:
@@ -1355,8 +1371,9 @@ class DesktopWindow:
             self.action_var.set("请先进入本人车辆并等待新鲜遥测，再确认本次参数。"
                                 if str(exc) == "STRATEGY_SOURCE_NOT_READY" else
                                 "参数无效：容量 0.1–1000 升，速率 0.05–50 升/秒，"
-                                "通道上下限 0–1000 秒；出站四项须一起填："
-                                "位置 0≤比例<1 且互异，完整损失 0.1–600 秒，低≤高。")
+                                "通道 0–1000 秒；换胎 0.1–600 秒需同时填作业方式及速率。"
+                                "其他开销 0–600 秒需完整通道/速率，不能与固定总损失混填；"
+                                "出站位置须成对且互异，0≤比例<1，并选择一种完整损失模式。")
         except Exception:
             self.action_var.set("策略参数未能应用；未重启采集或改动游戏设置。")
         else:

@@ -1,6 +1,6 @@
 # Conditional native mapped rejoin
 
-`live-mapped-rejoin-v1` connects the native app's fuel budget, source-bound user
+`live-mapped-rejoin-v2` connects the native app's fuel budget, source-bound user
 assumptions and per-car observed lap shapes. It is an experimental conditional
 forecast, not a calibrated confidence interval, optimal pit instruction, race
 position, tire-service decision or authentic in-car acceptance result.
@@ -8,8 +8,8 @@ position, tire-service decision or authentic in-car acceptance result.
 ## Driver setup and questions
 
 While parked with fresh owned in-car telemetry, open **模型与本地设置**. In
-addition to effective tank capacity, the four right-hand fields are optional
-as a group, but all are required for this forecast:
+addition to effective tank capacity, confirm both positions and one complete
+cost mode. The original fixed-total mode uses these four fields together:
 
 - Pit-entry and pit-exit fractions of the lap, in `[0, 1)`, distinct from each
   other. Use the correct track/layout and actual entry/exit merge positions.
@@ -17,6 +17,12 @@ as a group, but all are required for this forecast:
   on-track travel between those positions. Include all expected stationary
   service, overhead and queues; the range must cover both compared fuel doses.
   Do not enter the left-hand transit-only loss or total pit-lane travel time.
+
+V2 also supports [complete service components](LIVE_SERVICE_COMPARISON.md):
+rate, transit bounds and explicit other-overhead bounds, optionally with
+four-tire time and parallel/sequential work. Do not also fill fixed totals.
+This mode computes separate fuel-only and four-tire traffic scenarios, without
+judging tire condition or recommending tire retention/replacement.
 
 These are explicitly `USER_RULE`, not SDK geometry, measured calibration or
 verified event rules. No values are guessed. Settings are memory-only, bound to
@@ -27,7 +33,8 @@ An optional [historical pit-visit draft](LIVE_PIT_OBSERVATION.md) can prefill
 these four fields while stopped, after a complete observed service visit and
 two preceding profiles. It is not automatic calibration: review SDK boundaries,
 missing outside-boundary loss and future service comparability, edit as needed,
-then explicitly confirm. Filling alone never changes active strategy inputs.
+then explicitly confirm. Filling clears other-overhead form fields to avoid
+mixing cost modes; it never changes active strategy inputs.
 
 Ask **出站预测**, **进站后会落在哪**, **预测出站交通**, or use **问出站**. Exact
 routine questions stay local and make zero provider requests. The full answer
@@ -80,7 +87,8 @@ average-speed model that ignores slower corners.
 
 Only entries within two laps are evaluated. Total forecast time including
 service must not exceed three times the shorter observed player lap. At most
-two scenarios are evaluated. Physical neighbors are selected by circular track
+four scenarios (two endpoints by two service variants) are evaluated; fixed
+total mode retains at most two. Physical neighbors are selected by circular track
 distance, including lapped/multiclass cars, not by classification or the
 fastest arrival time. Their seconds are equivalent travel time along the track,
 not an official timing-line gap. An envelope crossing physical overlap or

@@ -45,6 +45,8 @@ _QUERIES = {
     ),
     "pit_plan": ("比较进站方案", "进站方案", "进站计划", "进站窗口", "这次进站加多少油",
                  "下一次进站加多少油", "pit plan", "pit comparison"),
+    "service": ("换胎会多花多久", "换胎多花多久", "比较换胎耗时", "比较进站服务",
+                "tire service time", "tyre service time"),
     "rejoin": ("出站预测", "进站后会落在哪", "出站后前后车情况", "预测出站交通",
                "rejoin prediction", "where will i rejoin"),
     "pit_observation": ("这次进站用了多久", "本次进站耗时", "上次进站用了多久",
@@ -148,6 +150,14 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     if intent not in _QUERIES or context.get("scope") != "live_snapshot":
         raise ValueError("INVALID_LIVE_QUERY")
     facts = {item["id"]: item["text"] for item in context["facts"]}
+    if intent == "service":
+        chosen = [key for key in ("strategy.service_brief", "strategy.early_service",
+                                  "strategy.late_service") if key in facts]
+        spoken = facts.get("strategy.service_brief",
+            "服务比较未就绪；需有效比赛燃油方案，并确认加油速率、四轮换胎耗时及并行或串行。")
+        body = "\n".join(facts[key] for key in chosen if key != "strategy.service_brief") or spoken
+        return {"topic": "strategy", "fact_ids": chosen, "spoken_text": spoken,
+                "text": body + "\n这是服务时间假设；不会操作车辆或进站设置。", "intent": intent}
     if intent == "pit_observation":
         notices = {item["id"]: item["text"] for item in context.get("notices", [])}
         chosen = [key for key in ("pit_observation.brief", "pit_observation.elapsed",
@@ -161,6 +171,8 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     if intent == "rejoin":
         notices = {item["id"]: item["text"] for item in context.get("notices", [])}
         chosen = [key for key in ("rejoin.brief", "rejoin.early", "rejoin.late",
+                                  "rejoin.early_fuel", "rejoin.early_tires",
+                                  "rejoin.late_fuel", "rejoin.late_tires",
                                   "rejoin.assumptions") if key in facts]
         spoken = facts.get("rejoin.brief", notices.get("REJOIN_UNAVAILABLE", "出站预测未就绪。"))
         body = "\n".join(facts[key] for key in chosen if key != "rejoin.brief") or spoken
@@ -274,6 +286,7 @@ def _render_pit_comparison(context, facts, intent):
             "pit.permission", "pit.flags", "strategy.brief", "strategy.window",
             "strategy.early", "strategy.late",
             "strategy.early_time", "strategy.late_time", "strategy.assumptions", "fuel.horizon",
+            "strategy.early_service", "strategy.late_service",
         ) if key in facts]
         body = "\n".join(facts[key] for key in chosen if key != "strategy.brief")
         # Detailed hypothetical fills stay visible; the VR answer reports the

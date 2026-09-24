@@ -52,7 +52,8 @@ implemented in source, including player pit permission and flag observations.
 Conditional whole-lap fuel-stop comparison is now connected to current fuel and
 session-scoped user assumptions. Conditional mapped pit/rejoin projection now
 connects hand-entered entry/exit/full-loss assumptions and observed phase tracks;
-measured calibration, rule/tire integration and real comparisons remain open. Stage D's
+conditional fuel/tire service components can now vary that loss per scenario.
+Measured calibration, rule/tire-performance integration and real comparisons remain open. Stage D's
 bounded recent-lap model and local coaching questions are now implemented in source;
 this is descriptive evidence, not causal coaching or offline gate promotion.
 Stage E now has a bounded private proximity/capture/audio journal and silent
@@ -145,8 +146,8 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   Native memory-only parameters require fresh owned telemetry and are revoked
   on source/session boundaries. Local questions, exact projection validation,
   short speech and latched plan/config withdrawal are covered with synthetic
-  SDK/model/PTT/native-window tests. This is not a pit-entry command, full stop
-  service model or optimal rejoin plan. See
+  SDK/model/PTT/native-window tests. Optional service components are described
+  below; this is not a pit-entry command or optimal rejoin plan. See
   [the fuel-stop contract](LIVE_FUEL_STOP_COMPARISON.md).
 - Implemented: packaged numerical integration checks and constant-space native
   answer withdrawal. A 500-lap/60 Hz invented stream processed 892,192 frames,
@@ -195,6 +196,13 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   The new unsigned local EXE passed all 17 frozen checks, including the real
   owner/local-question/draft path using invented data. This is not actual pit
   calibration, real-device hearing or VR acceptance.
+- Implemented: conditional fuel-only versus four-tire service arithmetic, with
+  explicit parallel/sequential work and additional non-overlapping overhead.
+  Complete component costs now feed distinct mapped rejoin variants; missing
+  overhead remains unknown, and fixed complete totals are a separate mode.
+  Native settings, short local service questions and revision-bound PTT keep
+  user assumptions separate from tire condition and calibrated benefits.
+  See [the service comparison contract](LIVE_SERVICE_COMPARISON.md).
 - Still open: obtain reviewed matched tire/service evidence and connect calibrated
   performance/service costs to endurance strategy. Check selected microphone
   and headphones, wheel/PTT, actual proximity latency and VR performance in a

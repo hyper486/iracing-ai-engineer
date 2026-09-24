@@ -343,16 +343,23 @@ def test_controller_applies_without_sdk_restart_provider_restart_or_disk_write(t
 
 
 @pytest.mark.parametrize("invalidate", [False, True])
-def test_ptt_speaks_local_comparison_unless_parameters_changed_during_synthesis(invalidate):
+@pytest.mark.parametrize("service_question", [False, True])
+def test_ptt_speaks_local_comparison_unless_parameters_changed_during_synthesis(
+    invalidate, service_question,
+):
     import threading
 
     from iracing_ai_engineer.voice_service import VoiceService
 
     helper = fixtures("voice_service")
     state, _ = configured()
+    if service_question:
+        state.configure_strategy(StrategyParameters(50, 2, 20, 24, tire_change_time_s=20,
+                                                    fuel_tire_service_timing="PARALLEL"))
     entered, release = threading.Event(), threading.Event()
     audio, speech = helper.Audio(), helper.Speech()
-    speech.recognize = lambda *_args, **_kwargs: {"text": "比较进站方案", "confidence": .9}
+    speech.recognize = lambda *_args, **_kwargs: {
+        "text": "换胎会多花多久" if service_question else "比较进站方案", "confidence": .9}
 
     def synthesize(text, **_kwargs):
         speech.synthesis.append(text)
@@ -379,7 +386,8 @@ def test_ptt_speaks_local_comparison_unless_parameters_changed_during_synthesis(
         helper.wait_for(lambda: voice.snapshot()["status"] == "READY")
         played = [wav for wav, _, _ in audio.plays if wav == b"SYNTHETIC_SPEECH"]
         assert len(played) == (0 if invalidate else 1)
-        assert len(speech.synthesis) == 1 and "12.0 升" in speech.synthesis[0]
+        assert len(speech.synthesis) == 1
+        assert ("14.0 秒" if service_question else "12.0 升") in speech.synthesis[0]
         assert service.snapshot()["requests_used"] == 0
     finally:
         release.set()

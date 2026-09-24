@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass
 
 from .fuel import whole_lap_fuel_window
 
-CONTRACT = "live-fuel-stop-comparison-v1"
+CONTRACT = "live-fuel-stop-comparison-v2"
 
 
 def _map(value):
@@ -38,6 +38,10 @@ class StrategyParameters:
     pit_exit_fraction: float | None = None
     complete_pit_loss_low_s: float | None = None
     complete_pit_loss_high_s: float | None = None
+    tire_change_time_s: float | None = None
+    fuel_tire_service_timing: str | None = None
+    other_service_low_s: float | None = None
+    other_service_high_s: float | None = None
 
     def __post_init__(self):
         if not _number(self.tank_capacity_l, .1):
@@ -49,15 +53,66 @@ class StrategyParameters:
             all(_number(value) for value in losses) and losses[0] <= losses[1]
         ):
             raise ValueError("STRATEGY_PARAMETERS_INVALID")
-        rejoin = (self.pit_entry_fraction, self.pit_exit_fraction,
-                  self.complete_pit_loss_low_s, self.complete_pit_loss_high_s)
-        if rejoin != (None, None, None, None) and not (
-            all(_number(value, high=1) and value < 1 for value in rejoin[:2])
-            and rejoin[0] != rejoin[1]
-            and all(_number(value, .1, 600) for value in rejoin[2:])
-            and rejoin[2] <= rejoin[3]
+        tires = (self.tire_change_time_s, self.fuel_tire_service_timing)
+        if tires != (None, None) and not (
+            _number(tires[0], .1, 600) and type(tires[1]) is str
+            and tires[1] in ("PARALLEL", "SEQUENTIAL")
+            and self.refuel_rate_l_per_s is not None
         ):
             raise ValueError("STRATEGY_PARAMETERS_INVALID")
+        other = (self.other_service_low_s, self.other_service_high_s)
+        if other != (None, None) and not (
+            all(_number(value, high=600) for value in other) and other[0] <= other[1]
+            and self.refuel_rate_l_per_s is not None and self.pit_loss_low_s is not None
+        ):
+            raise ValueError("STRATEGY_PARAMETERS_INVALID")
+        complete = (self.complete_pit_loss_low_s, self.complete_pit_loss_high_s)
+        if complete != (None, None) and not (
+            all(_number(value, .1, 600) for value in complete) and complete[0] <= complete[1]
+            and other == (None, None)
+        ):
+            raise ValueError("STRATEGY_PARAMETERS_INVALID")
+        geometry = (self.pit_entry_fraction, self.pit_exit_fraction)
+        if (geometry != (None, None) or complete != (None, None)) and not (
+            all(_number(value, high=1) and value < 1 for value in geometry)
+            and geometry[0] != geometry[1]
+            and (complete != (None, None) or other != (None, None))
+        ):
+            raise ValueError("STRATEGY_PARAMETERS_INVALID")
+
+
+def service_cost_options(parameters, fuel_add_l):
+    """Conditional service arithmetic, never tire condition or a service command.
+
+    Other service is an explicitly supplied *additional*, non-overlapping cost
+    covering every remaining overhead. Missing is not zero. Fixed complete-loss
+    inputs are deliberately not mixed with this component model.
+    """
+    rate = parameters.refuel_rate_l_per_s
+    if rate is None:
+        return []
+    fuel_time = fuel_add_l / rate
+    options = [("FUEL_ONLY", 0.0)]
+    if parameters.tire_change_time_s is not None:
+        options.append(("FOUR_TIRES", parameters.tire_change_time_s))
+    rows = []
+    for name, tire_time in options:
+        service = (fuel_time + tire_time if parameters.fuel_tire_service_timing == "SEQUENTIAL"
+                   else max(fuel_time, tire_time))
+        partial = ([parameters.pit_loss_low_s + service, parameters.pit_loss_high_s + service]
+                   if parameters.pit_loss_low_s is not None else None)
+        complete = ([partial[0] + parameters.other_service_low_s,
+                     partial[1] + parameters.other_service_high_s]
+                    if partial is not None and parameters.other_service_low_s is not None else None)
+        rows.append({
+            "service_option": name, "fuel_time_s": round(fuel_time, 6),
+            "tire_time_s": tire_time, "stationary_service_time_s": round(service, 6),
+            "extra_tire_time_s": round(service - fuel_time, 6),
+            "partial_loss_range_s": [round(n, 6) for n in partial] if partial is not None else None,
+            "complete_loss_range_s": ([round(n, 6) for n in complete]
+                                      if complete is not None else None),
+        })
+    return rows
 
 
 def source_scope(monitor, generation):
@@ -156,6 +211,8 @@ def project_strategy(monitor, fuel, session_type, parameters, revision):
     if window is None:
         result["reason"] = "NO_FUEL_STOP_IN_BUDGET"
         return result
+    if parameters.tire_change_time_s is not None:
+        result["tire_service"] = "CONDITIONAL_SERVICE_TIME_ONLY"
     # Compare only the feasible endpoints, not every lap of a long endurance
     # horizon. A next fill covers the minimum next stint preserving this stop
     # count; later fills may still be required. This is not cumulative deficit.
@@ -177,6 +234,7 @@ def project_strategy(monitor, fuel, session_type, parameters, revision):
             "fuel_add_l": round(add, 6), "further_stops": stops - 1,
             "pumping_time_s": round(pumping, 6) if pumping is not None else None,
             "total_loss_range_s": [round(value, 6) for value in loss] if loss else None,
+            "service_options": service_cost_options(parameters, add),
         })
     return result
 

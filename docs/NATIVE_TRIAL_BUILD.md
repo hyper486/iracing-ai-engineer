@@ -5,7 +5,19 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current rebuilt EXE also corrects connected-reader short polling waits, with an
+The current service-comparison rebuild adds session-only four-tire timing,
+parallel/sequential service and explicit other overhead. Complete costs feed
+separate fuel/tire rejoin variants. **问换胎耗时 / 换胎会多花多久** is a local
+question, not a tire recommendation. See [the contract](LIVE_SERVICE_COMPARISON.md).
+It passed **19 frozen checks** (eleven numerical, five native/runtime, three
+memory-only voice) with system-only child PATH and saved keys removed. Visible
+source-mode synthetic QA checked the new settings fields, Chinese mode menu,
+scrolling and instructions. The final frozen settings window was also checked
+and closed normally; isolated native tests cover form application.
+This does not certify SDK, microphone/headphone or VR operation. Installed
+copies, shortcuts and saved settings remain untouched.
+
+The earlier polling rebuild corrected connected-reader short waits, with an
 anonymous-memory CPU benchmark and optional idle timer comparison. It does not
 change SDK event waits or lap-quality thresholds; the measured timer improvement
 is not a real in-car/VR sampling-rate result. See [the timing boundary](SDK_READER_PACING.md).
@@ -52,22 +64,23 @@ The default frozen-binary self-test now feeds invented numeric frames through
 the real normalization, proximity, fuel, recent-corner, observed-stint,
 conditional stop and mapped-rejoin owners. It requires left/clear transitions,
 learned fuel, repeated-corner evidence, local fuel/coaching/stop/stint/tire-counter/
-raw-pace/rejoin answers and bounded retained state. These
+raw-pace/service/rejoin answers and bounded retained state. These
 questions must use no provider requests. The fixture is streaming, with only
 two cached lap shapes; it does not store a whole synthetic race in memory.
-Eight numerical checks require at least eight invented laps including capture
+Nine numerical checks require at least eight invented laps including capture
 guards; those guards are not six valid real driving laps or a live tire model.
-The added mapped-rejoin check uses invented entry/exit/full-loss assumptions,
+The mapped-rejoin check now uses invented entry/exit/component-cost assumptions,
 consistent per-car lap counters and the actual phase tracker/local answer path.
-It does not promote those assumptions to a real pit calibration.
+It does not promote those assumptions to a real pit calibration. The service
+check requires the actual local service-question path with zero provider use.
 
-A ninth numerical check separately exercises an invented 1,921-frame pit visit,
+A tenth numerical check separately exercises an invented 1,921-frame pit visit,
 including finish-line wrap, through the real analysis owner and local question.
 It requires separate historical elapsed/net-loss evidence, a stopped-only draft,
 explicit confirmation and withdrawal after invalidation. It does not certify
 service contents, geometry or future pit costs.
 
-A tenth numerical check writes an invented 1,921-frame temporary capture,
+An eleventh numerical check writes an invented 1,921-frame temporary capture,
 validates it and recomputes the pit observation using the separate historical
 owner. It cleans up only its own temporary fixture. No saved capture is opened,
 and no live-shaped state leaves the owner. It now also exercises schema-bound

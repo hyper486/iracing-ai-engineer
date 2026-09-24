@@ -4,6 +4,9 @@ Packaged experimental implementation with synthetic verification, not a
 real in-car/VR acceptance result. This lane is a fuel-budget comparison, not a
 validated pit-entry action, optimal strategy, tire-service plan or rejoin forecast.
 It does not promote offline strategy evidence gates or fabricate sealed receipts.
+V2 adds optional [fuel/tire service comparisons](LIVE_SERVICE_COMPARISON.md),
+with explicit parallel/sequential work and complete-component overhead. Those
+conditional service costs do not establish a tire-change recommendation.
 The separate [mapped rejoin lane](LIVE_MAPPED_REJOIN.md) adds optional explicit
 entry/exit/full-loss assumptions and per-car motion evidence; it never treats
 this lane's partial transit-plus-pumping loss as a full service budget.

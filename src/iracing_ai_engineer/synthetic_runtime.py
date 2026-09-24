@@ -302,8 +302,10 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
             value = state.snapshot()
             if not configured:
                 try:
-                    state.configure_strategy(StrategyParameters(200., 2., 20., 25.,
-                                                                .9, .1, 60., 62.))
+                    state.configure_strategy(StrategyParameters(
+                        200., 2., 20., 25., .9, .1, tire_change_time_s=20.,
+                        fuel_tire_service_timing="PARALLEL",
+                        other_service_low_s=5., other_service_high_s=7.))
                     configured = True
                 except ValueError:
                     pass
@@ -342,6 +344,9 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
                 counts["strategy_ready_publications"] += 1
                 if query is None and not counts["strategy.window"]:
                     query = ("比较进站方案", "strategy.window")
+                elif (query is None and strategy["tire_service"] == "CONDITIONAL_SERVICE_TIME_ONLY"
+                      and not counts["strategy.service_brief"]):
+                    query = ("换胎会多花多久", "strategy.service_brief")
             if query is None and fuel.get("status") == "READY" and not counts["fuel.current"]:
                 query = ("还有多少油", "fuel.current")
             stint = validated_stint(value)
@@ -389,7 +394,7 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
                 and all(counts[key] for key in ("fuel.current", "strategy.window",
                                                 "driving.practice", "stint.observed",
                                                 "tire.observed_context", "tire.pace",
-                                                "rejoin.brief"))):
+                                                "rejoin.brief", "strategy.service_brief"))):
             raise RuntimeError("SYNTHETIC_LOOPS_NOT_REACHED")
         phase = "RETAINED_STATE_BOUNDS"
         if not (peaks["retained_laps"] <= MAX_LAPS and peaks["buffered_rows"] <= MAX_ROWS * 2
@@ -408,6 +413,7 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
             "SYNTHETIC_REPEATED_CORNER_QUERY", "SYNTHETIC_FUEL_STOP_QUERY",
             "SYNTHETIC_STINT_OBSERVATION_QUERY", "SYNTHETIC_RAW_PACE_QUERY",
             "SYNTHETIC_MAPPED_REJOIN_QUERY",
+            "SYNTHETIC_SERVICE_COST_QUERY",
             "SYNTHETIC_RETAINED_STATE_BOUNDS")]
     except Exception:
         checks.append({"id": "SYNTHETIC_NUMERICAL_RUNTIME", "status": "FAIL"})

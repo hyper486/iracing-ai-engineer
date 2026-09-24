@@ -6,10 +6,16 @@ import math
 from collections.abc import Mapping
 
 from .live_motion import validated_motion
-from .live_strategy import _map, _same_typed_tree, validated_strategy
+from .live_strategy import (
+    StrategyParameters,
+    _map,
+    _same_typed_tree,
+    service_cost_options,
+    validated_strategy,
+)
 from .rejoin_projection import phase_time, project_phase_rejoin
 
-CONTRACT = "live-mapped-rejoin-v1"
+CONTRACT = "live-mapped-rejoin-v2"
 
 
 def unavailable_rejoin(snapshot, reason="SOURCE_NOT_READY"):
@@ -74,10 +80,10 @@ def project_rejoin(snapshot):
     last = math.floor(plan["latest_laps_from_now"] - first_distance + 1e-9)
     if last < first:
         return {**result, "reason": "NO_REACHABLE_PIT_ENTRY_IN_FUEL_WINDOW"}
-    loss = (inputs["complete_pit_loss_low_s"], inputs["complete_pit_loss_high_s"])
+    parameters = StrategyParameters(**inputs)
     profiles = motion["player"]["lap_profiles"]
     rows = []
-    for extra in dict.fromkeys((first, last)):
+    for endpoint, extra in zip(("early", "late"), dict.fromkeys((first, last)), strict=False):
         entry_position = next_entry + extra
         entry_distance = max(0, entry_position - position)
         exit_position = entry_position + ((exit_ - entry) % 1)
@@ -102,31 +108,40 @@ def project_rejoin(snapshot):
             "target_fuel_l": round(target, 6),
             "next_stint_laps": round(next_stint, 9),
             "further_stops": plan["fuel_stops"] - 1,
-            "complete_loss_range_s": list(loss),
+            "endpoint": endpoint,
             "ahead": None,
             "behind": None,
             "status": "WAIT",
             "reason_codes": [],
         }
-        if entry_distance > 2:
-            row["reason_codes"] = ["FORECAST_BEYOND_TWO_LAPS"]
-        elif exit_distance >= plan["remaining_laps"]:
-            row["reason_codes"] = ["EXIT_AFTER_BUDGET_HORIZON"]
-        elif max((phase_time(profile, exit_position) - phase_time(profile, position)) / 1e6
-                 + loss[1] for profile in profiles) > 3 * min(
-                     profile["elapsed_us"][-1] / 1e6 for profile in profiles):
-            row["reason_codes"] = ["FORECAST_TIME_HORIZON_EXCEEDED"]
+        if parameters.other_service_low_s is not None:
+            options = service_cost_options(parameters, max(0, target - arrival))
+            basis = "USER_COMPONENT_SUM"
         else:
-            ahead, behind, reasons = project_phase_rejoin(
-                motion, exit_progress_laps=exit_position, loss_range_s=loss
-            )
-            row.update(
-                ahead=ahead,
-                behind=behind,
-                reason_codes=reasons,
-                status="READY" if not reasons else "WAIT",
-            )
-        rows.append(row)
+            options = [{"service_option": "UNSPECIFIED", "complete_loss_range_s": [
+                inputs["complete_pit_loss_low_s"], inputs["complete_pit_loss_high_s"]]}]
+            basis = "USER_COMPLETE_TOTAL"
+        for option in options:
+            loss = option["complete_loss_range_s"]
+            variant = {**row, "service_option": option["service_option"],
+                       "loss_basis": basis, "complete_loss_range_s": loss}
+            if loss is None or not .1 <= loss[0] <= loss[1] <= 600:
+                variant["reason_codes"] = ["SERVICE_LOSS_OUT_OF_BOUNDS"]
+            elif entry_distance > 2:
+                variant["reason_codes"] = ["FORECAST_BEYOND_TWO_LAPS"]
+            elif exit_distance >= plan["remaining_laps"]:
+                variant["reason_codes"] = ["EXIT_AFTER_BUDGET_HORIZON"]
+            elif max((phase_time(profile, exit_position) - phase_time(profile, position)) / 1e6
+                     + loss[1] for profile in profiles) > 3 * min(
+                         profile["elapsed_us"][-1] / 1e6 for profile in profiles):
+                variant["reason_codes"] = ["FORECAST_TIME_HORIZON_EXCEEDED"]
+            else:
+                ahead, behind, reasons = project_phase_rejoin(
+                    motion, exit_progress_laps=exit_position, loss_range_s=loss
+                )
+                variant.update(ahead=ahead, behind=behind, reason_codes=reasons,
+                               status="READY" if not reasons else "WAIT")
+            rows.append(variant)
     ready = any(row["status"] == "READY" for row in rows)
     return {
         **result,
@@ -173,6 +188,7 @@ def rejoin_binding(snapshot):
         tuple(
             (
                 row.get("entry_progress_laps"),
+                row.get("service_option"), row.get("loss_basis"),
                 row.get("status"),
                 tuple(row["reason_codes"]) if type(row.get("reason_codes")) is list else (),
                 neighbor(row.get("ahead")),
@@ -188,7 +204,7 @@ def rejoin_notice(snapshot):
     reason = _map(snapshot.get("rejoin")).get("reason")
     return {
         "FUEL_SCENARIOS_UNAVAILABLE": "尚无有效补油方案，暂不能比较出站交通。",
-        "COMPLETE_PIT_ASSUMPTIONS_REQUIRED": "请先确认进出站位置和含全部服务的总进站损失范围。",
+        "COMPLETE_PIT_ASSUMPTIONS_REQUIRED": "请先确认进出站位置，以及完整总损失或完整服务分项。",
         "NO_FUEL_STOP_IN_BUDGET": "当前燃油预算不需要补油停站，暂不建立出站方案。",
         "PIT_PERMISSION_OR_FLAGS_UNRESOLVED": "进站许可或旗号尚不支持出站推演，请核对游戏。",
         "COMPLETE_LAP_MOTION_REQUIRED": "尚缺在赛道车辆的连续两圈配速轨迹，暂不能预测出站交通。",
