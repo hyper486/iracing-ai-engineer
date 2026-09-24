@@ -12,6 +12,7 @@ from tkinter import filedialog, ttk
 from typing import Any
 
 from .live_driving import driving_notice, validated_driving
+from .live_strategy import StrategyParameters, strategy_notice, validated_strategy
 from .live_traffic import validated_traffic
 from .llm_evidence import _live_frame_ready
 from .runtime_clock import monotonic_now
@@ -159,6 +160,7 @@ class DesktopView:
     spotter: str
     traffic: str
     driving: str
+    strategy: str
 
 
 class DesktopPresenter:
@@ -431,6 +433,15 @@ class DesktopPresenter:
                     driving_text = "驾驶分析：最近圈未通过完整性或条件筛选，暂不作建议。"
             elif driving_notice(telemetry) is not None:
                 driving_text = driving_notice(telemetry)
+        strategy_text = "进站比较：等待新鲜的本人车内驾驶数据。"
+        if fresh and _live_frame_ready(telemetry):
+            strategy = validated_strategy(telemetry)
+            if strategy is not None and strategy["status"] == "READY":
+                plan = strategy["plan"]
+                strategy_text = (f"进站比较：完整圈燃油预算 {plan['fuel_stops']} 停"
+                                 " · 可询问‘比较进站方案’；仅手填参数下的估计，不是进站指令。")
+            else:
+                strategy_text = strategy_notice(telemetry)
         return DesktopView(
             lifecycle=lifecycle, connection=connection, source=source, context=context_label,
             quality=quality_text,
@@ -444,7 +455,7 @@ class DesktopPresenter:
             session_available=_mapping(engineer.get("capabilities")).get("session") is True,
             answer_header=header, answer_text=answer,
             notice=_text(value.get("notice"), limit=600),
-            spotter=spotter, traffic=traffic_text, driving=driving_text,
+            spotter=spotter, traffic=traffic_text, driving=driving_text, strategy=strategy_text,
         )
 
 
@@ -487,6 +498,9 @@ class DesktopWindow:
         self.key_var = tk.StringVar(root, "")
         self.remember_var = tk.BooleanVar(root, False)
         self.recording_var = tk.BooleanVar(root, False)
+        self.strategy_vars = {key: tk.StringVar(root, "")
+                              for key in StrategyParameters.__dataclass_fields__}
+        self.strategy_buttons = []
         self.request_var = tk.StringVar(
             root, "文字问题不会自动提交或朗读；语音请到“语音与 VR”启用。"
         )
@@ -581,6 +595,8 @@ class DesktopWindow:
         )
         self._label(outer, "traffic", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
         self._label(outer, "driving", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
+        self._label(outer, "strategy", style="Muted.TLabel", wraplength=920).pack(
+            anchor="w", pady=3)
         self._label(outer, "source", style="Muted.TLabel").pack(anchor="w", pady=3)
         self._label(outer, "notice", style="Warn.TLabel", wraplength=980).pack(anchor="w", pady=4)
         ttk.Label(outer, textvariable=self.action_var, style="Warn.TLabel",
@@ -679,6 +695,7 @@ class DesktopWindow:
         for label, question in (
             ("问燃油", "当前燃油还能跑几圈？"),
             ("问策略", "该进站了吗？"),
+            ("比较补油", "比较进站方案"),
             ("问交通", "前后车情况？"),
             ("问驾驶", "哪里可以改进？"),
         ):
@@ -700,6 +717,33 @@ class DesktopWindow:
         frame.pack(fill="both", expand=True, pady=(7, 0))
 
     def _build_settings(self, parent) -> None:
+        ttk.Label(parent, text="本次连接的燃油进站比较 · 停车后设置").pack(anchor="w")
+        ttk.Label(parent, text="进车后应用；换车、换会话、退车或断线后需重新确认，不自动保存。\n"
+                  "容量请使用本场规则允许的有效容量。耗时两项可留空；以下是手填假设，不是实测标定。",
+                  style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=6)
+        grid = ttk.Frame(parent)
+        grid.pack(fill="x")
+        for row, (key, label) in enumerate((
+            ("tank_capacity_l", "有效油箱容量（升，必填）"),
+            ("refuel_rate_l_per_s", "加油速率（升/秒，可选）"),
+            ("pit_loss_low_s", "通道损失下限（秒，不含驻站）"),
+            ("pit_loss_high_s", "通道损失上限（秒，与下限一起填）"),
+        )):
+            ttk.Label(grid, text=label).grid(row=row, column=0, sticky="w", pady=3)
+            entry = ttk.Entry(grid, textvariable=self.strategy_vars[key], width=16)
+            entry.grid(row=row, column=1, padx=12, pady=3)
+            self._controls.append(entry)
+        buttons = ttk.Frame(parent)
+        buttons.pack(anchor="w", pady=8)
+        for label, callback in (("确认本次策略参数", self._configure_strategy),
+                                 ("清除策略参数", lambda: self._configure_strategy(clear=True))):
+            button = self._button(buttons, label, callback)
+            button.pack(side="left", padx=(0, 8))
+            self.strategy_buttons.append(button)
+        ttk.Label(parent, text="只比较完整圈燃油方案，不定位进站口、不设置游戏油量，"
+                  "不包含赛事规则、轮胎服务或出站交通。", style="Muted.TLabel",
+                  wraplength=920).pack(anchor="w")
+        ttk.Separator(parent).pack(fill="x", pady=12)
         ttk.Label(parent, text="模型设置影响文字与语音识别后的问题解读，不改变模拟器。",
                   style="Muted.TLabel").pack(anchor="w", pady=(0, 12))
         enable = ttk.Checkbutton(parent, text="启用 DeepSeek 云端问答（默认关闭）",
@@ -1051,8 +1095,8 @@ class DesktopWindow:
             "已配置密钥（不显示内容）" if settings.get("key_configured") is True
             else "尚未确认已配置密钥；无密钥时使用本地解读。"
         )
-        for key in ("connection", "spotter", "traffic", "driving", "source", "context", "advice",
-                    "learning", "recording",
+        for key in ("connection", "spotter", "traffic", "driving", "strategy", "source", "context",
+                    "advice", "learning", "recording",
                     "quality", "engineer_status", "engineer_error", "budget", "answer_header",
                     "notice"):
             self._vars[key].set(getattr(view, key))
@@ -1078,6 +1122,9 @@ class DesktopWindow:
             self.history_button.state(["disabled"])
         if not callable(getattr(self.controller, "set_recording", None)):
             self.recording_check.state(["disabled"])
+        if not callable(getattr(self.controller, "configure_strategy", None)):
+            for button in self.strategy_buttons:
+                button.state(["disabled"])
         self.question_text.configure(state="disabled" if all_disabled else "normal")
         self._render_voice(_mapping(snapshot).get("voice"),
                            all_disabled=all_disabled or view.lifecycle != "RUNNING")
@@ -1130,6 +1177,31 @@ class DesktopWindow:
         if not self.question_text.get("1.0", "end-1c").strip():
             self.question_text.insert("1.0", "请复盘本次历史会话的有效证据、质量问题和分析边界。")
         self._submit("session")
+
+    def _configure_strategy(self, *, clear=False) -> None:
+        if self._closing:
+            return
+        try:
+            parameters = (None if clear else {
+                key: float(variable.get().strip()) if variable.get().strip() else None
+                for key, variable in self.strategy_vars.items()
+            })
+            if parameters is not None:
+                StrategyParameters(**parameters)
+            self.controller.configure_strategy(parameters)
+        except ValueError as exc:
+            self.action_var.set("请先进入本人车辆并等待新鲜遥测，再确认本次参数。"
+                                if str(exc) == "STRATEGY_SOURCE_NOT_READY" else
+                                "参数无效：容量 0.1–1000 升，速率 0.05–50 升/秒，"
+                                "通道上下限 0–1000 秒且下限不大于上限。")
+        except Exception:
+            self.action_var.set("策略参数未能应用；未重启采集或改动游戏设置。")
+        else:
+            self.action_var.set("本次策略参数已清除。" if clear else
+                                "参数已应用于本次连接，可询问‘比较进站方案’；不会自动保存。")
+            if clear:
+                for variable in self.strategy_vars.values():
+                    variable.set("")
 
     def _configure(self) -> None:
         if self._closing:

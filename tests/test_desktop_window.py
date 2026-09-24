@@ -678,6 +678,30 @@ def _native_trial_replay(native_window):
     assert "不等于功能验收" in window.trial_text.get("1.0", "end")
 
 
+def _native_strategy_configuration(native_window):
+    from iracing_ai_engineer.live_strategy import StrategyParameters
+
+    _, controller, window = native_window
+    calls = []
+    controller.configure_strategy = calls.append
+    window._poll()
+    assert all(not button.instate(["disabled"]) for button in window.strategy_buttons)
+    window.strategy_vars["tank_capacity_l"].set("50")
+    window.strategy_vars["refuel_rate_l_per_s"].set("2")
+    window.strategy_vars["pit_loss_low_s"].set("20")
+    window.strategy_vars["pit_loss_high_s"].set("24")
+    window._configure_strategy()
+    assert len(calls) == 1
+    assert StrategyParameters(**calls[0]) == StrategyParameters(50, 2, 20, 24)
+    assert "不会自动保存" in window.action_var.get()
+    window.strategy_vars["tank_capacity_l"].set("nan")
+    window._configure_strategy()
+    assert len(calls) == 1 and "参数无效" in window.action_var.get()
+    window._configure_strategy(clear=True)
+    assert calls[-1] is None and all(not var.get() for var in window.strategy_vars.values())
+    assert not controller.questions and not controller.voice_calls
+
+
 _NATIVE_SCENARIOS = {
     "settings": _native_settings, "question": _native_question,
     "close": _native_close, "validation": _native_validation,
@@ -688,6 +712,7 @@ _NATIVE_SCENARIOS = {
     "voice_pending": _native_voice_pending_binding_and_lost_snapshot,
     "voice_initialization": _native_voice_delayed_initial_settings,
     "trial_replay": _native_trial_replay,
+    "strategy_configuration": _native_strategy_configuration,
 }
 
 

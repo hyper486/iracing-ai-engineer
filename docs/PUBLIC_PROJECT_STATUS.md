@@ -1,6 +1,6 @@
 # Public project status
 
-Snapshot: 2026-09-23 EDT
+Snapshot: 2026-09-24 EDT
 
 ## Product objective
 
@@ -36,12 +36,44 @@ required running dependency. The final goal remains active and unaccepted.
 | Current physical traffic / pit-state questions | Local source implementation; synthetic checks | Bound ahead/behind distance, player permission and flag facts in native display/PTT; independent of fuel readiness, not time gaps or optimal pit/rejoin advice. |
 | Incremental recent-lap coaching | Local source implementation; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
 | Private proximity / audio replay | Native source implementation; synthetic checks | Bounded local journal, exact detector recomputation, software-playback correlation and optional capture byte links; not audio reproduction, source authentication or human hearing. |
+| Conditional live fuel-stop comparison | Native source implementation; synthetic checks | Session-scoped hand-entered assumptions, shared complete-lap stop arithmetic, next-fill/stint budgets and local PTT; not mapped pit-entry timing, optimal strategy or future rejoin. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Fuel-answer and corner-collection continuity milestone
+## Conditional live fuel-stop comparison milestone
+
+The native source now connects the learned current-fuel model to shared
+whole-lap stop arithmetic, without making synthetic lap samples or offline
+receipts. Current-connection user inputs supply effective capacity and optional
+refueling rate/pit-transit-loss bounds. Local questions and the new comparison
+shortcut expose feasible earlier/later fuel scenarios, next dose, next stint
+and further stops. Cumulative finish deficit remains a separate question.
+
+Configuration is memory-only and source/session/player bound; applying does not
+restart SDK/model/provider workers or modify the simulator. Missing/inconsistent
+inputs explain why a comparison is unavailable. Numeric projections are
+independently recomputed with typed-structure checks, fixed provenance and no
+free-text forwarding. A projection fault is visible and contained. Ten-second
+answers have latched config/plan/source withdrawal, including changes between
+consumer polls; normal small consumption alone does not cancel every utterance.
+
+Validation covers synthetic SDK-to-model publication, arithmetic boundaries,
+multi-stop next-dose versus total deficit, parameters/reconnection, malformed
+projections, fault containment, fake PTT and hidden native settings controls.
+Complete regression: **2,729 passed, 44 skipped**, including 73 new checks.
+The two asynchronous PTT cases also passed five consecutive runs. Ruff, public
+safety including history and exact staged-file/diff review passed. Existing
+skips retain data/platform/private-deployment or explicit opt-in boundaries;
+they are not accepted live evidence.
+No real simulator, microphone, selected output or provider account is used for
+acceptance. Existing EXEs are not updated by this source commit. The windows
+start at the question position, not a mapped pit entrance; tire/service/rule
+integration, action-bound rejoin, resource soak, packaging and real in-car/VR
+validation remain open. See [the comparison contract](LIVE_FUEL_STOP_COMPARISON.md).
+
+## Earlier fuel-answer and corner-collection continuity milestone
 
 Two pre-packaging defects were reproduced using invented frames and the actual
 state/model owners. Exact direct-fuel amount answers were withdrawn on every

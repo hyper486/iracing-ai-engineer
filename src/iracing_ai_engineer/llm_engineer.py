@@ -20,6 +20,7 @@ from typing import Any
 
 from .live_driving import coaching_binding
 from .live_queries import LOCAL_QUERY_INTERVAL_S, live_query_intent, render_live_query
+from .live_strategy import strategy_binding
 from .live_traffic import TRAFFIC_ANSWER_TTL_S, situation_binding
 from .llm_client import DeepSeekClient, LLMError
 from .llm_evidence import build_live_context, current_fuel_observation, load_session_context
@@ -81,7 +82,8 @@ def fallback_plan(context: Mapping, question: str) -> dict:
     if topic == "strategy" and context.get("scope") == "live_snapshot":
         available = {item["id"] for item in facts}
         return {"topic": topic, "fact_ids": [key for key in (
-            "pit.permission", "pit.flags", "fuel.finish_balance", "fuel.horizon",
+            "pit.permission", "pit.flags", "strategy.window", "strategy.early", "strategy.late",
+            "strategy.assumptions", "fuel.finish_balance", "fuel.horizon",
             "traffic.ahead", "traffic.behind", "traffic.overlap", "traffic.coverage",
             "fuel.minimum_stops", "fuel.range_laps", "fuel.reserve",
         ) if key in available][:6], "notice_ids": []}
@@ -144,15 +146,15 @@ def _binding(snapshot: Mapping) -> tuple:
         snapshot.get("session_type"), telemetry.get("session_num"),
         telemetry.get("lap_number"), monitor.get("binding_sha256"),
         situation_binding(snapshot), coaching_binding(snapshot),
-        observation,
+        observation, strategy_binding(snapshot),
     )
 
 
 def _situation_answer(fact_ids, intent=None):
     # An unavailable-traffic response still belongs to this lane. Otherwise
     # unrelated bad-fuel intervals would cancel its fault notice every 0.5 s.
-    return intent in ("traffic", "ahead", "behind", "pit_permission", "pit") or any(
-        key.startswith(("traffic.", "pit.")) for key in fact_ids)
+    return intent in ("traffic", "ahead", "behind", "pit_permission", "pit", "pit_plan") or any(
+        key.startswith(("traffic.", "pit.", "strategy.")) for key in fact_ids)
 
 
 def _selected_binding(binding, fact_ids, intent=None):
@@ -163,6 +165,7 @@ def _selected_binding(binding, fact_ids, intent=None):
         return (binding[0], binding[8], *binding[2:6])
     situation = _situation_answer(fact_ids, intent)
     driving = intent == "driving" or any(key.startswith("driving.") for key in fact_ids)
+    strategy = intent in ("pit", "pit_plan") or any(key.startswith("strategy.") for key in fact_ids)
     if not situation and not driving:
         return binding[:6]
     # Standalone traffic/pit observations do not depend on fuel learning or its
@@ -170,7 +173,8 @@ def _selected_binding(binding, fact_ids, intent=None):
     base = binding[:6]
     if all(key.startswith(("traffic.", "pit.", "driving.")) for key in fact_ids):
         base = (binding[0], None, *binding[2:6])
-    return (*base, binding[6] if situation else None, binding[7] if driving else None)
+    return (*base, binding[6] if situation else None, binding[7] if driving else None,
+            binding[9] if strategy else None)
 
 
 class EngineerService:

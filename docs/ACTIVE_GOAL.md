@@ -48,7 +48,9 @@ in source. Synthetic backend, local memory-only synthesis and visible synthetic
 UI checks are not a real hearing/VR acceptance pass. No new EXE deployment is
 claimed. Stage C's local current-fuel and physical-traffic question slices are
 implemented in source, including player pit permission and flag observations.
-Action-bound strategy integration and real lap comparisons remain open. Stage D's
+Conditional whole-lap fuel-stop comparison is now connected to current fuel and
+session-scoped user assumptions. Action-bound pit/rejoin integration and real
+lap comparisons remain open. Stage D's
 bounded recent-lap model and local coaching questions are now implemented in source;
 this is descriptive evidence, not causal coaching or offline gate promotion.
 Stage E now has a bounded private proximity/capture/audio journal and silent
@@ -104,8 +106,9 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   strict silent replay and visible recording faults. No microphone recording,
   transcript or provider call; no synthetic result becomes hearing acceptance.
   See [the replay contract](PRIVATE_TRIAL_REPLAY.md).
-- Verify endurance-duration resource limits and integrate supported live strategy
-  before claiming an integrated trial build. Journal replay currently covers
+- Verify endurance-duration resource limits before claiming an integrated trial
+  build of the supported slices. Action-bound pit/rejoin integration remains
+  open beyond the conditional fuel budget. Journal replay currently covers
   proximity and software audio, not a simulated hardware/PTT/LLM rerun.
 - Implemented: exact direct-fuel amount answers have a separate observation
   revision, so unrelated model-invalid intervals cannot repeatedly cancel them.
@@ -118,9 +121,19 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   Synthetic 60 Hz sparse-frame checks are not a real reader-rate improvement.
   Measure current acquisition under in-car/VR load; the older roughly 96%
   spectator result would still fail, and thresholds must not be silently relaxed.
-- Rebuild/package after those integrations, then check selected microphone and
+- Implemented: shared whole-lap fuel arithmetic now produces up to two current
+  conditional next-stop/stint budgets, with optional transit-plus-pumping loss.
+  Native memory-only parameters require fresh owned telemetry and are revoked
+  on source/session boundaries. Local questions, exact projection validation,
+  short speech and latched plan/config withdrawal are covered with synthetic
+  SDK/model/PTT/native-window tests. This is not a pit-entry command, full stop
+  service model or optimal rejoin plan. See
+  [the fuel-stop contract](LIVE_FUEL_STOP_COMPARISON.md).
+- Next: verify endurance resource bounds and rebuild/package these supported
+  source slices as a native trial build. Then check selected microphone and
   headphones, wheel/PTT, actual proximity latency and VR performance in a
-  user-driven session. A local TTS duration is not output or end-to-end latency.
+  user-driven session. A local TTS duration is not output or end-to-end latency;
+  a trial build does not close the full tire/rule/action-bound rejoin goal.
 
 For each major advance: update status, run Ruff and all pytest tests, scan public
 safety including history, review exact staged files/diff, commit with the configured

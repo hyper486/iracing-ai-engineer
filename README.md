@@ -33,6 +33,8 @@ practice opportunity.
   comparable-condition filters and local PTT answers for repeated corner patterns.
 - Private bounded proximity/audio journals and silent native replay in source,
   separating detected events, software playback and unconfirmed human hearing.
+- Conditional live fuel-stop comparisons in source: session-scoped capacity/rate/
+  transit assumptions, next-fill and stint budgets, and local PTT; not optimal pit timing.
 - An experimental local fuel dashboard with private recording and opt-in local
   practice speech; race speech stays disabled.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
@@ -53,6 +55,9 @@ new **哪里可以改进？** question and why an observed loss is not a promise
 The [private trial replay guide](docs/PRIVATE_TRIAL_REPLAY.md) explains how a
 recorded proximity input can be recomputed and correlated with software audio
 receipts without another game session or cloud call.
+The [fuel-stop comparison guide](docs/LIVE_FUEL_STOP_COMPARISON.md) explains the
+new **比较进站方案** question, current-connection inputs and the distinction
+between cumulative missing fuel and a conditional next-stop dose.
 
 The September 4 correctness/privacy review fixes are documented in
 [the review-fix record](docs/REVIEW_FIXES.md). Rejoin estimates now bind the

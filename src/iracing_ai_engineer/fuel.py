@@ -167,6 +167,27 @@ class PitWindow:
     label: Literal["estimated"] = "estimated"
 
 
+def whole_lap_fuel_window(
+    *, current_fuel_l: float, tank_capacity_l: float, reserve_l: float,
+    burn_l_per_lap: float, remaining_laps: int,
+) -> tuple[int, int, int | None, PitWindow | None]:
+    """Shared arithmetic for admitted inputs, not an evidence-admission gate.
+
+    Stops occur after integral complete laps from the decision position. This
+    conservative discretization neither locates pit entry nor proves an optimum.
+    Return a missing stop count if a full tank cannot cover a required lap.
+    """
+    current = math.floor((max(0.0, current_fuel_l - reserve_l) + 1e-12) / burn_l_per_lap)
+    full = math.floor((tank_capacity_l - reserve_l + 1e-12) / burn_l_per_lap)
+    if remaining_laps <= current:
+        return current, full, 0, None
+    if full < 1:
+        return current, full, None, None
+    stops = math.ceil((remaining_laps - current) / full)
+    window = PitWindow(max(0, remaining_laps - stops * full), current)
+    return current, full, stops, window
+
+
 @dataclass(frozen=True)
 class FuelStrategyResult:
     """A ready plan or an explicitly unavailable, fail-closed result."""
@@ -443,12 +464,12 @@ def estimate_fuel_strategy(
         laps_to_go = math.ceil(float(remaining_time_s) / lap_time) + timed_race_extra_laps
         remaining_label = "derived"
 
-    usable_current = max(0.0, current_fuel_l - reserve_l)
-    usable_full_tank = tank_capacity_l - reserve_l
-    safe_current_laps = math.floor((usable_current + 1e-12) / planning_burn)
-    safe_full_tank_laps = math.floor((usable_full_tank + 1e-12) / planning_burn)
+    safe_current_laps, safe_full_tank_laps, pit_stops, pit_window = whole_lap_fuel_window(
+        current_fuel_l=current_fuel_l, tank_capacity_l=tank_capacity_l, reserve_l=reserve_l,
+        burn_l_per_lap=planning_burn, remaining_laps=laps_to_go,
+    )
 
-    if laps_to_go > safe_current_laps and safe_full_tank_laps < 1:
+    if pit_stops is None:
         return _not_ready(
             "TANK_CANNOT_COVER_ONE_CONSERVATIVE_LAP",
             current_fuel_l=current_fuel_l,
@@ -464,22 +485,11 @@ def estimate_fuel_strategy(
         conservative_to_end = planning_burn * laps_to_go + reserve_l
     additional_fuel = max(0.0, conservative_to_end - current_fuel_l)
 
-    if laps_to_go <= safe_current_laps:
-        pit_stops = 0
-        pit_window = None
-    else:
-        laps_after_current_stint = laps_to_go - safe_current_laps
-        pit_stops = math.ceil(laps_after_current_stint / safe_full_tank_laps)
-        earliest = max(0, laps_to_go - pit_stops * safe_full_tank_laps)
-        latest = safe_current_laps
-        if earliest > latest:
-            return _not_ready(
-                "NO_FEASIBLE_PIT_WINDOW",
-                current_fuel_l=current_fuel_l,
-                rejection_counts=rejection_counts,
-                burn=burn_summary,
-            )
-        pit_window = PitWindow(earliest_lap_from_now=earliest, latest_lap_from_now=latest)
+    if pit_window is not None and pit_window.earliest_lap_from_now > pit_window.latest_lap_from_now:
+        return _not_ready(
+            "NO_FEASIBLE_PIT_WINDOW", current_fuel_l=current_fuel_l,
+            rejection_counts=rejection_counts, burn=burn_summary,
+        )
 
     return FuelStrategyResult(
         status="ready",

@@ -68,9 +68,13 @@ Synthetic arithmetic example: 20 L current fuel, 2 L/lap, 2 L reserve and a
 next stop. A configured 50 L capacity permits a one-stop fuel-only lower bound;
 it says nothing about mandatory stops, service time or traffic advantage.
 
-The native reader currently uses the default unknown tank capacity. It can
-report a cumulative deficit, but withholds a positive minimum-stop count rather
-than guessing capacity. The library/CLI supports explicit capacity. Missing
+The native reader uses the default unknown tank capacity. It can report a
+cumulative deficit but does not guess a positive minimum-stop count. The new
+[conditional fuel-stop comparison](LIVE_FUEL_STOP_COMPARISON.md) accepts explicit
+current-connection capacity separately, without restarting the reader. When
+ready, **还要几停** reports its labeled complete-lap budget; **这次进站加多少油**
+and **比较进站方案** distinguish the next hypothetical fill from total deficit.
+The library/CLI also supports explicit capacity. Missing
 pit-loss calibration, event rules and action-bound future traffic still block an optimal
 pit/rejoin recommendation. Tire wear and driving advice are not inferred here.
 Current physical car distances and pit-state facts are now separate inputs;

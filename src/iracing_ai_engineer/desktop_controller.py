@@ -12,6 +12,7 @@ from .desktop_settings import DesktopSettings, SettingsStore
 from .live_app import AppState, run_reader
 from .live_fuel import LiveFuelConfig
 from .live_queries import live_query_intent
+from .live_strategy import StrategyParameters
 from .llm_client import DeepSeekClient, LLMError
 from .llm_engineer import EngineerConfig, EngineerService
 from .runtime_clock import monotonic_now
@@ -380,6 +381,19 @@ class DesktopController:
                 self._notice = "本地诊断回放结束；未播放音频，不代表真实驾驶验收。"
 
         self._schedule(replay)
+
+    def configure_strategy(self, parameters: dict | None) -> None:
+        """Bounded in-memory assumptions; does not restart SDK or save settings."""
+        if parameters is not None and type(parameters) is not dict:
+            raise ValueError("STRATEGY_PARAMETERS_INVALID")
+        try:
+            parsed = StrategyParameters(**parameters) if parameters is not None else None
+        except (TypeError, ValueError):
+            raise ValueError("STRATEGY_PARAMETERS_INVALID") from None
+        with self._lock:
+            if self._closing or self._configuring or self._lifecycle != "RUNNING":
+                raise ValueError("STRATEGY_SOURCE_NOT_READY")
+            self._state.configure_strategy(parsed)
 
     def set_recording(self, enabled: bool) -> None:
         if type(enabled) is not bool:

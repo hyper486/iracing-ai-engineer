@@ -43,6 +43,8 @@ _QUERIES = {
         "该进站了吗", "现在该进站吗", "我要进站吗", "什么时候进站", "何时进站",
         "什么时候加油", "when should i pit", "should i pit now", "pit window",
     ),
+    "pit_plan": ("比较进站方案", "进站方案", "进站计划", "进站窗口", "这次进站加多少油",
+                 "下一次进站加多少油", "pit plan", "pit comparison"),
     "traffic": ("前后车情况", "周围车辆情况", "周围的车在哪里", "附近车辆情况", "交通情况",
                 "traffic report", "cars around me"),
     "ahead": ("前车多远", "前车离我多远", "前面车在哪", "前车在哪里", "gap ahead"),
@@ -120,13 +122,15 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     if intent not in _QUERIES or context.get("scope") != "live_snapshot":
         raise ValueError("INVALID_LIVE_QUERY")
     facts = {item["id"]: item["text"] for item in context["facts"]}
+    if intent == "pit_plan" or (intent == "pit" and "strategy.window" in facts):
+        return _render_pit_comparison(context, facts, intent)
     preferences = {
         "amount": ("fuel.current",),
         "range": ("fuel.range_laps", "fuel.reserve"),
         "burn": ("fuel.burn_per_lap", "fuel.sample_laps", "fuel.observed_burn_range"),
         "finish": ("fuel.finish_balance", "fuel.horizon"),
         "add": ("fuel.finish_balance", "fuel.horizon"),
-        "stops": ("fuel.minimum_stops",),
+        "stops": ("strategy.window",) if "strategy.window" in facts else ("fuel.minimum_stops",),
         "pit": ("pit.permission", "pit.flags", "fuel.finish_balance", "fuel.range_laps",
                 "traffic.ahead", "traffic.behind", "traffic.overlap"),
         "traffic": ("traffic.ahead", "traffic.behind", "traffic.overlap", "traffic.coverage"),
@@ -188,7 +192,8 @@ def render_live_query(context: Mapping, intent: str) -> dict:
             body += "当前进站许可尚未确认。"
         body += "这是现场状态，不代表现在进站最优，也不代替赛事规则。"
     elif intent == "stops":
-        body += "不代表应当现在进站。"
+        body += ("仅手填参数下的完整圈预算，未定位进站口，不含赛事强制进站。"
+                 if "strategy.window" in chosen else "") + "不代表应当现在进站。"
     if len(body) > 280:
         raise ValueError("LIVE_QUERY_RENDER_LIMIT")
     spoken = _situation_speech(facts, intent, body)
@@ -199,3 +204,35 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         "text": body + "\n这是提问时的证据解读；不会操作车辆或进站设置。",
         "intent": intent,
     }
+
+
+def _render_pit_comparison(context, facts, intent):
+    notices = {item["id"]: item["text"] for item in context.get("notices", [])}
+    if "strategy.window" not in facts:
+        body = notices.get("STRATEGY_UNAVAILABLE", "进站比较未就绪，请核对本地策略设置。")
+        chosen, spoken = [], body
+    else:
+        chosen = [key for key in (
+            "pit.permission", "pit.flags", "strategy.brief", "strategy.window",
+            "strategy.early", "strategy.late",
+            "strategy.early_time", "strategy.late_time", "strategy.assumptions", "fuel.horizon",
+        ) if key in facts]
+        body = "\n".join(facts[key] for key in chosen if key != "strategy.brief")
+        # Detailed hypothetical fills stay visible; the VR answer reports the
+        # budget window and limitations in one short utterance, never a command.
+        spoken = facts["strategy.brief"]
+        permission = facts.get("pit.permission", "")
+        if "不允许" in permission:
+            spoken = "当前不允许进站。" + spoken
+        elif not permission:
+            spoken = "进站许可未确认。" + spoken
+        body += "\n" + notices["STRATEGY_CONDITIONAL"]
+        if "存在黑旗" in facts.get("pit.flags", ""):
+            spoken = "有处罚或维修旗号，请核对。" + spoken
+        elif "黄旗、红旗" in facts.get("pit.flags", ""):
+            spoken = "有黄红旗或安全车旗号，请核对。" + spoken
+    if len(spoken) > 280:
+        raise ValueError("LIVE_QUERY_RENDER_LIMIT")
+    return {"topic": "strategy", "fact_ids": chosen, "spoken_text": spoken,
+            "text": body + "\n这是提问时的证据解读；不会操作车辆或进站设置。",
+            "intent": intent}

@@ -31,6 +31,14 @@ from .dashboard_page import DASHBOARD_HTML
 from .live_driving import LiveDrivingEngineer
 from .live_fuel import LiveFuelConfig, LiveFuelEngineer
 from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
+from .live_strategy import (
+    StrategyParameters,
+    configuration_projection,
+    project_strategy,
+    source_ready,
+    source_scope,
+    strategy_binding,
+)
 from .live_traffic import (
     bound_track_length_mm,
     project_live_traffic,
@@ -165,6 +173,11 @@ class AppState:
         self._fuel_observation_revision = 0
         self._observed_fuel_l = None
         self._situation_revision = 0
+        self._strategy_parameters = None
+        self._strategy_scope = None
+        self._strategy_revision = 0
+        self._strategy_evidence_revision = 0
+        self._strategy_failed = False
         self._spotter = ProximitySpotter()
         self._spotter_failed = False
         self._trial = None
@@ -178,6 +191,7 @@ class AppState:
             "fuel": None,
             "traffic": None,
             "driving": None,
+            "strategy": None,
             "speech": None,
             "source_mode": "LIVE",
             "session_type": None,
@@ -206,11 +220,58 @@ class AppState:
             self._updated = None
             self._observed_fuel_l = None
             self._generation += 1
+            self._clear_strategy()
             if status == "CONNECTED":
                 self._summary["connections"] += 1
                 self._trace_generation = None
             else:
                 self._spotter_step("UNAVAILABLE", status=status)
+
+    def _clear_strategy(self):
+        # Caller holds the mailbox lock. Never persist or silently reapply
+        # assumptions to a different car, session, source or connection.
+        self._strategy_parameters = self._strategy_scope = None
+        self._strategy_revision += 1
+        self._strategy_evidence_revision += 1
+        self._strategy_failed = False
+        self._value["strategy"] = None
+
+    def configure_strategy(self, parameters: StrategyParameters | None) -> None:
+        if parameters is not None and type(parameters) is not StrategyParameters:
+            raise ValueError("STRATEGY_PARAMETERS_INVALID")
+        workers, _ = self._worker_status()
+        with self._lock:
+            monitor = self._value.get("monitor") or {}
+            scope = source_scope(monitor, self._generation)
+            analysis = workers.get("analysis")
+            if parameters is not None and not (
+                self._value["connection"] == "CONNECTED" and self._updated is not None
+                and 0 <= self.clock() - self._updated <= FRESHNESS_S
+                and source_ready(monitor) and scope is not None
+                and (analysis is None or (not analysis["failed"]
+                     and analysis["generation"] == self._generation))
+            ):
+                raise ValueError("STRATEGY_SOURCE_NOT_READY")
+            self._clear_strategy()
+            self._strategy_parameters = parameters
+            self._strategy_scope = scope if parameters is not None else None
+            self._project_strategy(monitor, self._value.get("fuel") or {},
+                                   self._value.get("session_type"))
+
+    def _project_strategy(self, monitor, fuel, session_type):
+        # Constant-size arithmetic, at publication rate, with no I/O, history,
+        # SDK reads or provider calls. Failure affects only this projection.
+        if self._strategy_failed:
+            return
+        previous = strategy_binding(self._value)
+        try:
+            self._value["strategy"] = project_strategy(
+                monitor, fuel, session_type, self._strategy_parameters, self._strategy_revision)
+        except Exception:
+            self._strategy_failed = True
+            self._value["strategy"] = {"status": "ERROR", "reason": "PROCESSING_ERROR"}
+        if previous != strategy_binding(self._value):
+            self._strategy_evidence_revision += 1
 
     def start_spotter(self, tick_rate_hz: int) -> None:
         with self._lock:
@@ -326,6 +387,7 @@ class AppState:
                 self._observed_fuel_l = None
                 self._situation_revision += 1
                 self._value.update(monitor=None, fuel=None, traffic=None, driving=None, speech=None)
+                self._clear_strategy()
 
     def _worker_status(self):
         # Never take a worker lock while holding the AppState lock. A worker's
@@ -407,6 +469,12 @@ class AppState:
                 or (_finite(old_level) and _finite(new_level) and new_level > old_level + 0.05)
             ):
                 self._engineer_revision += 1
+            if self._strategy_parameters is not None and (
+                source_changed or not source_ready(monitor)
+                or self._strategy_scope != source_scope(monitor, self._generation)
+            ):
+                self._clear_strategy()
+            self._project_strategy(monitor, fuel, session_type)
             self._updated = self.clock() if observed_at is None else observed_at
             self._value.update(
                 connection="CONNECTED",
@@ -448,8 +516,13 @@ class AppState:
                          situation_revision=self._situation_revision)
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
                 value.update(connection="DISCONNECTED", fuel=None, monitor=None, traffic=None,
-                             driving=None,
+                             driving=None, strategy=None,
                              speech=None)
+                if self._strategy_parameters is not None:
+                    self._clear_strategy()
+            value["strategy_configuration"] = configuration_projection(
+                self._strategy_parameters, self._strategy_scope, self._strategy_revision)
+            value["strategy_revision"] = self._strategy_evidence_revision
             intent = value.get("speech")
             if intent is not None:
                 remaining = intent.pop("deadline") - self.clock()

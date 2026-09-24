@@ -35,6 +35,10 @@ For pit questions, full text retains the missing calibration/rules/forecast;
 speech explicitly leaves pit timing undecided. A readable `PitsOpen` value is
 permission for the current player, not evidence that entering now is optimal.
 Flags are observations, not a complete rulebook or a decoded penalty/service plan.
+When a [conditional fuel-stop comparison](LIVE_FUEL_STOP_COMPARISON.md) is ready,
+**该进站了吗** now gives that hypothetical complete-lap budget alongside pit
+state, still without choosing an optimal entry action. Current car distances do
+not become future rejoin evidence.
 
 ## Data and calculation contract
 

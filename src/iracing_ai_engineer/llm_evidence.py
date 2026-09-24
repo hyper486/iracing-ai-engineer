@@ -17,6 +17,7 @@ from typing import Any
 
 from .engineer_session import validate_engineer_session
 from .live_driving import driving_notice, validated_driving
+from .live_strategy import strategy_notice, validated_strategy
 from .live_traffic import validated_traffic
 
 LLM_CONTEXT_CONTRACT_VERSION = "engineer-llm-context-v1"
@@ -220,7 +221,8 @@ def _fuel_budget_facts(result: dict, fuel: Mapping, amount: float, burn: float) 
     if not (_number(fuel.get("fuel_shortfall_l"), maximum=100_000)
             and math.isclose(fuel["fuel_shortfall_l"], deficit, rel_tol=1e-9, abs_tol=1e-6)):
         return
-    result["capabilities"]["strategy"] = "FUEL_BUDGET_ONLY"
+    if result["capabilities"]["strategy"] == "UNAVAILABLE":
+        result["capabilities"]["strategy"] = "FUEL_BUDGET_ONLY"
     facts.append(_entry("fuel.finish_balance",
                         f"按燃油模型，跑到结束累计还缺约 {deficit:.1f} 升。" if deficit > 0
                         else "按燃油模型，当前油量够覆盖预算赛程。"))
@@ -240,6 +242,47 @@ def _fuel_budget_facts(result: dict, fuel: Mapping, amount: float, burn: float) 
         if stops == expected_stops:
             facts.append(_entry("fuel.minimum_stops",
                                 f"仅按燃油预算，至少还需 {stops} 次补油；不含赛事强制进站。"))
+
+
+def _live_strategy_facts(result, snapshot):
+    value = validated_strategy(snapshot) if _live_frame_ready(snapshot) else None
+    if value is None or value["status"] != "READY":
+        for notice in result["notices"]:
+            if notice["id"] == "STRATEGY_UNAVAILABLE":
+                notice["text"] = strategy_notice(snapshot if _live_frame_ready(snapshot) else
+                                                    {"strategy": {"reason": "SOURCE_NOT_READY"}})
+        return
+    plan = value["plan"]
+    result["capabilities"]["strategy"] = "CONDITIONAL_FUEL_COMPARISON"
+    result["notices"][:] = [item for item in result["notices"]
+                            if item["id"] != "STRATEGY_UNAVAILABLE"]
+    result["notices"].append(_entry("STRATEGY_CONDITIONAL",
+        "进站比较使用本次连接手填参数及完整圈预算；未定位进站口，不是进站圈指令。"
+        "未核验赛事规则、轮胎服务或出站交通，不保证最优。"))
+    facts = result["facts"]
+    window = (f"从提问位置起的完整圈预算：{plan['fuel_stops']} 停，首停可行区间为 "
+              f"{plan['earliest_laps_from_now']} 至 {plan['latest_laps_from_now']} 整圈后。"
+              if plan["fuel_stops"] else "完整圈燃油预算无需再补油，不代表免除赛事强制进站。")
+    facts.append(_entry("strategy.window", window))
+    early = value["scenarios"][0] if value["scenarios"] else None
+    brief = (f"手填燃油预算：首停 {plan['earliest_laps_from_now']} 到 "
+             f"{plan['latest_laps_from_now']} 整圈后，早方案补 {early['fuel_add_l']:.1f} 升。"
+             "未定位进站口，非进站指令。" if early is not None else
+             "按手填燃油预算无需补油；未核验赛事强制进站。")
+    facts.append(_entry("strategy.brief", brief))
+    facts.append(_entry("strategy.assumptions",
+        f"使用手填有效油箱容量 {plan['tank_capacity_l']:.1f} 升、储备 {plan['reserve_l']:.1f} 升"
+        f"及模型耗油 {plan['burn_l_per_lap']:.3f} 升/圈，预算剩余 {plan['remaining_laps']} 圈。"))
+    for name, row in zip(("early", "late"), value["scenarios"], strict=False):
+        facts.append(_entry(f"strategy.{name}",
+            f"若 {row['laps_from_now']} 整圈后补油：届时约 {row['arrival_fuel_l']:.1f} 升，"
+            f"补 {row['fuel_add_l']:.1f} 升至 {row['target_fuel_l']:.1f} 升，"
+            f"覆盖下一段 {row['next_stint_laps']} 圈；之后还有 {row['further_stops']} 停。"))
+        loss = row["total_loss_range_s"]
+        if loss is not None:
+            facts.append(_entry(f"strategy.{name}_time",
+                f"{row['laps_from_now']} 整圈后方案，按手填速率和通道损失估算，"
+                f"仅通道与泵油时间损失 {loss[0]:.1f} 至 {loss[1]:.1f} 秒；不含其他停站服务。"))
 
 
 def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
@@ -262,6 +305,7 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     snapshot = _mapping(snapshot)
     _live_situation_facts(result, snapshot)
     _live_driving_facts(result, snapshot)
+    _live_strategy_facts(result, snapshot)
     monitor = _mapping(snapshot.get("monitor"))
     fuel = _mapping(snapshot.get("fuel"))
     direct = current_fuel_observation(snapshot)
