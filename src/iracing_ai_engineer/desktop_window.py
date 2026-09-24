@@ -44,6 +44,18 @@ def _finite(value: object) -> bool:
         return False
 
 
+def _answer_counter(value: object) -> int | None:
+    """The native controller owns canonical, monotonically increasing IDs."""
+    if type(value) is str:
+        if not 1 <= len(value) <= 16 or not value.isascii() or not value.isdecimal():
+            return None
+        number = int(value)
+        if str(number) != value:
+            return None
+        value = number
+    return value if type(value) is int and 0 <= value <= 2**53 else None
+
+
 def format_number(value: object, suffix: str = "", digits: int = 1) -> str:
     """Unknown, invalid and negative measurements remain visibly absent."""
     return f"{value:.{digits}f}{suffix}" if _finite(value) else _DASH
@@ -170,7 +182,11 @@ class DesktopPresenter:
         self._generation: int | None = None
         self._sequence: int | None = None
         self._progress_at = 0.0
-        self._withdrawn: set[tuple[str, str, str]] = set()
+        # Answer serials and service epochs are monotonic. One high-water mark
+        # rejects every older answer, without a race-long set of expired IDs.
+        self._answer_order: tuple[int, int] | None = None
+        self._answer_signature: tuple[str, str, bool] | None = None
+        self._answer_withdrawn = False
 
     def _fresh(self, telemetry: Mapping, now: float) -> bool:
         generation = telemetry.get("generation")
@@ -196,8 +212,11 @@ class DesktopPresenter:
         answer = _mapping(engineer.get("answer"))
         origin, scope = answer.get("origin"), answer.get("scope")
         identity = answer.get("id")
+        serial = _answer_counter(identity)
+        instance = engineer.get("instance_id", 0)  # Synthetic controller has no epoch.
+        epoch = _answer_counter(instance)
         if (
-            type(identity) is not str or not identity
+            type(identity) is not str or serial is None or serial < 1 or epoch is None
             or origin not in ("deepseek", "local_fallback", "local_live")
             or scope not in ("live_snapshot", "historical_session")
             or type(answer.get("text")) is not str
@@ -205,18 +224,22 @@ class DesktopPresenter:
             return "尚无回答", (
                 "可启用按住说话（PTT）；文字输入请停车后使用。仅解释证据，不操作模拟器。"
             )
-        instance = engineer.get("instance_id")
-        namespace = str(instance) if type(instance) is int else _text(instance, limit=80)
-        key = (namespace, origin, identity)
+        key = (epoch, serial)
+        signature = (origin, scope, answer.get("snapshot_was_valid") is not False)
         age = answer.get("age_s")
         invalid = (
             answer.get("stale") is not False or not _finite(age)
             or (scope == "live_snapshot" and answer.get("snapshot_was_valid") is not False
                 and not fresh)
         )
-        if invalid and scope == "live_snapshot":
-            self._withdrawn.add(key)
-        stale = invalid or key in self._withdrawn
+        if self._answer_order is None or key > self._answer_order:
+            self._answer_order, self._answer_signature = key, signature
+            self._answer_withdrawn = False
+        if key == self._answer_order:
+            self._answer_withdrawn |= invalid or signature != self._answer_signature
+        # An out-of-order old packet must neither revive nor poison the newer
+        # current answer. A reused ID with a different scope/origin fails closed.
+        stale = invalid or key < self._answer_order or self._answer_withdrawn
         origin_label = {
             "local_live": "本地实时直答 · 未调用模型",
             "local_fallback": "本地规则解读 · 未调用模型",

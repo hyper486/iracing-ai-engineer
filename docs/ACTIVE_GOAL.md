@@ -45,8 +45,9 @@ limits are tracked in [the public status](PUBLIC_PROJECT_STATUS.md) and
 [the detector contract](PROXIMITY_SPOTTER.md). Stage B's native opt-in audio lane,
 cache, priority ownership, cancellation and settings migration are now implemented
 in source. Synthetic backend, local memory-only synthesis and visible synthetic
-UI checks are not a real hearing/VR acceptance pass. No new EXE deployment is
-claimed. Stage C's local current-fuel and physical-traffic question slices are
+UI checks are not a real hearing/VR acceptance pass. A new local trial EXE is
+built and self-tested, without replacing existing installations. Stage C's
+local current-fuel and physical-traffic question slices are
 implemented in source, including player pit permission and flag observations.
 Conditional whole-lap fuel-stop comparison is now connected to current fuel and
 session-scoped user assumptions. Action-bound pit/rejoin integration and real
@@ -106,8 +107,9 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   strict silent replay and visible recording faults. No microphone recording,
   transcript or provider call; no synthetic result becomes hearing acceptance.
   See [the replay contract](PRIVATE_TRIAL_REPLAY.md).
-- Verify endurance-duration resource limits before claiming an integrated trial
-  build of the supported slices. Action-bound pit/rejoin integration remains
+- Accelerated numerical resource checks and an integrated native trial build
+  now cover the supported slices; full-duration hardware limits remain open.
+  Action-bound pit/rejoin integration remains
   open beyond the conditional fuel budget. Journal replay currently covers
   proximity and software audio, not a simulated hardware/PTT/LLM rerun.
 - Implemented: exact direct-fuel amount answers have a separate observation
@@ -129,9 +131,16 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   SDK/model/PTT/native-window tests. This is not a pit-entry command, full stop
   service model or optimal rejoin plan. See
   [the fuel-stop contract](LIVE_FUEL_STOP_COMPARISON.md).
-- Next: verify endurance resource bounds and rebuild/package these supported
-  source slices as a native trial build. Then check selected microphone and
-  headphones, wheel/PTT, actual proximity latency and VR performance in a
+- Implemented: packaged numerical integration checks and constant-space native
+  answer withdrawal. A 500-lap/60 Hz invented stream processed 892,192 frames,
+  with 12 retained corner laps, at most 1,894 observed buffered rows and 3.85 MiB
+  measured post-warmup private-commit growth. This is accelerated numerical
+  evidence, not four hours of real SDK/audio/recording/VR operation. The rebuilt
+  unsigned local EXE passed frozen numerical, Tk and memory-only voice checks;
+  installed copies, shortcuts and device settings were not replaced. See
+  [the native trial guide](NATIVE_TRIAL_BUILD.md).
+- Next: check selected microphone and headphones, wheel/PTT, actual proximity
+  latency and VR performance in a
   user-driven session. A local TTS duration is not output or end-to-end latency;
   a trial build does not close the full tire/rule/action-bound rejoin goal.
 

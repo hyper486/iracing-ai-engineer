@@ -30,19 +30,60 @@ required running dependency. The final goal remains active and unaccepted.
 | DeepSeek engineer framework | Implemented; constrained evidence selection | Opt-in asynchronous questions, local grounding/rendering, bounded attempts and safe fallback; validated historical receipt context is separate from live fuel. Real provider/account and in-car acceptance remain unverified. |
 | Native Windows EXE | Experimental native Tk/ttk app | Standalone windowed binary, direct Python service calls, masked/optional DPAPI key storage and private recording. No HTML/WebView/server. |
 | Native VR voice | Implemented; hardware/race acceptance pending | Opt-in background PTT, input/output selectors or refreshed Windows defaults, local Whisper STT and Windows TTS, interruption and optional guarded low-fuel facts. No continuous listening or raw-audio upload. |
-| Tick-level proximity | Detector plus opt-in native audio in source | Independent fixed-phrase cache, priority cancellation, fast snapshots and bounded playback diagnostics; synthetic/local-synthesis checks only, no hardware or in-car acceptance. |
+| Tick-level proximity | Detector plus opt-in native audio in the local trial build | Independent fixed-phrase cache, priority cancellation, fast snapshots and bounded playback diagnostics; synthetic/local-synthesis checks only, no hardware or in-car acceptance. |
 | Reader / analysis / recording isolation | Bounded worker lanes in source | Recorder and analysis failures no longer synchronously block the SDK reader; explicit incomplete prefixes, generation guards and streaming event digests. Not GIL isolation or a hardware latency guarantee. |
-| Routine current-fuel questions | Local source implementation; synthetic checks | Current observations, learned range and conditional race fuel budgets bypass cloud waits; not live pit tactics or an updated EXE. |
-| Current physical traffic / pit-state questions | Local source implementation; synthetic checks | Bound ahead/behind distance, player permission and flag facts in native display/PTT; independent of fuel readiness, not time gaps or optimal pit/rejoin advice. |
-| Incremental recent-lap coaching | Local source implementation; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
-| Private proximity / audio replay | Native source implementation; synthetic checks | Bounded local journal, exact detector recomputation, software-playback correlation and optional capture byte links; not audio reproduction, source authentication or human hearing. |
-| Conditional live fuel-stop comparison | Native source implementation; synthetic checks | Session-scoped hand-entered assumptions, shared complete-lap stop arithmetic, next-fill/stint budgets and local PTT; not mapped pit-entry timing, optimal strategy or future rejoin. |
+| Routine current-fuel questions | Packaged local trial; synthetic checks | Current observations, learned range and conditional race fuel budgets bypass cloud waits; not live pit tactics or in-car acceptance. |
+| Current physical traffic / pit-state questions | Packaged local trial; synthetic checks | Bound ahead/behind distance, player permission and flag facts in native display/PTT; independent of fuel readiness, not time gaps or optimal pit/rejoin advice. |
+| Incremental recent-lap coaching | Packaged local trial; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
+| Private proximity / audio replay | Packaged local trial; synthetic checks | Bounded local journal, exact detector recomputation, software-playback correlation and optional capture byte links; not audio reproduction, source authentication or human hearing. |
+| Conditional live fuel-stop comparison | Packaged local trial; synthetic checks | Session-scoped hand-entered assumptions, shared complete-lap stop arithmetic, next-fill/stint budgets and local PTT; not mapped pit-entry timing, optimal strategy or future rejoin. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Conditional live fuel-stop comparison milestone
+## Integrated native trial and numerical resource milestone
+
+A new unsigned local EXE packages the supported source slices together. Default
+build verification now requires five numerical checks in addition to the native
+window/lifecycle and in-memory voice checks. Invented frames traverse the real
+normalizer, proximity, fuel and corner owners, including local fuel, coaching
+and conditional stop questions. No SDK transport, provider account, microphone
+or speaker is opened. All 13 frozen self-test checks passed with system-only
+PATH and no inherited Python/Tcl/provider environment. Existing installations,
+shortcuts, keys and device settings were not replaced.
+
+The accelerated resource run processed **500 synthetic laps / 892,192 frames**
+at a virtual 60 Hz: **14,869.85 simulated seconds in 176.625 wall seconds**.
+Corner-worker barriers deliberately pace virtual time; this is not an SDK
+latency, overload or four-hour hardware soak. It produced 55 repeated-corner
+local answers and exercised refuel epochs. Peak observed retained state stayed
+at 12 corner laps / 346,176 trace bytes, 1,894 buffered rows, one worker job /
+387,904 bytes, 50 fuel samples and 42 proximity audit rows. After 24 warmup laps,
+Windows private committed memory grew at most **3.85 MiB** above its baseline.
+This memory measurement excludes real voice/SDK/recording/VR work and is not a
+general memory-budget acceptance gate.
+
+The native presenter also no longer accumulates an unbounded set of expired
+answer IDs. A constant-space epoch/serial high-water mark rejects older answers
+without allowing revival after eviction, including reconfiguration and changed
+scope/origin. A 20,000-withdrawal regression and malformed-ID cases cover this.
+Focused desktop/diagnostic checks: **113 passed**. Complete regression:
+**2,760 passed, 44 skipped**, including 31 new checks. Ruff, public safety
+including history and exact staged-file/diff review passed. Existing skips
+retain data/platform/private-deployment or explicit opt-in boundaries; they do
+not imply accepted live evidence. The visible synthetic EXE exposed the new
+status/settings/voice/question controls and exited on its diagnostic timer;
+this is not a microphone, playback or real-source check.
+
+See [the integrated native trial guide](NATIVE_TRIAL_BUILD.md) for reproduction
+and the focused user-driven practice checklist. Local receipts and binaries
+remain ignored/private; GitHub receives reusable source and documentation, not
+raw captures or host-specific files. Real selected-device hearing, recognition
+and proximity latency, in-car frame quality and VR performance remain open.
+The complete tire/service/rule/action-bound rejoin goal remains active.
+
+## Earlier conditional live fuel-stop comparison milestone
 
 The native source now connects the learned current-fuel model to shared
 whole-lap stop arithmetic, without making synthetic lap samples or offline

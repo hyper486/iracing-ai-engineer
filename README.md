@@ -50,6 +50,9 @@ audio, current fuel answers and supported corner coaching on the AEIS framework.
 [Detection and native priority audio](docs/PROXIMITY_SPOTTER.md) are implemented
 in source and checked with synthetic backends/local synthesis. Existing EXEs are
 not automatically upgraded; hardware hearing and in-car/VR acceptance remain open.
+The [integrated native trial build](docs/NATIVE_TRIAL_BUILD.md) now packages these
+slices with a frozen numerical/voice self-test and a reproducible accelerated
+resource diagnostic. It is not a full-duration hardware soak or race acceptance.
 The [recent-lap coaching contract](docs/LIVE_DRIVING_COACHING.md) explains the
 new **哪里可以改进？** question and why an observed loss is not a promised gain.
 The [private trial replay guide](docs/PRIVATE_TRIAL_REPLAY.md) explains how a

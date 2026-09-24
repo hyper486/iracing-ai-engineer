@@ -75,4 +75,8 @@ def test_real_native_self_test_without_key_sdk_or_network(monkeypatch):
     assert result["native_gui"] is True
     assert not result["sdk_accessed"] and not result["provider_called"]
     assert not result["live_acceptance"]
-    assert {item["id"] for item in result["checks"]} >= {"WINDOW_CLOSE_PROTOCOL"}
+    assert {item["id"] for item in result["checks"]} >= {
+        "WINDOW_CLOSE_PROTOCOL", "SYNTHETIC_PROXIMITY_TRANSITIONS",
+        "SYNTHETIC_LEARNED_FUEL_QUERY", "SYNTHETIC_REPEATED_CORNER_QUERY",
+        "SYNTHETIC_FUEL_STOP_QUERY", "SYNTHETIC_RETAINED_STATE_BOUNDS",
+    }

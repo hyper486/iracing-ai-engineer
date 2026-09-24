@@ -104,10 +104,13 @@ if (-not $SkipSelfTest) {
         throw 'Frozen desktop self-test receipt did not satisfy the synthetic-only contract.'
     }
     foreach ($requiredCheck in @(
-        'VOICE_IO_IMPORT_ONLY', 'PINNED_LOCAL_STT_MODEL_HASHES', 'CHINESE_SYNTHETIC_TTS_TO_STT'
+        'VOICE_IO_IMPORT_ONLY', 'PINNED_LOCAL_STT_MODEL_HASHES', 'CHINESE_SYNTHETIC_TTS_TO_STT',
+        'SYNTHETIC_PROXIMITY_TRANSITIONS', 'SYNTHETIC_LEARNED_FUEL_QUERY',
+        'SYNTHETIC_REPEATED_CORNER_QUERY', 'SYNTHETIC_FUEL_STOP_QUERY',
+        'SYNTHETIC_RETAINED_STATE_BOUNDS'
     )) {
         if (@($receipt.checks | Where-Object { $_.id -ceq $requiredCheck }).Count -ne 1) {
-            throw 'Frozen desktop self-test receipt is missing a required voice check.'
+            throw 'Frozen desktop self-test receipt is missing a required runtime check.'
         }
     }
     $selfTestStatus = 'PASS'
@@ -124,6 +127,7 @@ $manifest = [ordered]@{
     pyinstaller_version = '6.22.3'
     self_test = $selfTestStatus
     voice_self_test = $selfTestStatus
+    numerical_self_test = $selfTestStatus
     self_test_environment = $(if ($SkipSelfTest) { 'NOT_RUN' } else { 'SYSTEM_PATH_ONLY' })
     authenticode_signed = ((Get-AuthenticodeSignature -LiteralPath $exePath).Status -eq 'Valid')
     live_acceptance = $false

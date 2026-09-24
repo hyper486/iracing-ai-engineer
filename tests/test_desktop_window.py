@@ -280,6 +280,43 @@ def test_native_service_instance_namespaces_answer_ids_after_reconfiguration() -
     assert "21.2" in presenter.project(state, now=0.1).answer_text
 
 
+def test_twenty_thousand_withdrawals_are_constant_space_and_cannot_revive():
+    presenter = DesktopPresenter()
+    for serial in range(1, 20_001):
+        value = {"instance_id": "3", "answer": {
+            **_answer(), "id": str(serial), "stale": True}}
+        assert "21.2" not in presenter._answer(value, True)[1]
+    assert presenter._answer_order == (3, 20_000)
+    assert not any(isinstance(item, (list, set, dict)) for item in vars(presenter).values())
+    # The earliest ID is still rejected, even after many more expired answers.
+    assert "21.2" not in presenter._answer({"instance_id": 3, "answer": _answer()}, True)[1]
+    fresh = {"instance_id": "4", "answer": _answer()}
+    assert "21.2" in presenter._answer(fresh, True)[1]
+    assert "21.2" not in presenter._answer(value, True)[1]
+    assert "21.2" in presenter._answer(fresh, True)[1]  # Old epoch cannot poison new one.
+
+
+@pytest.mark.parametrize("change", [
+    {"origin": "deepseek"}, {"scope": "historical_session"}, {"snapshot_was_valid": False},
+])
+def test_reused_answer_identity_cannot_change_semantics_or_revive(change):
+    presenter = DesktopPresenter()
+    original = {"instance_id": 0, "answer": _answer()}
+    assert "21.2" in presenter._answer(original, True)[1]
+    changed = {"instance_id": 0, "answer": {**_answer(), **change}}
+    assert "21.2" not in presenter._answer(changed, True)[1]
+    assert "21.2" not in presenter._answer(original, True)[1]
+
+
+@pytest.mark.parametrize("bad", [None, True, -1, "-1", "01", "１", "1" * 10000, 2**54])
+@pytest.mark.parametrize("field", ["instance_id", "id"])
+def test_malformed_answer_order_is_not_displayed(bad, field):
+    value = {"instance_id": 0, "answer": _answer()}
+    target = value if field == "instance_id" else value["answer"]
+    target[field] = bad
+    assert "21.2" not in DesktopPresenter()._answer(value, True)[1]
+
+
 @pytest.mark.parametrize("status,allowed", [
     ("DISABLED", True), ("MISSING_KEY", True), ("ERROR", True), ("BUDGET_EXHAUSTED", True),
     ("READY", True), ("BUSY", False), ("RATE_LIMITED", False), ("unexpected", False),

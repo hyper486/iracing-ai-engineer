@@ -5,6 +5,11 @@ The desktop entry is a real Tk/ttk application, packaged as one windowed
 install a service or schedule background launches. Legacy browser/report code
 remains available separately; it is not the native UI.
 
+The 2026-09-24 local trial build includes the proximity, local question,
+recent-corner, conditional fuel-stop and private replay slices below. See
+[the integrated trial checklist](NATIVE_TRIAL_BUILD.md). Installed older copies
+are not automatically replaced; run the newly built `dist/AEIS-Engineer.exe`.
+
 ## 使用方法
 
 1. 双击 `AEIS-Engineer.exe`。首次解包可能需要几秒；不需要安装 Python。
@@ -20,20 +25,20 @@ remains available separately; it is not the native UI.
 6. 正常点窗口右上角关闭。它会等待读取器和设置写入真正结束，之后退出。
    慢磁盘/SDK 可能延长等待；未结束时不会显示关闭成功或再启动第二读取器。
 
-当前源码另外区分**采集连接、分析状态、记录状态、近车状态**。分析卡住或
+当前试用版另外区分**采集连接、分析状态、记录状态、近车状态**。分析卡住或
 积压时，燃油数字会撤回，但不会连带关闭近车检测；录制队列满时明确提示
 “本段不完整”，不会丢帧后仍显示完成。“记录正在收尾”也不代表已关闭。
 若重连时上一段录制仍未退出，会显示“本连接未录制”，需要等其退出后再重启
 采集；不会不断启动新的后台写入任务。已有 EXE 不会自动获得这些源码更新。
 新增的交通观测行独立显示前后车纵向距离、缺少匹配赛道长度或分析故障；不需要
 等燃油学习完成，也不等同于左右近车 Spotter。没有可定位对手不代表赛道清空。
-驾驶分析行独立显示近期可比圈与重复证据。源码中的 **问驾驶** 或 PTT 问
+驾驶分析行独立显示近期可比圈与重复证据。**问驾驶** 或 PTT 问
 **哪里可以改进？** 会在本地回答一个有依据的弯道练习假设；不等待 DeepSeek。
 至少需三个完整可比圈来寻找参考，且要有两圈重复模式，圈数够了也不保证出建议。
 进站、事故或数据中断会撤回旧结论；缺少遥测会说明原因。自动分段编号不是正式
 弯名，观测损失不是保证能追回的时间。见 [实时驾驶说明](LIVE_DRIVING_COACHING.md)。
 
-源码还新增**进站比较**状态行、**比较补油**按钮及本地策略参数。停车进车后，在
+试用版还包含**进站比较**状态行、**比较补油**按钮及本地策略参数。停车进车后，在
 **模型与本地设置**确认本场允许的有效油箱容量；加油速率、进站通道损失上下限
 可选，通道损失指相对继续跑赛道的时间损失，不含驻站服务。参数只对本次连接
 有效，不自动保存或重用；换会话、退车或断线后需重新确认。应用不重启采集。
@@ -41,7 +46,7 @@ remains available separately; it is not the native UI.
 窗口列出早晚边界、下一停补油量及下一段圈数；语音只说简要预算，不等 DeepSeek。
 “几整圈后”从提问位置起算，未定位进站口；这不是最佳进站圈、换胎或回场预测。
 **还要加多少油**仍回答终点累计缺油，不是下一停加油量。
-见 [进站比较说明](LIVE_FUEL_STOP_COMPARISON.md)。已有 EXE 尚未包含本次源码更新。
+见 [进站比较说明](LIVE_FUEL_STOP_COMPARISON.md)。旧安装需改用新构建的 EXE。
 
 ## VR 语音设置（无需在驾驶时打字）
 
@@ -68,7 +73,7 @@ remains available separately; it is not the native UI.
 音量为零时明确显示暂停。普通 PTT 可以打断取消提示，但不能抢断近车提示。
 
 旧 `native-voice-v1` 设置升级到 v2 时保留原设备、按键和音量，新增近车开关保持关闭。
-这部分当前为源代码实现：既有 EXE 不会自动升级，耳机听感、真实赛况触发和 VR
+这部分已打包进当前本机试用版；既有 EXE 不会自动升级，耳机听感、真实赛况触发和 VR
 负载仍需验证。完整边界见 [近车检测与音频说明](PROXIMITY_SPOTTER.md)。
 
 明确选择的设备失联或名称有歧义时会报错，不会擅自切换到另一个麦克风或
@@ -87,13 +92,13 @@ remains available separately; it is not the native UI.
 它不调用 LLM、不决定进站、不替代比赛提醒。主动问答依然是提问时的快照；
 失效后撤回并停止尚在播放的回答。实时多停/交通/轮胎/驾驶指导仍未验收。
 
-源码新增本地短问短答：“还有多少油”“当前燃油还能跑几圈”“每圈用多少油”
+本地短问短答包括：“还有多少油”“当前燃油还能跑几圈”“每圈用多少油”
 “油够到终点吗”“还要加多少油”“还要几停”“该进站了吗”。不等待 DeepSeek，
 也不消耗模型次数；云端问题未返回时，可重新按 PTT 提问这些短句。旧回答不会覆盖
 新答案。当前油量在耗油学习期也可查询，续航仍需完整有效圈；缺油是累计终点预算，
 不是下一次进站加油量。没有油箱容量或交通/规则证据时明确说明，不猜次数或最佳
 进站圈。详见[本地燃油问答边界](LIVE_FUEL_QUESTIONS.md)。识别和本地朗读仍有耗时，
-未实测端到端延迟；这部分尚未重新打包到已有 EXE。
+未实测端到端延迟；请使用新试用版，旧 EXE 不会自动升级。
 
 交通短句包括“前后车情况”“前车多远”“后车多远”“现在允许进站吗”。回答的是
 提问时可用车辆的沿赛道距离，不是秒差或未来出站车距；超过一公里的语音用约数，
@@ -200,7 +205,10 @@ the binary is not committed into Git history.
 The default build executes the frozen self-test with a system-only PATH and
 Python/Tcl/Conda/provider environment overrides removed. It checks bundled Tk,
 an SDK import without startup, a real local-answer worker, worker closure and
-the registered window-close protocol. It also checks audio dependency imports,
+the registered window-close protocol. Invented frames also exercise proximity,
+learned fuel, repeated-corner evidence and local fuel/coaching/stop answers;
+all five numerical check IDs are required by the build. It checks audio
+dependency imports,
 the exact model hashes and in-memory Chinese TTS-to-STT. No microphone stream
 or speaker is opened. Receipt provenance remains `SYNTHETIC`,
 with `sdk_accessed=false`, `provider_called=false`, `live_acceptance=false`.

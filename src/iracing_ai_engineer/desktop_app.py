@@ -88,15 +88,20 @@ class _SelfTestController:
 
 
 def run_self_test() -> dict:
-    """Exercise the packaged Tk and SDK import plus a real local answer worker."""
+    """Exercise packaged Tk and the numerical pipeline with invented inputs."""
     import tkinter as tk
 
     from .desktop_window import DesktopWindow
+    from .synthetic_runtime import run_synthetic_runtime
 
     checks = []
     callback_errors = []
     root = controller = None
     try:
+        numerical = run_synthetic_runtime()
+        checks.extend(numerical["checks"])
+        if numerical["status"] != "PASS":
+            raise ValueError("SYNTHETIC_NUMERICAL_FAILED")
         import irsdk
 
         if not hasattr(irsdk, "IRSDK"):
