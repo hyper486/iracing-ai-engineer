@@ -1,9 +1,12 @@
 # Conditional live fuel-stop comparisons
 
-Source implementation with synthetic verification, not an updated EXE or a
-real in-car/VR acceptance result. This is a fuel-budget comparison, not a
+Packaged experimental implementation with synthetic verification, not a
+real in-car/VR acceptance result. This lane is a fuel-budget comparison, not a
 validated pit-entry action, optimal strategy, tire-service plan or rejoin forecast.
 It does not promote offline strategy evidence gates or fabricate sealed receipts.
+The separate [mapped rejoin lane](LIVE_MAPPED_REJOIN.md) adds optional explicit
+entry/exit/full-loss assumptions and per-car motion evidence; it never treats
+this lane's partial transit-plus-pumping loss as a full service budget.
 
 ## Driver-facing setup
 
@@ -104,6 +107,7 @@ fake recognition/audio, and a hidden native Tk window. They cover multi-stop
 arithmetic, zero/edge ranges, optional loss inputs, source/config invalidation,
 tampering, fault containment, PTT cancellation and no-restart/no-write settings.
 They do not prove real acquisition quality, hardware hearing, end-to-end latency,
-full-race resource use or safe/optimal race timing. Live action-bound rejoin,
-pit-entry geometry, event-rule/service integration, tire evidence, packaging and
-real acceptance remain open under the unchanged [active goal](ACTIVE_GOAL.md).
+full-race resource use or safe/optimal race timing. Conditional mapped rejoin is
+now a separate native lane. Measured pit geometry/calibration, event-rule/service
+integration, tire evidence and real acceptance remain open under the unchanged
+[active goal](ACTIVE_GOAL.md).

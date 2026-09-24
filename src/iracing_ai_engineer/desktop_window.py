@@ -12,6 +12,7 @@ from tkinter import filedialog, ttk
 from typing import Any
 
 from .live_driving import driving_notice, validated_driving
+from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import stint_notice
 from .live_strategy import StrategyParameters, strategy_notice, validated_strategy
 from .live_traffic import validated_traffic
@@ -175,6 +176,7 @@ class DesktopView:
     driving: str
     strategy: str
     stint: str
+    rejoin: str
 
 
 class DesktopPresenter:
@@ -459,6 +461,7 @@ class DesktopPresenter:
             elif driving_notice(telemetry) is not None:
                 driving_text = driving_notice(telemetry)
         strategy_text = "进站比较：等待新鲜的本人车内驾驶数据。"
+        rejoin_text = rejoin_notice({})
         if fresh and _live_frame_ready(telemetry):
             strategy = validated_strategy(telemetry)
             if strategy is not None and strategy["status"] == "READY":
@@ -467,6 +470,11 @@ class DesktopPresenter:
                                  " · 可询问‘比较进站方案’；仅手填参数下的估计，不是进站指令。")
             else:
                 strategy_text = strategy_notice(telemetry)
+            rejoin = validated_rejoin(telemetry)
+            rejoin_text = ("出站预测：条件推演可用，可问‘出站预测’；"
+                           "历史配速与手填假设，不保证畅通。"
+                           if rejoin is not None and rejoin["status"] == "READY" else
+                           rejoin_notice({"rejoin": rejoin}) if rejoin is not None else rejoin_text)
         return DesktopView(
             lifecycle=lifecycle, connection=connection, source=source, context=context_label,
             quality=quality_text,
@@ -482,6 +490,7 @@ class DesktopPresenter:
             notice=_text(value.get("notice"), limit=600),
             spotter=spotter, traffic=traffic_text, driving=driving_text, strategy=strategy_text,
             stint=stint_notice(telemetry if fresh and _live_frame_ready(telemetry) else {}),
+            rejoin=rejoin_text,
         )
 
 
@@ -624,6 +633,7 @@ class DesktopWindow:
         self._label(outer, "strategy", style="Muted.TLabel", wraplength=920).pack(
             anchor="w", pady=3)
         self._label(outer, "stint", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
+        self._label(outer, "rejoin", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
         self._label(outer, "source", style="Muted.TLabel").pack(anchor="w", pady=3)
         self._label(outer, "notice", style="Warn.TLabel", wraplength=980).pack(anchor="w", pady=4)
         ttk.Label(outer, textvariable=self.action_var, style="Warn.TLabel",
@@ -731,7 +741,7 @@ class DesktopWindow:
         stint_buttons = ttk.Frame(parent)
         stint_buttons.pack(fill="x", pady=(0, 8))
         for label, question in (("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
-                                ("问配速", "配速变化")):
+                                ("问配速", "配速变化"), ("问出站", "出站预测")):
             self._button(stint_buttons, label, lambda q=question: self._quick(q),
                          question=True).pack(side="left", padx=(0, 10))
         ttk.Label(parent, textvariable=self.request_var, wraplength=950,
@@ -752,7 +762,7 @@ class DesktopWindow:
     def _build_settings(self, parent) -> None:
         ttk.Label(parent, text="本次连接的燃油进站比较 · 停车后设置").pack(anchor="w")
         ttk.Label(parent, text="进车后应用；换车、换会话、退车或断线后需重新确认，不自动保存。\n"
-                  "容量请使用本场规则允许的有效容量。耗时两项可留空；以下是手填假设，不是实测标定。",
+                  "容量请使用本场规则允许的有效容量。出站四项可一起留空；手填假设不是实测标定。",
                   style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=6)
         grid = ttk.Frame(parent)
         grid.pack(fill="x")
@@ -761,10 +771,15 @@ class DesktopWindow:
             ("refuel_rate_l_per_s", "加油速率（升/秒，可选）"),
             ("pit_loss_low_s", "通道损失下限（秒，不含驻站）"),
             ("pit_loss_high_s", "通道损失上限（秒，与下限一起填）"),
+            ("pit_entry_fraction", "进站口圈长比例（0 至小于 1）"),
+            ("pit_exit_fraction", "出站口圈长比例（0 至小于 1）"),
+            ("complete_pit_loss_low_s", "完整进站损失下限（秒）"),
+            ("complete_pit_loss_high_s", "完整进站损失上限（秒）"),
         )):
-            ttk.Label(grid, text=label).grid(row=row, column=0, sticky="w", pady=3)
-            entry = ttk.Entry(grid, textvariable=self.strategy_vars[key], width=16)
-            entry.grid(row=row, column=1, padx=12, pady=3)
+            column, row = (row // 4) * 2, row % 4
+            ttk.Label(grid, text=label).grid(row=row, column=column, sticky="w", pady=3)
+            entry = ttk.Entry(grid, textvariable=self.strategy_vars[key], width=10)
+            entry.grid(row=row, column=column + 1, padx=10, pady=3)
             self._controls.append(entry)
         buttons = ttk.Frame(parent)
         buttons.pack(anchor="w", pady=8)
@@ -773,8 +788,10 @@ class DesktopWindow:
             button = self._button(buttons, label, callback)
             button.pack(side="left", padx=(0, 8))
             self.strategy_buttons.append(button)
-        ttk.Label(parent, text="只比较完整圈燃油方案，不定位进站口、不设置游戏油量，"
-                  "不包含赛事规则、轮胎服务或出站交通。", style="Muted.TLabel",
+        ttk.Label(parent, text="右侧完整损失须包含所有停站服务，并相对留在赛道行驶计算；"
+                  "须覆盖所比较的补油量，不能填左侧不含驻站的通道损失。\n"
+                  "出站预测还需所有在赛道车辆两圈连续轨迹；赛事规则未核验，不设置游戏油量。",
+                  style="Muted.TLabel",
                   wraplength=920).pack(anchor="w")
         ttk.Separator(parent).pack(fill="x", pady=12)
         ttk.Label(parent, text="模型设置影响文字与语音识别后的问题解读，不改变模拟器。",
@@ -1128,8 +1145,8 @@ class DesktopWindow:
             "已配置密钥（不显示内容）" if settings.get("key_configured") is True
             else "尚未确认已配置密钥；无密钥时使用本地解读。"
         )
-        for key in ("connection", "spotter", "traffic", "driving", "strategy", "stint", "source",
-                    "context",
+        for key in ("connection", "spotter", "traffic", "driving", "strategy", "stint", "rejoin",
+                    "source", "context",
                     "advice", "learning", "recording",
                     "quality", "engineer_status", "engineer_error", "budget", "answer_header",
                     "notice"):
@@ -1227,12 +1244,13 @@ class DesktopWindow:
             self.action_var.set("请先进入本人车辆并等待新鲜遥测，再确认本次参数。"
                                 if str(exc) == "STRATEGY_SOURCE_NOT_READY" else
                                 "参数无效：容量 0.1–1000 升，速率 0.05–50 升/秒，"
-                                "通道上下限 0–1000 秒且下限不大于上限。")
+                                "通道上下限 0–1000 秒；出站四项须一起填："
+                                "位置 0≤比例<1 且互异，完整损失 0.1–600 秒，低≤高。")
         except Exception:
             self.action_var.set("策略参数未能应用；未重启采集或改动游戏设置。")
         else:
             self.action_var.set("本次策略参数已清除。" if clear else
-                                "参数已应用于本次连接，可询问‘比较进站方案’；不会自动保存。")
+                                "参数已应用于本次连接，可询问‘比较进站方案’或‘出站预测’；不会自动保存。")
             if clear:
                 for variable in self.strategy_vars.values():
                     variable.set("")

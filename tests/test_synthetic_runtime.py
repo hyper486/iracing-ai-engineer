@@ -31,9 +31,9 @@ def test_actual_numerical_pipeline_reaches_all_local_features_without_io(monkeyp
         context = original_context(snapshot)
         # The combined stop/coaching/stint features add allowlisted fact IDs,
         # not raw lap traces, identities or unchecked source strings.
-        assert len(context["facts"]) <= 32
+        assert len(context["facts"]) <= 36
         encoded = json.dumps(context, allow_nan=False)
-        assert len(encoded) < 10_000 and "SYNTHETIC_SECRET" not in encoded
+        assert len(encoded) < 14_000 and "SYNTHETIC_SECRET" not in encoded
         assert "SessionTick" not in encoded and "synthetic-runtime-only" not in encoded
         return context
     monkeypatch.setattr(llm_engineer, "build_live_context", bounded_context)
@@ -44,11 +44,11 @@ def test_actual_numerical_pipeline_reaches_all_local_features_without_io(monkeyp
     assert result["proximity_kinds"] == ["ALL_CLEAR", "CAR_LEFT"]
     assert all(result["counts"][key] > 0 for key in (
         "frames", "fuel.current", "strategy.window", "driving.practice", "stint.observed",
-        "tire.observed_context", "tire.pace"))
+        "tire.observed_context", "tire.pace", "rejoin.brief", "rejoin_ready_publications"))
     assert all(result[key] is False for key in (
         "sdk_accessed", "provider_called", "audio_io", "raw_capture_written", "live_acceptance"))
     assert result["private_growth_bytes"] is None  # Short self-test is not a soak.
-    assert len(result["checks"]) == 7 and not calls
+    assert len(result["checks"]) == 8 and not calls
     serialized = json.dumps(result)
     assert "SDK_LIVE" not in serialized and "SYNTHETIC_SECRET" not in serialized
     assert set(threading.enumerate()) <= before

@@ -17,6 +17,7 @@ from typing import Any
 
 from .engineer_session import validate_engineer_session
 from .live_driving import driving_notice, validated_driving, validated_pace
+from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import validated_stint
 from .live_strategy import strategy_notice, validated_strategy
 from .live_traffic import validated_traffic
@@ -258,7 +259,7 @@ def _live_strategy_facts(result, snapshot):
     result["notices"][:] = [item for item in result["notices"]
                             if item["id"] != "STRATEGY_UNAVAILABLE"]
     result["notices"].append(_entry("STRATEGY_CONDITIONAL",
-        "进站比较使用本次连接手填参数及完整圈预算；未定位进站口，不是进站圈指令。"
+        "燃油比较本身使用本次连接手填参数及完整圈预算；未定位进站口，不是进站圈指令。"
         "未核验赛事规则、轮胎服务或出站交通，不保证最优。"))
     facts = result["facts"]
     window = (f"从提问位置起的完整圈预算：{plan['fuel_stops']} 停，首停可行区间为 "
@@ -284,6 +285,50 @@ def _live_strategy_facts(result, snapshot):
             facts.append(_entry(f"strategy.{name}_time",
                 f"{row['laps_from_now']} 整圈后方案，按手填速率和通道损失估算，"
                 f"仅通道与泵油时间损失 {loss[0]:.1f} 至 {loss[1]:.1f} 秒；不含其他停站服务。"))
+
+
+def _live_rejoin_facts(result, snapshot):
+    value = validated_rejoin(snapshot) if _live_frame_ready(snapshot) else None
+    if value is None or value["status"] != "READY":
+        result["notices"].append(_entry("REJOIN_UNAVAILABLE", rejoin_notice(
+            {"rejoin": value} if value is not None else {})))
+        return
+    inputs = snapshot["strategy_configuration"]["inputs"]
+    facts = result["facts"]
+    result["notices"].append(_entry("REJOIN_CONDITIONAL",
+        "出站推演以手填进出站位置、完整进站损失及历史分段配速为条件，不是实测标定、"
+        "置信区间、比赛排名或进站指令。不能保证其他车未来不进站或不改变配速。"))
+    facts.append(_entry("rejoin.assumptions",
+        f"手填进站口位于圈长 {inputs['pit_entry_fraction']:.4f}，"
+        f"出站口位于 {inputs['pit_exit_fraction']:.4f}；相对留在赛道行驶，"
+        f"含所有停站服务的总损失为 {inputs['complete_pit_loss_low_s']:.1f} 至 "
+        f"{inputs['complete_pit_loss_high_s']:.1f} 秒，须覆盖所比较的补油量。"
+        "使用当前在赛道各车最近两圈的分段时间轨迹；"
+        f"未纳入 {snapshot['motion']['excluded_count']} 个站内或无赛道位置槽位，"
+        "不能据此宣称出站畅通；未核验赛事规则或物理胎耗。"))
+
+    def short_gap(side, bounds):
+        if bounds[0] >= 30:
+            return side + "30秒外"
+        if bounds[1] > 30:
+            return side + "秒差范围较宽"
+        return f"{side}{math.floor(bounds[0])}至{math.ceil(bounds[1])}秒"
+
+    for name, row in zip(("early", "late"), value["scenarios"], strict=False):
+        timing = "早方案" if name == "early" else "晚方案"
+        label = f"{timing}（约 {row['distance_to_entry_laps']:.2f} 圈后到进站口）"
+        if row["status"] != "READY":
+            facts.append(_entry(f"rejoin.{name}", label + "：暂不能确定出站邻车关系或距离过远。"))
+            continue
+        ahead, behind = row["ahead"]["gap_range_s"], row["behind"]["gap_range_s"]
+        gaps = (f"出站前车约 {math.floor(ahead[0])} 至 {math.ceil(ahead[1])} 秒，"
+                f"后车约 {math.floor(behind[0])} 至 {math.ceil(behind[1])} 秒")
+        facts.append(_entry(f"rejoin.{name}", label + "：" + gaps
+            + f"；补油预算 {row['fuel_add_l']:.1f} 升，之后还有 {row['further_stops']} 停。"
+            "秒差是沿赛道分段行驶时间，不代表名次。"))
+        if not any(item["id"] == "rejoin.brief" for item in facts):
+            facts.append(_entry("rejoin.brief", f"手填{timing}，"
+                + short_gap("前", ahead) + "，" + short_gap("后", behind) + "。非指令。"))
 
 
 def _live_stint_facts(result, snapshot):
@@ -336,6 +381,7 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     _live_situation_facts(result, snapshot)
     _live_driving_facts(result, snapshot)
     _live_strategy_facts(result, snapshot)
+    _live_rejoin_facts(result, snapshot)
     _live_stint_facts(result, snapshot)
     monitor = _mapping(snapshot.get("monitor"))
     fuel = _mapping(snapshot.get("fuel"))

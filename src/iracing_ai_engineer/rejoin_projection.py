@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from collections.abc import Mapping
 from itertools import product
 
@@ -12,12 +13,13 @@ REJOIN_METHOD_VERSION = "physical-progress-envelope-v2"
 
 def _nearest(
     candidates: list[dict[str, object]],
+    *, key: str = "gap_range_s",
 ) -> tuple[dict[str, object] | None, bool]:
     if not candidates:
         return None, True
-    ordered = sorted(candidates, key=lambda row: (sum(row["gap_range_s"]), row["car_idx"]))
+    ordered = sorted(candidates, key=lambda row: (sum(row[key]), row["car_idx"]))
     winner = ordered[0]
-    if any(winner["gap_range_s"][1] >= row["gap_range_s"][0] for row in ordered[1:]):
+    if any(winner[key][1] >= row[key][0] for row in ordered[1:]):
         return None, False
     return winner, True
 
@@ -89,3 +91,86 @@ def project_physical_rejoin(
     if reasons:
         return None, None, list(dict.fromkeys(reasons))
     return nearest_ahead, nearest_behind, []
+
+
+def phase_time(profile, progress):
+    """Counterfactual elapsed microseconds at an unwrapped track position."""
+    times = profile["elapsed_us"]
+    bins = len(times) - 1
+    lap = math.floor(progress)
+    phase = (progress - lap) * bins
+    index = min(bins - 1, math.floor(phase))
+    return lap * times[-1] + times[index] + (phase - index) * (times[index + 1] - times[index])
+
+
+def phase_position(profile, elapsed_us):
+    """Inverse of phase_time for a strictly increasing completed-lap profile."""
+    times = profile["elapsed_us"]
+    lap, phase = divmod(elapsed_us, times[-1])
+    index = min(len(times) - 2, bisect_right(times, phase) - 1)
+    fraction = (phase - times[index]) / (times[index + 1] - times[index])
+    return lap + (index + fraction) / (len(times) - 1)
+
+
+def project_phase_rejoin(motion, *, exit_progress_laps, loss_range_s):
+    """Project to a mapped exit using both actors' two observed lap shapes.
+
+    Full net pit loss is relative to counterfactual ordinary travel to that exit.
+    We enumerate both completed profiles, service-loss endpoints and bounded
+    sampling errors. This envelope is conditional on repeated historical pace;
+    it is not a statistical prediction interval or a guarantee about future pits.
+    Inputs are admitted by the live motion/scenario validators, not free text.
+    """
+    player = motion["player"]
+    distance = exit_progress_laps - player["progress_laps"]
+    if not 0 <= distance <= 3:
+        raise ValueError("EXIT_DISTANCE_OUT_OF_RANGE")
+    ahead, behind, reasons = [], [], []
+    for opponent in motion["opponents"]:
+        deltas, forward_gaps, backward_gaps = [], [], []
+        for ours, theirs in product(player["lap_profiles"], opponent["lap_profiles"]):
+            travel = (phase_time(ours, exit_progress_laps)
+                      - phase_time(ours, player["progress_laps"])) / 1e6
+            own_error = 2 * ours["sampling_error_us"] / 1e6 * (math.ceil(distance) + 1)
+            for loss, sign in product(loss_range_s, (-1, 1)):
+                elapsed = max(0, travel + loss + sign * own_error)
+                other_laps = math.ceil(elapsed * 1e6 / theirs["elapsed_us"][-1])
+                other_error = 2 * theirs["sampling_error_us"] / 1e6 * (other_laps + 1)
+                for other_sign in (-1, 1):
+                    future = phase_position(theirs, phase_time(theirs, opponent["progress_laps"])
+                                            + max(0, elapsed + other_sign * other_error) * 1e6)
+                    delta = round(future - exit_progress_laps, 9)
+                    deltas.append(delta)
+                    forward = delta % 1
+                    a = (phase_time(ours, exit_progress_laps + forward)
+                         - phase_time(ours, exit_progress_laps)) / 1e6
+                    b = (phase_time(theirs, future + 1 - forward)
+                         - phase_time(theirs, future)) / 1e6
+                    forward_gaps.extend((max(0, a - 4 * ours["sampling_error_us"] / 1e6),
+                                         a + 4 * ours["sampling_error_us"] / 1e6))
+                    backward_gaps.extend((max(0, b - 4 * theirs["sampling_error_us"] / 1e6),
+                                          b + 4 * theirs["sampling_error_us"] / 1e6))
+        low, high = min(deltas), max(deltas)
+        if math.ceil(low - 1e-12) <= math.floor(high + 1e-12):
+            reasons.append("REJOIN_ZERO_CROSSING_WITHIN_UNCERTAINTY")
+            continue
+        forward_range = [low % 1, high % 1]
+        backward_range = [1 - forward_range[1], 1 - forward_range[0]]
+        for target, gaps, distances in ((ahead, forward_gaps, forward_range),
+                                         (behind, backward_gaps, backward_range)):
+            target.append({"car_idx": opponent["car_idx"],
+                           "distance_range_laps": distances,
+                           "gap_range_s": [round(min(gaps), 6), round(max(gaps), 6)]})
+    # Physical ordering is by circular track distance, not relative pace. A
+    # farther but faster car is not the nearest car behind in a multiclass race.
+    nearest_ahead, a_stable = _nearest(ahead, key="distance_range_laps")
+    nearest_behind, b_stable = _nearest(behind, key="distance_range_laps")
+    if not a_stable or not b_stable:
+        reasons.append("REJOIN_ORDER_AMBIGUOUS")
+    if not ahead or not behind:
+        reasons.append("NO_REJOIN_NEIGHBOR_AVAILABLE")
+    if reasons:
+        return None, None, sorted(set(reasons))
+    return ({key: value for key, value in nearest_ahead.items() if key != "distance_range_laps"},
+            {key: value for key, value in nearest_behind.items() if key != "distance_range_laps"},
+            [])

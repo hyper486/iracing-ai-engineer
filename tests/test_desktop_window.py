@@ -472,7 +472,7 @@ def _native_settings(native_window) -> None:
 def _native_question(native_window) -> None:
     _, controller, window = native_window
     for label, question in (("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
-                            ("问配速", "配速变化")):
+                            ("问配速", "配速变化"), ("问出站", "出站预测")):
         button = next(item for item in window._question_buttons if item.cget("text") == label)
         button.invoke()
         assert controller.questions[-1] == (question, "live")
@@ -740,9 +740,15 @@ def _native_strategy_configuration(native_window):
     assert len(calls) == 1
     assert StrategyParameters(**calls[0]) == StrategyParameters(50, 2, 20, 24)
     assert "不会自动保存" in window.action_var.get()
+    for name, number in (("pit_entry_fraction", ".8"), ("pit_exit_fraction", ".05"),
+                         ("complete_pit_loss_low_s", "30"), ("complete_pit_loss_high_s", "35")):
+        window.strategy_vars[name].set(number)
+    window._configure_strategy()
+    assert len(calls) == 2
+    assert StrategyParameters(**calls[-1]) == StrategyParameters(50, 2, 20, 24, .8, .05, 30, 35)
     window.strategy_vars["tank_capacity_l"].set("nan")
     window._configure_strategy()
-    assert len(calls) == 1 and "参数无效" in window.action_var.get()
+    assert len(calls) == 2 and "参数无效" in window.action_var.get()
     window._configure_strategy(clear=True)
     assert calls[-1] is None and all(not var.get() for var in window.strategy_vars.values())
     assert not controller.questions and not controller.voice_calls

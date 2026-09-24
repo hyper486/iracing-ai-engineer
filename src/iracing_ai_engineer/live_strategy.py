@@ -34,6 +34,10 @@ class StrategyParameters:
     refuel_rate_l_per_s: float | None = None
     pit_loss_low_s: float | None = None
     pit_loss_high_s: float | None = None
+    pit_entry_fraction: float | None = None
+    pit_exit_fraction: float | None = None
+    complete_pit_loss_low_s: float | None = None
+    complete_pit_loss_high_s: float | None = None
 
     def __post_init__(self):
         if not _number(self.tank_capacity_l, .1):
@@ -43,6 +47,15 @@ class StrategyParameters:
         losses = (self.pit_loss_low_s, self.pit_loss_high_s)
         if losses != (None, None) and not (
             all(_number(value) for value in losses) and losses[0] <= losses[1]
+        ):
+            raise ValueError("STRATEGY_PARAMETERS_INVALID")
+        rejoin = (self.pit_entry_fraction, self.pit_exit_fraction,
+                  self.complete_pit_loss_low_s, self.complete_pit_loss_high_s)
+        if rejoin != (None, None, None, None) and not (
+            all(_number(value, high=1) and value < 1 for value in rejoin[:2])
+            and rejoin[0] != rejoin[1]
+            and all(_number(value, .1, 600) for value in rejoin[2:])
+            and rejoin[2] <= rejoin[3]
         ):
             raise ValueError("STRATEGY_PARAMETERS_INVALID")
 

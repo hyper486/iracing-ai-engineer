@@ -186,6 +186,7 @@ def test_build_script_bounds_outputs_and_checks_frozen_synthetic_receipt():
         "'SYNTHETIC_REPEATED_CORNER_QUERY'",
         "'SYNTHETIC_FUEL_STOP_QUERY'",
         "'SYNTHETIC_STINT_OBSERVATION_QUERY'", "'SYNTHETIC_RAW_PACE_QUERY'",
+        "'SYNTHETIC_MAPPED_REJOIN_QUERY'",
         "'SYNTHETIC_RETAINED_STATE_BOUNDS'",
         "numerical_self_test = $selfTestStatus",
         "Where-Object { $_.id -ceq $requiredCheck }",

@@ -45,6 +45,8 @@ _QUERIES = {
     ),
     "pit_plan": ("比较进站方案", "进站方案", "进站计划", "进站窗口", "这次进站加多少油",
                  "下一次进站加多少油", "pit plan", "pit comparison"),
+    "rejoin": ("出站预测", "进站后会落在哪", "出站后前后车情况", "预测出站交通",
+               "rejoin prediction", "where will i rejoin"),
     "traffic": ("前后车情况", "周围车辆情况", "周围的车在哪里", "附近车辆情况", "交通情况",
                 "traffic report", "cars around me"),
     "ahead": ("前车多远", "前车离我多远", "前面车在哪", "前车在哪里", "gap ahead"),
@@ -144,6 +146,19 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     if intent not in _QUERIES or context.get("scope") != "live_snapshot":
         raise ValueError("INVALID_LIVE_QUERY")
     facts = {item["id"]: item["text"] for item in context["facts"]}
+    if intent == "rejoin":
+        notices = {item["id"]: item["text"] for item in context.get("notices", [])}
+        chosen = [key for key in ("rejoin.brief", "rejoin.early", "rejoin.late",
+                                  "rejoin.assumptions") if key in facts]
+        spoken = facts.get("rejoin.brief", notices.get("REJOIN_UNAVAILABLE", "出站预测未就绪。"))
+        body = "\n".join(facts[key] for key in chosen if key != "rejoin.brief") or spoken
+        if "REJOIN_CONDITIONAL" in notices:
+            body += "\n" + notices["REJOIN_CONDITIONAL"]
+        if len(spoken) > 280:
+            raise ValueError("LIVE_QUERY_RENDER_LIMIT")
+        return {"topic": "strategy", "fact_ids": chosen, "spoken_text": spoken,
+                "text": body + "\n这是提问时的条件推演；不会操作车辆或进站设置。",
+                "intent": intent}
     if intent == "pit_plan" or (intent == "pit" and "strategy.window" in facts):
         return _render_pit_comparison(context, facts, intent)
     preferences = {

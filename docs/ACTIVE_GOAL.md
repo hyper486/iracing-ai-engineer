@@ -50,8 +50,9 @@ built and self-tested, without replacing existing installations. Stage C's
 local current-fuel and physical-traffic question slices are
 implemented in source, including player pit permission and flag observations.
 Conditional whole-lap fuel-stop comparison is now connected to current fuel and
-session-scoped user assumptions. Action-bound pit/rejoin integration and real
-lap comparisons remain open. Stage D's
+session-scoped user assumptions. Conditional mapped pit/rejoin projection now
+connects hand-entered entry/exit/full-loss assumptions and observed phase tracks;
+measured calibration, rule/tire integration and real comparisons remain open. Stage D's
 bounded recent-lap model and local coaching questions are now implemented in source;
 this is descriptive evidence, not causal coaching or offline gate promotion.
 Stage E now has a bounded private proximity/capture/audio journal and silent
@@ -109,8 +110,8 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   See [the replay contract](PRIVATE_TRIAL_REPLAY.md).
 - Accelerated numerical resource checks and an integrated native trial build
   now cover the supported slices; full-duration hardware limits remain open.
-  Action-bound pit/rejoin integration remains
-  open beyond the conditional fuel budget. Journal replay currently covers
+  Full calibrated pit/rejoin integration remains
+  open beyond the conditional mapped forecast. Journal replay currently covers
   proximity and software audio, not a simulated hardware/PTT/LLM rerun.
 - Implemented: exact direct-fuel amount answers have a separate observation
   revision, so unrelated model-invalid intervals cannot repeatedly cancel them.
@@ -154,8 +155,21 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   consumes the complete context. M2 and exact bundle replay enforce the same
   origin boundary. Labels are an explicit review trust boundary, not SDK service
   contents or physical wear. See [the contract](TIRE_PERFORMANCE_BELIEF.md).
-  This offline-only source change is not in the existing trial EXE and does not
-  admit a tire model to native live recommendations.
+  This offline-only correction does not admit a tire model to native live
+  recommendations; its packaging is tracked in the native trial guide.
+- Implemented: conditional native mapped rejoin, exact local questions and short
+  PTT answers. Explicit entry/exit/full net-loss assumptions combine with two
+  completed per-car phase profiles. Physical neighbor order, sampling bounds,
+  reachable fuel windows, short forecast horizons and current-phase checks
+  gate every number. Faults and stale/config-changed results withdraw without
+  blocking independent proximity. Synthetic source/model/PTT/native checks do
+  not establish measured pit calibration or race acceptance. See
+  [the mapped-rejoin contract](LIVE_MAPPED_REJOIN.md).
+  The rebuilt unsigned local EXE passed 16 frozen checks; the new 500-lap
+  virtual run reached the mapped question path with bounded motion storage.
+  This build also contains the offline tire-origin correction, without admitting
+  physical tire/service advice to the native live lane. Installed copies and
+  shortcuts were not replaced.
 - Next: obtain reviewed matched tire/service evidence and connect calibrated
   performance/service costs to endurance strategy. Check selected microphone
   and headphones, wheel/PTT, actual proximity latency and VR performance in a

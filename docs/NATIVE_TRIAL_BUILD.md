@@ -5,22 +5,32 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The later offline reviewed tire-origin v2 correction is source-only and is not
-included in this existing build. Its native live tire questions remain bounded
-observations, not physical tire age or model-selected tire service. Use current
+The rebuilt trial includes the offline reviewed tire-origin v2 correction and
+conditional mapped-rejoin lane. All 16 frozen numerical/Tk/memory-only speech
+checks passed. Native live tire questions remain bounded observations, not
+physical tire age or model-selected tire service. Use current
 source for offline finalization/verification; do not use an older packaged CLI
 to regenerate tire-strategy evidence. See [the v2 contract](TIRE_PERFORMANCE_BELIEF.md).
+
+The four new session-only input fields and **问出站** shortcut were also checked
+visually in the frozen synthetic UI mode, including unavailable and expired
+responses. The QA window was closed afterwards. No game, saved credentials,
+microphone or speaker was opened; installed copies and shortcuts were untouched.
 
 ## What the integrated self-test actually exercises
 
 The default frozen-binary self-test now feeds invented numeric frames through
-the real normalization, proximity, fuel, recent-corner, observed-stint and conditional stop
-owners. It requires left/clear transitions, learned fuel, repeated-corner
-evidence, local fuel/coaching/stop/stint/tire-counter/raw-pace answers and bounded retained state. These
+the real normalization, proximity, fuel, recent-corner, observed-stint,
+conditional stop and mapped-rejoin owners. It requires left/clear transitions,
+learned fuel, repeated-corner evidence, local fuel/coaching/stop/stint/tire-counter/
+raw-pace/rejoin answers and bounded retained state. These
 questions must use no provider requests. The fixture is streaming, with only
 two cached lap shapes; it does not store a whole synthetic race in memory.
-Seven numerical checks require at least eight invented laps including capture
+Eight numerical checks require at least eight invented laps including capture
 guards; those guards are not six valid real driving laps or a live tire model.
+The added mapped-rejoin check uses invented entry/exit/full-loss assumptions,
+consistent per-car lap counters and the actual phase tracker/local answer path.
+It does not promote those assumptions to a real pit calibration.
 
 The existing checks additionally exercise hidden native Tk controls, local
 answer-worker shutdown, the window-close protocol, exact speech-model hashes
@@ -33,6 +43,12 @@ are not proof of source authenticity and are never exported as a capture,
 sealed SDK receipt or accepted driving evidence. Output is aggregate only.
 
 ## Numerical resource diagnostic
+
+The mapped-rejoin build's 500-lap/892,192-frame accelerated check passed all
+eight numerical checks, including 8,400 ready rejoin publications. For its two
+active invented cars, peak retained motion points were 363; post-warmup measured
+private-commit growth was 4.64 MiB. The 208.094-second wall run represented
+14,869.85 seconds of paced virtual time, not real operation under VR load.
 
 From a source checkout, choose a new ignored/local output path:
 
@@ -86,12 +102,18 @@ otherwise have been truncated; old packets cannot invalidate a newer answer.
 6. While parked, enter verified effective tank capacity and optional pumping/
    transit-loss assumptions under local settings. Ask **比较进站方案**. This is
    a whole-lap conditional fuel budget, not an optimal stop/rejoin command.
+   For **出站预测**, also confirm the right-hand entry/exit fractions and complete
+   net loss including all services. Do not reuse the left-hand transit-only
+   loss. All on-track cars need two completed observed phase profiles; unknown,
+   distant or ambiguous scenarios remain unavailable. The forecast is conditional
+   on historical pace, not a promise of a clear exit. See [setup and limits](LIVE_MAPPED_REJOIN.md).
 7. If something stays silent, preserve the ended private `trial-*.jsonl` and
    optional raw capture. Native **回放近车诊断日志…** separates no detector event,
    suppression and recorded playback outcomes without calling a model or
    playing audio. Never upload these private inputs to the public repository.
 
 Acceptance remains open for actual acquisition quality, headset hearing, PTT
-recognition/response timing and VR load. Full tire/rule/service/action-bound
-rejoin integration is also unfinished. This build never sends vehicle,
+recognition/response timing and VR load. Full calibrated tire/rule/service
+integration is also unfinished; the mapped forecast uses explicit user assumptions.
+This build never sends vehicle,
 simulator-launch or pit-black-box commands.

@@ -18,6 +18,7 @@ import numpy as np
 from .live_app import AppState, _LiveAnalysis
 from .live_driving import MAX_JOB_BYTES, MAX_LAPS, MAX_ROWS, validated_driving, validated_pace
 from .live_fuel import LiveFuelConfig
+from .live_rejoin import validated_rejoin
 from .live_stint import validated_stint
 from .live_strategy import StrategyParameters, validated_strategy
 from .llm_engineer import EngineerService
@@ -80,7 +81,8 @@ def synthetic_frames(laps, rate=60):
                 "TrackTemp": 29., "TrackTempCrew": 29., "AirTemp": 20.,
                 "WindVel": 1., "WindDir": 0., "Precipitation": 0.,
                 "CarIdxLapDistPct": [fraction, (fraction + .4) % 1, -1.],
-                "CarIdxLap": [lap + 1, lap + 1, 0], "CarIdxLapCompleted": [lap, lap, 0],
+                "CarIdxLap": [lap + 1, math.floor(lap + fraction + .4) + 1, 0],
+                "CarIdxLapCompleted": [lap, math.floor(lap + fraction + .4), 0],
                 "CarIdxTrackSurface": [3, 3, -1], "CarIdxOnPitRoad": [False, False, False],
             }
             yield RawSdkFrame(buffer_tick=tick, session_info_update=1, values=values,
@@ -159,7 +161,8 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
             value = state.snapshot()
             if not configured:
                 try:
-                    state.configure_strategy(StrategyParameters(100., 2., 20., 25.))
+                    state.configure_strategy(StrategyParameters(200., 2., 20., 25.,
+                                                                .9, .1, 60., 62.))
                     configured = True
                 except ValueError:
                     pass
@@ -175,6 +178,11 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
                 peaks[key] = max(peaks[key], health.get(key, 0))
             peaks["spotter_audit_rows"] = max(
                 peaks["spotter_audit_rows"], len(state._spotter.audit()))
+            if analysis._motion is not None:
+                peaks["motion_actors"] = max(peaks["motion_actors"], len(analysis._motion.actors))
+                peaks["motion_profile_points"] = max(peaks["motion_profile_points"], sum(
+                    sum(len(profile["elapsed_us"]) for profile in actor.profiles)
+                    + len(actor.active or []) for actor in analysis._motion.actors.values()))
             for row in state._spotter.audit():
                 if row["decision"] == "CANDIDATE":
                     proximity_kinds.add(row["kind"])
@@ -203,6 +211,11 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
                     query = ("轮胎怎么样", "tire.observed_context")
             if query is None and validated_pace(value) is not None and not counts["tire.pace"]:
                 query = ("配速变化", "tire.pace")
+            rejoin = validated_rejoin(value)
+            if rejoin is not None and rejoin["status"] == "READY":
+                counts["rejoin_ready_publications"] += 1
+                if query is None and not counts["rejoin.brief"]:
+                    query = ("出站预测", "rejoin.brief")
             if query is not None and now[0] - last_query_at >= 1.01:
                 # Ordinary local rate guards and fresh publications, not a
                 # forced snapshot or query-clock jump. No audio is requested.
@@ -234,13 +247,16 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
                 and {"CAR_LEFT", "ALL_CLEAR"} <= proximity_kinds
                 and all(counts[key] for key in ("fuel.current", "strategy.window",
                                                 "driving.practice", "stint.observed",
-                                                "tire.observed_context", "tire.pace"))):
+                                                "tire.observed_context", "tire.pace",
+                                                "rejoin.brief"))):
             raise RuntimeError("SYNTHETIC_LOOPS_NOT_REACHED")
         phase = "RETAINED_STATE_BOUNDS"
         if not (peaks["retained_laps"] <= MAX_LAPS and peaks["buffered_rows"] <= MAX_ROWS * 2
                 and peaks["peak_buffered_frames"] <= 2
                 and peaks["peak_buffered_bytes"] <= MAX_JOB_BYTES * 2
-                and peaks["fuel_history_laps"] <= 50 and peaks["spotter_audit_rows"] <= 128):
+                and peaks["fuel_history_laps"] <= 50 and peaks["spotter_audit_rows"] <= 128
+                and peaks["motion_actors"] <= 256
+                and peaks["motion_profile_points"] <= 256 * (2 * 65 + 64)):
             raise RuntimeError("SYNTHETIC_RETAINED_STATE_LIMIT")
         if service.snapshot()["requests_used"]:
             raise RuntimeError("SYNTHETIC_PROVIDER_REQUEST")
@@ -250,6 +266,7 @@ def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
             "SYNTHETIC_PROXIMITY_TRANSITIONS", "SYNTHETIC_LEARNED_FUEL_QUERY",
             "SYNTHETIC_REPEATED_CORNER_QUERY", "SYNTHETIC_FUEL_STOP_QUERY",
             "SYNTHETIC_STINT_OBSERVATION_QUERY", "SYNTHETIC_RAW_PACE_QUERY",
+            "SYNTHETIC_MAPPED_REJOIN_QUERY",
             "SYNTHETIC_RETAINED_STATE_BOUNDS")]
     except Exception:
         checks.append({"id": "SYNTHETIC_NUMERICAL_RUNTIME", "status": "FAIL"})

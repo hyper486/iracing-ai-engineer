@@ -37,13 +37,55 @@ required running dependency. The final goal remains active and unaccepted.
 | Incremental recent-lap coaching | Packaged local trial; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
 | Private proximity / audio replay | Packaged local trial; synthetic checks | Bounded local journal, exact detector recomputation, software-playback correlation and optional capture byte links; not audio reproduction, source authentication or human hearing. |
 | Conditional live fuel-stop comparison | Packaged local trial; synthetic checks | Session-scoped hand-entered assumptions, shared complete-lap stop arithmetic, next-fill/stint budgets and local PTT; not mapped pit-entry timing, optimal strategy or future rejoin. |
+| Conditional mapped rejoin | Packaged local trial; synthetic checks | User-confirmed entry/exit/full net-loss assumptions, two completed per-car phase profiles, reachable fuel-window endpoints, physical neighbor ranges and local PTT; not measured calibration, optimal timing or live acceptance. |
 | Observed stint / tire-counter interval / raw pace | Packaged local trial; synthetic checks | Separate stint and tire observations, six consecutive clean-lap median comparison and local questions; not physical tire age, fuel-corrected degradation or a tire-change decision. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Reviewed tire-origin correction
+## Conditional native mapped rejoin
+
+The native window now has optional session-scoped pit-entry/exit and complete
+net-loss inputs plus **问出站 / 出站预测**. Current fuel-window endpoints map to
+reachable entrances, with projection to the corresponding exit. The tracker
+retains each on-track actor's two completed 64-bin lap profiles, not a uniform
+average-speed or instantaneous-speed extrapolation. Physical distance selects
+neighbors in multiclass/lapped traffic; uncertainty in overlap or order gives
+`WAIT`. Missing geometry, full loss, permission or continuous motion stays
+explicit. Excluded pit/off-track slots do not become a "clear track" claim.
+
+Projection runs outside the AppState lock. Delayed old-config work is discarded;
+continuity/neighbor/material-gap changes and the ten-second answer TTL withdraw
+old speech. Ordinary opponent profile refreshes do not continually cancel it.
+Exact questions bypass DeepSeek; optional free-form selection only sees fixed
+summary facts. Independent Spotter/fuel/coaching remain available when this
+module faults. See [the contract](LIVE_MAPPED_REJOIN.md).
+
+The 56 new synthetic cases cover numerical, source, fault, configuration-race,
+fake-PTT and presentation boundaries. A separate 207-case malformed-projection
+check admitted no unsafe facts and raised no uncaught errors. Native settings/
+shortcut and streaming numerical tests also exercise the new lane. The rebuilt
+unsigned local EXE passed all 16 frozen numerical/Tk/memory-only voice checks
+with a system-only child PATH and no saved credentials. Visible synthetic QA
+confirmed the four setup fields, question shortcut, unavailable response and
+expired-answer withdrawal. It was then closed; existing installations, shortcuts,
+credentials and device preferences were not replaced. Full regression passed
+**2,950 tests, with 44 skips**, in **556.62 seconds**. Skips retain their existing
+data/platform/private-deployment and explicit opt-in boundaries. No real race,
+microphone, headphone, calibrated service or VR acceptance is implied.
+
+The current **500-lap / 892,192-frame** virtual 60 Hz run passed all eight
+numerical checks in **208.094 wall seconds** for **14,869.85 virtual seconds**.
+It reached 8,400 ready mapped-rejoin publications and the local question path.
+Peak motion storage for the two active synthetic cars was 363 profile points;
+the other bounded peaks remained 12 corner laps / 346,176 trace bytes, 1,894
+rows, one job / 387,904 bytes, 50 fuel samples and 42 proximity audit rows.
+Measured peak private-commit growth after 24 warmup laps was **4.64 MiB**. This
+is a small invented fleet with accelerated time and worker barriers, not a
+full-grid SDK/recording/audio/VR endurance soak or a hardware latency guarantee.
+
+## Previous milestone: reviewed tire-origin correction
 
 Current source fixes the old offline assumption that every pit exit or lap-zero
 attachment proves a fresh tire set. V2 tire contexts bind independently pinned
@@ -62,8 +104,8 @@ The unchanged native live tracker still reports observations only.
 Targeted checks include a positive synthetic capture-to-model-selected-change
 and exact bundle replay, plus unknown/partial/fuel-only service and tampering
 regressions. These labels/captures are invented tests, not real tire calibration.
-The existing local trial EXE and installed copies have not been rebuilt/replaced
-for this offline source correction. Real matched tire/service data, native
+At that milestone, the local trial EXE and installed copies had not been rebuilt
+for the offline source correction. Real matched tire/service data, native
 strategy integration and hardware/VR acceptance remain open. See
 [the tire-origin contract](TIRE_PERFORMANCE_BELIEF.md).
 

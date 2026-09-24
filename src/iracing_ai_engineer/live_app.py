@@ -31,6 +31,8 @@ from .dashboard_page import DASHBOARD_HTML
 from .live_driving import LiveDrivingEngineer
 from .live_fuel import LiveFuelConfig, LiveFuelEngineer
 from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
+from .live_motion import LiveMotionTracker, unavailable_motion
+from .live_rejoin import project_rejoin, rejoin_binding, unavailable_rejoin
 from .live_stint import LiveStintTracker, unavailable_stint
 from .live_strategy import (
     StrategyParameters,
@@ -179,6 +181,7 @@ class AppState:
         self._strategy_revision = 0
         self._strategy_evidence_revision = 0
         self._strategy_failed = False
+        self._rejoin_revision = 0
         self._spotter = ProximitySpotter()
         self._spotter_failed = False
         self._trial = None
@@ -194,6 +197,8 @@ class AppState:
             "driving": None,
             "stint": None,
             "strategy": None,
+            "motion": None,
+            "rejoin": None,
             "speech": None,
             "source_mode": "LIVE",
             "session_type": None,
@@ -217,6 +222,7 @@ class AppState:
         with self._lock:
             self._value.update(
                 connection=status, monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                motion=None, rejoin=None,
                 speech=None,
                 session_type=None,
             )
@@ -238,6 +244,13 @@ class AppState:
         self._strategy_evidence_revision += 1
         self._strategy_failed = False
         self._value["strategy"] = None
+        self._value["rejoin"] = None
+        self._rejoin_revision += 1
+
+    def strategy_inputs(self):
+        """Immutable configuration snapshot; expensive projection stays off this lock."""
+        with self._lock:
+            return (self._strategy_parameters, self._strategy_scope, self._strategy_revision)
 
     def configure_strategy(self, parameters: StrategyParameters | None) -> None:
         if parameters is not None and type(parameters) is not StrategyParameters:
@@ -390,6 +403,7 @@ class AppState:
                 self._observed_fuel_l = None
                 self._situation_revision += 1
                 self._value.update(monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                                   motion=None, rejoin=None,
                                    speech=None)
                 self._clear_strategy()
 
@@ -425,11 +439,13 @@ class AppState:
         self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None,
         *, observed_at=None, generation=None, allowed=lambda: True, traffic=None, driving=None,
         stint=None,
+        motion=None, rejoin=None, rejoin_configuration_revision=None,
     ) -> None:
         with self._lock:
             if (generation is not None and generation != self._generation) or not allowed():
                 return
             previous = self._value.get("monitor") or {}
+            previous_rejoin = rejoin_binding(self._value)
             previous_fuel = self._value.get("fuel") or {}
             old_level, new_level = previous_fuel.get("current_fuel_l"), fuel.get("current_fuel_l")
             source_changed = (
@@ -480,6 +496,8 @@ class AppState:
             ):
                 self._clear_strategy()
             self._project_strategy(monitor, fuel, session_type)
+            if rejoin_configuration_revision != self._strategy_revision:
+                rejoin = None
             self._updated = self.clock() if observed_at is None else observed_at
             self._value.update(
                 connection="CONNECTED",
@@ -488,9 +506,13 @@ class AppState:
                 traffic=copy.deepcopy(traffic),
                 driving=copy.deepcopy(driving),
                 stint=copy.deepcopy(stint),
+                motion=copy.deepcopy(motion),
+                rejoin=copy.deepcopy(rejoin),
                 speech=copy.deepcopy(speech),
                 session_type=session_type,
             )
+            if previous_rejoin != rejoin_binding(self._value):
+                self._rejoin_revision += 1
             self._summary["snapshots_seen"] += 1
             count = fuel.get("valid_laps", 0)
             if type(count) is int:
@@ -515,15 +537,18 @@ class AppState:
             ):
                 # Defense in depth if a fault-notification callback could not run.
                 value.update(monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                             motion=None, rejoin=None,
                              speech=None)
                 age = None
             value.update(updated_age_s=age, generation=self._generation,
                          engineer_revision=self._engineer_revision,
                          fuel_observation_revision=self._fuel_observation_revision,
                          situation_revision=self._situation_revision)
+            value["rejoin_revision"] = self._rejoin_revision
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
                 value.update(connection="DISCONNECTED", fuel=None, monitor=None, traffic=None,
                              driving=None, stint=None, strategy=None,
+                             motion=None, rejoin=None,
                              speech=None)
                 if self._strategy_parameters is not None:
                     self._clear_strategy()
@@ -692,6 +717,12 @@ class _LiveAnalysis:
         )
         self._fuel, self._speech = LiveFuelEngineer(config), PracticeFuelSpeech()
         try:
+            self._motion = LiveMotionTracker(tick_rate)
+        except Exception:
+            self._motion = None
+        self._rejoin_failed = False
+        self._rejoin_config_revision = None
+        try:
             self._stint = LiveStintTracker(tick_rate)
         except Exception:
             self._stint = None
@@ -707,6 +738,11 @@ class _LiveAnalysis:
         frame, session_type, observed, track_length_mm = item
         progressed = self._monitor.feed(frame, observed_monotonic_s=observed)
         self._monitor.advance_time(observed)
+        if progressed and self._motion is not None:
+            try:
+                self._motion.feed(frame, self._monitor.latest_sample)
+            except Exception:
+                self._motion.fail()
         if progressed and self._stint is not None:
             try:
                 self._stint.feed(frame, self._monitor.latest_sample)
@@ -719,6 +755,9 @@ class _LiveAnalysis:
                 self._driving.fail()
         if observed >= self._next_snapshot and self._monitor.snapshot_pending:
             snapshot = self._monitor.snapshot()
+            if (self._motion is not None
+                    and snapshot.get("quality", {}).get("stale") is not False):
+                self._motion.reset("SOURCE_STALE")
             if (self._stint is not None
                     and snapshot.get("quality", {}).get("stale") is not False):
                 self._stint.reset("SOURCE_STALE")
@@ -726,6 +765,29 @@ class _LiveAnalysis:
                     and snapshot.get("quality", {}).get("stale") is not False):
                 self._driving.reset("SOURCE_STALE")
             fuel = self._fuel.feed(snapshot, session_type=session_type)
+            try:
+                motion = (self._motion.snapshot(snapshot) if self._motion is not None
+                          else unavailable_motion(snapshot, "MOTION_PROCESSING_ERROR"))
+            except Exception:
+                if self._motion is not None:
+                    self._motion.fail()
+                motion = unavailable_motion(snapshot, "MOTION_PROCESSING_ERROR")
+            parameters, scope, config_revision = self._state.strategy_inputs()
+            if config_revision != self._rejoin_config_revision:
+                self._rejoin_failed = False
+                self._rejoin_config_revision = config_revision
+            rejoin_input = {"monitor": snapshot, "fuel": fuel, "motion": motion,
+                            "session_type": session_type, "generation": self._generation,
+                            "strategy_configuration": configuration_projection(
+                                parameters, scope, config_revision)}
+            rejoin = unavailable_rejoin(rejoin_input, "REJOIN_PROCESSING_ERROR")
+            if not self._rejoin_failed:
+                try:
+                    rejoin_input["strategy"] = project_strategy(
+                        snapshot, fuel, session_type, parameters, config_revision)
+                    rejoin = project_rejoin(rejoin_input)
+                except Exception:
+                    self._rejoin_failed = True
             try:
                 stint = (self._stint.snapshot(snapshot) if self._stint is not None
                          else unavailable_stint(snapshot, "STINT_PROCESSING_ERROR"))
@@ -747,6 +809,8 @@ class _LiveAnalysis:
             self._state.publish(snapshot, fuel, intent, session_type, observed_at=observed,
                                 generation=self._generation, allowed=self._allowed, traffic=traffic,
                                 stint=stint,
+                                motion=motion, rejoin=rejoin,
+                                rejoin_configuration_revision=config_revision,
                                 driving=(self._driving.snapshot(snapshot)
                                          if self._driving is not None
                                          else {"status": "ERROR"}))

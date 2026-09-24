@@ -108,6 +108,7 @@ if (-not $SkipSelfTest) {
         'SYNTHETIC_PROXIMITY_TRANSITIONS', 'SYNTHETIC_LEARNED_FUEL_QUERY',
         'SYNTHETIC_REPEATED_CORNER_QUERY', 'SYNTHETIC_FUEL_STOP_QUERY',
         'SYNTHETIC_STINT_OBSERVATION_QUERY', 'SYNTHETIC_RAW_PACE_QUERY',
+        'SYNTHETIC_MAPPED_REJOIN_QUERY',
         'SYNTHETIC_RETAINED_STATE_BOUNDS'
     )) {
         if (@($receipt.checks | Where-Object { $_.id -ceq $requiredCheck }).Count -ne 1) {
