@@ -88,6 +88,12 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
 - Remaining isolation boundary: SDK access, metadata binding and bounded input
   inspection still run on the reader; Python threads do not isolate the GIL or
   forcibly recover a hung native call. Final shutdown waits for actual release.
+- Implemented: full-schema private captures now preserve pyirsdk char octets via
+  schema-bound reversible encoding, including NUL padding. Queue bounds and
+  duplicate/replay digests use compatible representations; generic bytes and
+  malformed values still fail. Synthetic native-reader checks preserve proximity
+  when recording fails. Raw chars are never added to question/voice summaries.
+  See [the recording contract](SDK_CHAR_RECORDING.md); real capture acceptance remains open.
 - Implemented: the native reader's unused 10 ms polling budget now uses a short
   high-resolution sleep instead of an Event timeout. CPU/timer-only diagnostics
   and synthetic real-reader shutdown/pacing tests cover the change. SDK event

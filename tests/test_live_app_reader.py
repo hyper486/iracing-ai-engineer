@@ -14,7 +14,12 @@ from iracing_ai_engineer import live_app, live_app_recording
 from iracing_ai_engineer.collector import CollectorConsistencyError, CollectorSample
 from iracing_ai_engineer.live_fuel import LiveFuelConfig
 from iracing_ai_engineer.live_worker import FrameWorker
-from iracing_ai_engineer.sdk_probe import SDK_TYPE_NAMES, RawSdkFrame, VariableDescriptor
+from iracing_ai_engineer.sdk_probe import (
+    SDK_TYPE_NAMES,
+    SDK_TYPE_SIZES,
+    RawSdkFrame,
+    VariableDescriptor,
+)
 
 MIB = 1024**2
 
@@ -225,6 +230,62 @@ class PacedWorker(FrameWorker):
     def close(self, **kwargs):
         super().close(**kwargs)
         assert self.join(3)
+
+
+@pytest.mark.parametrize("malformed", [False, True])
+def test_raw_char_recording_and_failure_do_not_block_reader_analysis_or_proximity(
+    tmp_path, malformed,
+):
+    from iracing_ai_engineer.capture_replay import replay_capture
+    from iracing_ai_engineer.trial_audit import TrialAudit
+    from iracing_ai_engineer.trial_replay import replay_trial
+
+    octets = b"SYNTHETIC PRIVATE CHAR\x80\0\0"
+
+    class CharSdk(FakeSdk):
+        def descriptors(self):
+            base = super().descriptors()
+            offset = max(row.offset + row.count * SDK_TYPE_SIZES[row.type_code] for row in base)
+            return (*base, VariableDescriptor("ExtraSdkText", 0, "char", offset,
+                                              len(octets), False, "", "invented char field"))
+
+    clock, stop = Clock(), Stop()
+    state = ObservedState(clock)
+    value = [bytes([item]) for item in octets]
+    if malformed:
+        value[-1] = b"too long"
+    sdk = CharSdk(clock, stop, 12, stop_on_last=True, value_changes={
+        tick: {"ExtraSdkText": value, "CarLeftRight": 2} for tick in range(1, 13)
+    })
+    journal = TrialAudit(tmp_path / "trials", clock=clock)
+    state.attach_trial(journal)
+    try:
+        live_app.run_reader(state, stop, LiveFuelConfig(), transport_factory=lambda: sdk,
+                            clock=clock, worker_factory=PacedWorker,
+                            record_directory=tmp_path / "captures")
+    finally:
+        state.attach_trial(None)
+        journal.close()
+    assert sdk.closed and sdk.read_count == 12 and state.publications
+    assert "PRIVATE CHAR" not in json.dumps(state.publications)
+    [trial_path] = (tmp_path / "trials").glob("*.jsonl")
+    trial = replay_trial(trial_path)
+    assert trial["frames"] == 12 and trial["decisions"]["CANDIDATE"] == 1
+    assert trial["live_acceptance"] is False
+    assert b"PRIVATE CHAR" not in trial_path.read_bytes()
+    [capture_path] = (tmp_path / "captures").glob("*.jsonl")
+    rows = [json.loads(line) for line in capture_path.read_bytes().splitlines()]
+    if malformed:
+        assert state.snapshot()["recording"]["status"] == "ERROR"
+        assert not any(row["record_type"] == "receipt" for row in rows)
+    else:
+        assert state.snapshot()["recording"]["status"] == "COMPLETE"
+        frames = [row for row in rows if row["record_type"] == "frame"]
+        assert len(frames) == 12
+        assert all(row["values"]["ExtraSdkText"].encode("latin-1") == octets for row in frames)
+        report = replay_capture(capture_path)
+        assert report["frames"] == 12 and report["status"] == "RECOMPUTED"
+        assert "PRIVATE CHAR" not in json.dumps(report)
 
 
 class PollingSdk(FakeSdk):

@@ -16,11 +16,13 @@ from .runtime_clock import monotonic_now
 
 
 def payload_size(value, *, limit=16 * 1024**2):
-    """Conservative retained JSON-object size, without encoding/copying telemetry.
+    """Conservative retained transport size, without encoding/copying telemetry.
 
-    Only frozen transport-owned JSON-shaped inputs are admitted. Generous Python
-    object overhead and UTF-32 string accounting bound the retained queue; this
-    is not a claim about serialized capture bytes or total process RSS.
+    Frozen transport-owned JSON-shaped inputs and immutable SDK char bytes are
+    admitted. This is size accounting, not schema/serialization validation:
+    the collector still rejects bytes outside declared char values. Generous
+    Python overhead and UTF-32 string accounting bound the retained queue, not
+    serialized capture bytes or total process RSS. Mutable buffers are rejected.
     """
     total, nodes = 0, 0
     pending = [(value, 0)]
@@ -33,6 +35,8 @@ def payload_size(value, *, limit=16 * 1024**2):
             total += 128 + (item.bit_length() // 8 if type(item) is int else 0)
         elif type(item) is str:
             total += 128 + len(item) * 4
+        elif type(item) is bytes:
+            total += 128 + len(item)
         elif type(item) in (dict, list, tuple):
             total += 256 + len(item) * 128
             if total > limit:

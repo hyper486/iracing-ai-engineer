@@ -13,6 +13,11 @@ This pacing rebuild passed the same **18 frozen checks** using a system-only
 child PATH and no provider credentials. No UI layout change or new real-device
 acceptance is claimed; installed copies, shortcuts and saved settings are untouched.
 
+The subsequent full-schema char-recording rebuild also passed all **18 frozen
+checks**, with the capture check extended to preserve raw char octets/NULs and
+exclude them from historical summary cards. It does not change the v2 recording
+contract or imply any fresh SDK/device/VR acceptance.
+
 The rebuilt trial includes the offline reviewed tire-origin v2 correction and
 conditional mapped-rejoin lane, plus historical pit-visit observations and the
 reviewed settings draft. The new **采集复盘** tab also recomputes completed raw
@@ -65,7 +70,9 @@ service contents, geometry or future pit costs.
 A tenth numerical check writes an invented 1,921-frame temporary capture,
 validates it and recomputes the pit observation using the separate historical
 owner. It cleans up only its own temporary fixture. No saved capture is opened,
-and no live-shaped state leaves the owner. The capture-replay rebuild passed
+and no live-shaped state leaves the owner. It now also exercises schema-bound
+SDK char bytes, exact octet/NUL retention and exclusion from summary cards; see
+[the char recording boundary](SDK_CHAR_RECORDING.md). The capture-replay rebuild passed
 all **18 frozen checks**: ten numerical, five native/runtime and three memory-only
 voice checks, on the isolated system-only child PATH with saved keys removed.
 It remains unsigned and `live_acceptance=false`; existing installations were

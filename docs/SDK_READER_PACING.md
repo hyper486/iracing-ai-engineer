@@ -61,11 +61,12 @@ field decoder remains unchanged because these results did not justify a second
 decoder implementation. They do not measure the real SDK event, recording fsync,
 concurrent worker contention, microphone/output latency or VR performance.
 
-The CPU/queue benchmark excludes char fields explicitly. A separate fixture test
-checks all six raw SDK types, including non-ASCII bytes, but this does not claim
-that the JSON recording pipeline supports bytes. Its existing fail-closed bytes
-rejection remains a known compatibility boundary; no char encoding or capture
-format change is hidden in this pacing fix.
+The CPU/queue benchmark excludes char fields by default to preserve the original
+timing fixture; `--include-chars` now opts into all six raw SDK types. The pacing
+fix itself did not change recording encoding. A subsequent schema-bound
+[char-recording correction](SDK_CHAR_RECORDING.md) admits valid raw char bytes
+without relaxing the generic JSON bytes guard. The CPU diagnostic still does not
+measure recording durability or prove actual game sampling rate.
 
 ## Verification and remaining acceptance
 

@@ -33,6 +33,7 @@ required running dependency. The final goal remains active and unaccepted.
 | Tick-level proximity | Detector plus opt-in native audio in the local trial build | Independent fixed-phrase cache, priority cancellation, fast snapshots and bounded playback diagnostics; synthetic/local-synthesis checks only, no hardware or in-car acceptance. |
 | Reader / analysis / recording isolation | Bounded worker lanes in source | Recorder and analysis failures no longer synchronously block the SDK reader; explicit incomplete prefixes, generation guards and streaming event digests. Not GIL isolation or a hardware latency guarantee. |
 | Native reader pacing | Packaged short high-resolution polling pause | Unused 10 ms budget no longer uses an Event timeout; SDK event waits and quality gates are unchanged. Idle timer and synthetic checks are not live sample-rate acceptance. |
+| Full-schema SDK char recording | Schema-bound reversible conversion | Raw pyirsdk char bytes retain all octets/NULs in private capture; prior JSON values and v2 replay stay compatible. Generic bytes rejection and independent module failure remain enforced. |
 | Routine current-fuel questions | Packaged local trial; synthetic checks | Current observations, learned range and conditional race fuel budgets bypass cloud waits; not live pit tactics or in-car acceptance. |
 | Current physical traffic / pit-state questions | Packaged local trial; synthetic checks | Bound ahead/behind distance, player permission and flag facts in native display/PTT; independent of fuel readiness, not time gaps or optimal pit/rejoin advice. |
 | Incremental recent-lap coaching | Packaged local trial; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
@@ -46,6 +47,29 @@ required running dependency. The final goal remains active and unaccepted.
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Full-schema char capture compatibility
+
+Valid pyirsdk char fields no longer stop native recording merely because the getter
+returns bytes. Only validated char descriptors admit a reversible byte-to-codepoint
+mapping; all octets and NUL padding survive. The unchanged generic JSON guard still
+rejects unsupported bytes in other fields/metadata/writer input. Duplicate evidence
+uses the persisted representation, and old supported JSON captures retain their
+bytes. No raw char content is promoted into live questions, model inputs or voice.
+See [the encoding, privacy and verification contract](SDK_CHAR_RECORDING.md).
+
+Synthetic tests cover actual pinned SDK getters on anonymous memory, complete
+private recording, strict historical replay and continued proximity after a
+malformed recording field. The packaged recomputation fixture now also verifies
+char octets and marker exclusion. This is not real-game, headset or VR acceptance.
+The rebuilt unsigned local EXE passed all **18 frozen checks**, including that
+extended capture check, under a system-only child PATH with no provider credentials.
+Existing installed copies, shortcuts and saved settings remain untouched.
+
+Full regression passed **3,100 tests, with 44 skips**, in **590.42 seconds**.
+The skips retain existing data/platform/private-deployment and opt-in boundaries.
+Ruff, public-safety including history and exact staged review passed. These checks
+do not establish authentic SDK collection, hardware hearing or VR acceptance.
 
 ## Native reader pacing correction
 

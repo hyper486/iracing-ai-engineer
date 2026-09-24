@@ -79,6 +79,15 @@ def test_optional_timer_report_has_no_platform_dependent_speed_assertion():
     assert result["event_wait_measured"] is False  # The SDK event was never opened.
 
 
+def test_optional_char_cpu_path_does_not_claim_durable_recording():
+    result = BENCHMARK["benchmark"](2, include_chars=True)
+    assert result["char_fields_included"] is True
+    assert result["durable_recording_measured"] is result["sdk_accessed"] is False
+    assert result["values_sha256"] == BENCHMARK["benchmark"](1, include_chars=True)["values_sha256"]
+    with pytest.raises(ValueError):
+        BENCHMARK["benchmark"](1, include_chars=1)
+
+
 @pytest.mark.parametrize("iterations,wait_samples", [
     (0, 0), (10001, 0), (True, 0), (1.5, 0), (1, -1), (1, 301), (1, True), (1, .5),
 ])

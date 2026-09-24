@@ -144,19 +144,19 @@ def write_synthetic_capture(path, frames, *, complete=True, metadata=True):
     from itertools import chain
 
     from .collector import CollectorSample, JsonlHandleWriter, LiveCollector
-    from .sdk_probe import FIELD_EXPECTED_TYPES, VariableDescriptor
+    from .sdk_probe import FIELD_EXPECTED_TYPES, SDK_TYPE_NAMES, VariableDescriptor
     from .telemetry import SourceKind
 
     frames = iter(frames)
     first = next(frames)
     descriptors, offset = [], 0
-    dtypes = {1: "bool", 2: "int32", 3: "uint32_or_bitfield", 4: "float32", 5: "float64"}
     for name, value in first.values.items():
         scalar = value[0] if type(value) is list else value
-        code = min(FIELD_EXPECTED_TYPES.get(name, {1 if type(scalar) is bool else
+        code = min(FIELD_EXPECTED_TYPES.get(name, {0 if type(scalar) is bytes else
+                                                  1 if type(scalar) is bool else
                                                   2 if type(scalar) is int else 5}))
-        count = len(value) if type(value) is list else 1
-        descriptors.append(VariableDescriptor(name, code, dtypes[code], offset, count,
+        count = len(value) if type(value) in (list, bytes) else 1
+        descriptors.append(VariableDescriptor(name, code, SDK_TYPE_NAMES[code], offset, count,
                                                False, "", "invented fixture"))
         offset += 8 * count
     info = {"WeekendInfo": {"SimMode": "full", "TrackLength": "1.2 km"},
@@ -174,21 +174,39 @@ def write_synthetic_capture(path, frames, *, complete=True, metadata=True):
 
 def run_synthetic_capture_replay():
     """Actual sealed file -> validator -> owner -> historical-only summary."""
+    import json
     from pathlib import Path
     from tempfile import TemporaryDirectory
 
     from .capture_replay import replay_capture
+    from .live_worker import payload_size
 
     passed = False
     try:
+        octets = b"SYNTHETIC CHAR FIXTURE\x80\0\0"
+        chars = {"SyntheticCharScalar": b"\xff",
+                 "SyntheticCharArray": [bytes([value]) for value in octets]}
+        payload_size(chars)  # Queue accounting must admit immutable SDK char bytes too.
         with TemporaryDirectory(prefix="aeis-synthetic-replay-") as directory:
             path = Path(directory) / "invented.jsonl"
-            write_synthetic_capture(path, synthetic_pit_visit_frames())
+            write_synthetic_capture(path, (replace(frame, values={**frame.values, **chars})
+                                          for frame in synthetic_pit_visit_frames()))
+            with path.open(encoding="utf-8") as handle:
+                for line in handle:
+                    row = json.loads(line)
+                    if row["record_type"] == "frame":
+                        saved_chars = row["values"]
+                        break
+                else:
+                    raise ValueError("SYNTHETIC_CHAR_FRAME_MISSING")
             result = replay_capture(path)
             facts = result["latest"]["pit"]["facts"]
             passed = (result["status"] == "RECOMPUTED" and result["frames"] == 1921
                       and result["source_kind"] == "OFFLINE_REPLAY"
                       and not result["live_acceptance"] and not result["provider_called"]
+                      and saved_chars["SyntheticCharScalar"].encode("latin-1") == b"\xff"
+                      and saved_chars["SyntheticCharArray"].encode("latin-1") == octets
+                      and "SYNTHETIC CHAR FIXTURE" not in json.dumps(result)
                       and any(row["id"] == "pit_observation.elapsed" for row in facts))
     except Exception:
         pass

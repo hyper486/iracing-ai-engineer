@@ -151,6 +151,16 @@ def test_payload_size_rejects_cycles_unknown_objects_and_accepts_transport_json(
     assert payload_size({"flags": [1, 2], "mode": "full", "missing": None}) > 0
 
 
+def test_immutable_sdk_bytes_are_bounded_but_mutable_buffers_still_fail():
+    assert payload_size(b"\0\xff") == 130
+    assert payload_size([b"\0", b"\xff"]) > 260
+    with pytest.raises(ValueError, match="PAYLOAD_LIMIT"):
+        payload_size(b"x" * 1000, limit=500)
+    for value in (bytearray(b"x"), memoryview(b"x")):
+        with pytest.raises(ValueError, match="PAYLOAD_TYPE"):
+            payload_size(value)
+
+
 @pytest.mark.parametrize("observed", [None, True, -1, float("nan"), float("inf"), 2.0])
 def test_missing_invalid_or_future_observation_cannot_become_fresh_work(observed):
     sink = Sink()

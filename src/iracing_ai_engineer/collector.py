@@ -271,6 +271,7 @@ class _PreparedSchema:
     digest: str
     variables: list[dict[str, object]]
     names: frozenset[str]
+    char_counts: tuple[tuple[str, int], ...]
 
 
 def _schema_cache_key(
@@ -323,6 +324,8 @@ class _SchemaCache:
             digest=digest,
             variables=variables,
             names=frozenset(item.name for item in descriptors),
+            char_counts=tuple((item.name, item.count) for item in descriptors
+                              if item.type_code == 0),
         )
         if key is not None:
             self._key, self._prepared = key, prepared
@@ -336,6 +339,24 @@ class _PreparedSample:
     redacted_paths: tuple[str, ...]
     session_info_scope: SessionInfoPayloadScope
     schema: _PreparedSchema | None = None
+
+
+def _char_json_value(value: object, count: int) -> object:
+    """Encode only schema-bound raw char octets; preserve legacy JSON values.
+
+    Latin-1 here is a reversible byte-to-codepoint mapping, not a claim about
+    the simulator's text language. Preserve embedded and trailing NULs. No
+    decoding with replacement, string coercion or arbitrary bytes exemption.
+    """
+    if type(value) is bytes:
+        if len(value) != count:
+            raise CollectorConsistencyError("SDK char bytes do not match descriptor count")
+        return value.decode("latin-1")
+    if type(value) in (list, tuple) and any(isinstance(item, bytes) for item in value):
+        if len(value) != count or any(type(item) is not bytes or len(item) != 1 for item in value):
+            raise CollectorConsistencyError("SDK char byte array does not match descriptor count")
+        return b"".join(value).decode("latin-1")
+    return value
 
 
 def _prepare_collector_sample(
@@ -356,12 +377,21 @@ def _prepare_collector_sample(
         validate_variable_descriptors(sample.descriptors)
         schema = None
         descriptor_names = frozenset(descriptor.name for descriptor in sample.descriptors)
+        char_counts = tuple((item.name, item.count) for item in sample.descriptors
+                            if item.type_code == 0)
     else:
         schema = schema_cache.prepare(sample.descriptors)
         descriptor_names = schema.names
+        char_counts = schema.char_counts
     if not isinstance(sample.frame.values, Mapping):
         raise CollectorConsistencyError("frame values must be a mapping")
-    safe_values = _json_safe(sample.frame.values)
+    values = sample.frame.values
+    if char_counts:
+        values = dict(values)
+        for name, count in char_counts:
+            if name in values:
+                values[name] = _char_json_value(values[name], count)
+    safe_values = _json_safe(values)
     if not isinstance(safe_values, dict):
         raise CollectorConsistencyError("frame values root must be a mapping")
     unknown_fields = sorted(set(safe_values) - descriptor_names)
@@ -461,13 +491,17 @@ def _capture_us(frame: RawSdkFrame) -> int | None:
     return capture_us
 
 
-def _telemetry_payload_digest(frame: RawSdkFrame) -> str:
-    """Hash raw-buffer content, excluding independently changing metadata."""
+def _telemetry_payload_digest(frame: RawSdkFrame, values: dict[str, object]) -> str:
+    """Hash prepared value content, excluding independently changing metadata.
+
+    Use the same schema-bound JSON representation written into the frame, so
+    duplicate evidence can be recomputed from the sealed capture alone.
+    """
 
     payload = {
         "buffer_tick": frame.buffer_tick,
         "read_errors": list(frame.read_errors),
-        "values": _json_safe(frame.values),
+        "values": values,
     }
     return hashlib.sha256(_canonical_json(payload)).hexdigest()
 
@@ -1013,7 +1047,7 @@ class LiveCollector:
             "values": prepared.values,
         }
         _json_safe(frame_payload)
-        frame_payload_digest = _telemetry_payload_digest(sample.frame)
+        frame_payload_digest = _telemetry_payload_digest(sample.frame, prepared.values)
 
         if not self._run_written:
             self._write_run(mode, source_kind)

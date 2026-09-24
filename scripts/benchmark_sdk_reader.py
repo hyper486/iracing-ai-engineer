@@ -22,13 +22,15 @@ def _summary(values):
             "p95_ms": round(ordered[math.ceil(len(ordered) * .95) - 1] * 1000, 4)}
 
 
-def benchmark(iterations=1000, *, wait_samples=0):
+def benchmark(iterations=1000, *, wait_samples=0, include_chars=False):
     if type(iterations) is not int or not 1 <= iterations <= 10_000:
         raise ValueError("SYNTHETIC_SDK_ARGUMENT")
     if type(wait_samples) is not int or not 0 <= wait_samples <= 300:
         raise ValueError("SYNTHETIC_SDK_ARGUMENT")
+    if type(include_chars) is not bool:
+        raise ValueError("SYNTHETIC_SDK_ARGUMENT")
     timings = {key: [] for key in ("read_frozen", "metadata", "queue_accounting")}
-    with synthetic_sdk(include_chars=False) as (transport, descriptors):
+    with synthetic_sdk(include_chars=include_chars) as (transport, descriptors):
         fields = tuple(row.name for row in descriptors)
         for _ in range(3):
             frame = transport.read_frozen(fields)
@@ -62,7 +64,7 @@ def benchmark(iterations=1000, *, wait_samples=0):
     return {"evidence_kind": "SYNTHETIC_CPU_AND_TIMER_ONLY", "sdk_accessed": False,
             "live_acceptance": False, "event_wait_measured": False,
             "durable_recording_measured": False, "iterations": iterations,
-            "char_fields_included": False,
+            "char_fields_included": include_chars,
             "fields": len(fields), "arrays": 20, "array_size": 64,
             "values_sha256": digest, "timing": {key: _summary(value)
                                                  for key, value in timings.items()},
@@ -77,5 +79,8 @@ if __name__ == "__main__":
     parser.add_argument("--iterations", type=int, default=1000)
     parser.add_argument("--wait-samples", type=int, default=0,
                         help="Optional idle timer comparison, 0..300 samples each; no SDK wait.")
+    parser.add_argument("--include-chars", action="store_true",
+                        help="Include raw byte-valued SDK char fields in CPU/queue checks.")
     args = parser.parse_args()
-    print(json.dumps(benchmark(args.iterations, wait_samples=args.wait_samples), indent=2))
+    print(json.dumps(benchmark(args.iterations, wait_samples=args.wait_samples,
+                               include_chars=args.include_chars), indent=2))
