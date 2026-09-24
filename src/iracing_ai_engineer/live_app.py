@@ -31,6 +31,7 @@ from .dashboard_page import DASHBOARD_HTML
 from .live_driving import LiveDrivingEngineer
 from .live_fuel import LiveFuelConfig, LiveFuelEngineer
 from .live_monitor import LIVE_MONITOR_FIELDS, LiveMonitor, _expected_car_count
+from .live_stint import LiveStintTracker, unavailable_stint
 from .live_strategy import (
     StrategyParameters,
     configuration_projection,
@@ -191,6 +192,7 @@ class AppState:
             "fuel": None,
             "traffic": None,
             "driving": None,
+            "stint": None,
             "strategy": None,
             "speech": None,
             "source_mode": "LIVE",
@@ -214,7 +216,8 @@ class AppState:
             raise ValueError("invalid connection status")
         with self._lock:
             self._value.update(
-                connection=status, monitor=None, fuel=None, traffic=None, driving=None, speech=None,
+                connection=status, monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                speech=None,
                 session_type=None,
             )
             self._updated = None
@@ -386,7 +389,8 @@ class AppState:
                 self._fuel_observation_revision += 1
                 self._observed_fuel_l = None
                 self._situation_revision += 1
-                self._value.update(monitor=None, fuel=None, traffic=None, driving=None, speech=None)
+                self._value.update(monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                                   speech=None)
                 self._clear_strategy()
 
     def _worker_status(self):
@@ -420,6 +424,7 @@ class AppState:
     def publish(
         self, monitor: dict, fuel: dict, speech: dict | None, session_type: str | None,
         *, observed_at=None, generation=None, allowed=lambda: True, traffic=None, driving=None,
+        stint=None,
     ) -> None:
         with self._lock:
             if (generation is not None and generation != self._generation) or not allowed():
@@ -482,6 +487,7 @@ class AppState:
                 fuel=copy.deepcopy(fuel),
                 traffic=copy.deepcopy(traffic),
                 driving=copy.deepcopy(driving),
+                stint=copy.deepcopy(stint),
                 speech=copy.deepcopy(speech),
                 session_type=session_type,
             )
@@ -508,7 +514,8 @@ class AppState:
                 analysis["failed"] or analysis["generation"] != self._generation
             ):
                 # Defense in depth if a fault-notification callback could not run.
-                value.update(monitor=None, fuel=None, traffic=None, driving=None, speech=None)
+                value.update(monitor=None, fuel=None, traffic=None, driving=None, stint=None,
+                             speech=None)
                 age = None
             value.update(updated_age_s=age, generation=self._generation,
                          engineer_revision=self._engineer_revision,
@@ -516,7 +523,7 @@ class AppState:
                          situation_revision=self._situation_revision)
             if value["connection"] == "CONNECTED" and (age is None or age > FRESHNESS_S):
                 value.update(connection="DISCONNECTED", fuel=None, monitor=None, traffic=None,
-                             driving=None, strategy=None,
+                             driving=None, stint=None, strategy=None,
                              speech=None)
                 if self._strategy_parameters is not None:
                     self._clear_strategy()
@@ -685,6 +692,10 @@ class _LiveAnalysis:
         )
         self._fuel, self._speech = LiveFuelEngineer(config), PracticeFuelSpeech()
         try:
+            self._stint = LiveStintTracker(tick_rate)
+        except Exception:
+            self._stint = None
+        try:
             self._driving = LiveDrivingEngineer(tick_rate, clock=state.clock)
         except Exception:
             # A coaching-worker startup failure cannot disable fuel/traffic.
@@ -696,6 +707,11 @@ class _LiveAnalysis:
         frame, session_type, observed, track_length_mm = item
         progressed = self._monitor.feed(frame, observed_monotonic_s=observed)
         self._monitor.advance_time(observed)
+        if progressed and self._stint is not None:
+            try:
+                self._stint.feed(frame, self._monitor.latest_sample)
+            except Exception:
+                self._stint.fail()
         if progressed and self._driving is not None:
             try:
                 self._driving.feed(frame, self._monitor.latest_sample, track_length_mm)
@@ -703,10 +719,20 @@ class _LiveAnalysis:
                 self._driving.fail()
         if observed >= self._next_snapshot and self._monitor.snapshot_pending:
             snapshot = self._monitor.snapshot()
+            if (self._stint is not None
+                    and snapshot.get("quality", {}).get("stale") is not False):
+                self._stint.reset("SOURCE_STALE")
             if (self._driving is not None
                     and snapshot.get("quality", {}).get("stale") is not False):
                 self._driving.reset("SOURCE_STALE")
             fuel = self._fuel.feed(snapshot, session_type=session_type)
+            try:
+                stint = (self._stint.snapshot(snapshot) if self._stint is not None
+                         else unavailable_stint(snapshot, "STINT_PROCESSING_ERROR"))
+            except Exception:
+                if self._stint is not None:
+                    self._stint.fail()
+                stint = unavailable_stint(snapshot, "STINT_PROCESSING_ERROR")
             intent = self._speech.update(snapshot, fuel, session_type, observed)
             traffic = unavailable_traffic(snapshot, "TRAFFIC_PROCESSING_ERROR")
             if not self._traffic_failed:
@@ -720,6 +746,7 @@ class _LiveAnalysis:
                     self._traffic_failed = True
             self._state.publish(snapshot, fuel, intent, session_type, observed_at=observed,
                                 generation=self._generation, allowed=self._allowed, traffic=traffic,
+                                stint=stint,
                                 driving=(self._driving.snapshot(snapshot)
                                          if self._driving is not None
                                          else {"status": "ERROR"}))

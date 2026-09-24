@@ -8,11 +8,13 @@ installed copies and shortcuts are not automatically upgraded; build output is
 ## What the integrated self-test actually exercises
 
 The default frozen-binary self-test now feeds invented numeric frames through
-the real normalization, proximity, fuel, recent-corner and conditional stop
+the real normalization, proximity, fuel, recent-corner, observed-stint and conditional stop
 owners. It requires left/clear transitions, learned fuel, repeated-corner
-evidence, local fuel/coaching/stop answers and bounded retained state. These
+evidence, local fuel/coaching/stop/stint/tire-counter/raw-pace answers and bounded retained state. These
 questions must use no provider requests. The fixture is streaming, with only
 two cached lap shapes; it does not store a whole synthetic race in memory.
+Seven numerical checks require at least eight invented laps including capture
+guards; those guards are not six valid real driving laps or a live tire model.
 
 The existing checks additionally exercise hidden native Tk controls, local
 answer-worker shutdown, the window-close protocol, exact speech-model hashes
@@ -72,6 +74,9 @@ otherwise have been truncated; old packets cannot invalidate a newer answer.
 5. After several clean comparable laps, ask **哪里可以改进**. There must be a
    repeat-supported pattern; enough laps alone do not guarantee advice. Current
    observations do not establish curb geometry, tire wear or causal time gains.
+   Ask **这一段跑了多久 / 轮胎怎么样 / 配速变化** for the observation slice.
+   Partial attachment is not a complete stint. Pace needs six consecutive clean
+   comparable laps; its raw median change cannot by itself justify new tires.
 6. While parked, enter verified effective tank capacity and optional pumping/
    transit-loss assumptions under local settings. Ask **比较进站方案**. This is
    a whole-lap conditional fuel budget, not an optimal stop/rejoin command.

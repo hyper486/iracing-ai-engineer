@@ -20,6 +20,7 @@ from typing import Any
 
 from .live_driving import coaching_binding
 from .live_queries import LOCAL_QUERY_INTERVAL_S, live_query_intent, render_live_query
+from .live_stint import stint_binding
 from .live_strategy import strategy_binding
 from .live_traffic import TRAFFIC_ANSWER_TTL_S, situation_binding
 from .llm_client import DeepSeekClient, LLMError
@@ -68,7 +69,8 @@ def _topic(question: str) -> str:
     for topic, words in (
         ("driving", ("弯", "刹车", "油门", "路肩", "循迹", "驾驶", "丢时间", "改进", "练习",
                      "brak", "corner", "throttle")),
-        ("strategy", ("策略", "进站", "轮胎", "交通", "回场", "pit", "tire", "tyre", "traffic")),
+        ("strategy", ("策略", "进站", "轮胎", "交通", "回场", "本段", "配速", "stint", "pace",
+                      "pit", "tire", "tyre", "traffic")),
         ("fuel", ("油", "fuel", "laps", "几圈")),
     ):
         if any(word in text for word in words):
@@ -81,7 +83,10 @@ def fallback_plan(context: Mapping, question: str) -> dict:
     facts = context["facts"]
     if topic == "strategy" and context.get("scope") == "live_snapshot":
         available = {item["id"] for item in facts}
-        return {"topic": topic, "fact_ids": [key for key in (
+        observed = (("tire.observed_context", "tire.pace", "stint.observed")
+                    if any(word in question.lower() for word in (
+                        "轮胎", "本段", "配速", "tire", "tyre", "stint", "pace")) else ())
+        return {"topic": topic, "fact_ids": [key for key in (*observed,
             "pit.permission", "pit.flags", "strategy.window", "strategy.early", "strategy.late",
             "strategy.assumptions", "fuel.finish_balance", "fuel.horizon",
             "traffic.ahead", "traffic.behind", "traffic.overlap", "traffic.coverage",
@@ -147,6 +152,7 @@ def _binding(snapshot: Mapping) -> tuple:
         telemetry.get("lap_number"), monitor.get("binding_sha256"),
         situation_binding(snapshot), coaching_binding(snapshot),
         observation, strategy_binding(snapshot),
+        stint_binding(snapshot),
     )
 
 
@@ -164,17 +170,20 @@ def _selected_binding(binding, fact_ids, intent=None):
         # retain it, including any learning/availability explanation.
         return (binding[0], binding[8], *binding[2:6])
     situation = _situation_answer(fact_ids, intent)
-    driving = intent == "driving" or any(key.startswith("driving.") for key in fact_ids)
+    driving = intent in ("driving", "pace") or any(
+        key.startswith("driving.") or key == "tire.pace" for key in fact_ids)
+    stint = intent in ("stint", "tire") or any(key.startswith("stint.") or
+                                             key == "tire.observed_context" for key in fact_ids)
     strategy = intent in ("pit", "pit_plan") or any(key.startswith("strategy.") for key in fact_ids)
-    if not situation and not driving:
+    if not situation and not driving and not stint:
         return binding[:6]
     # Standalone traffic/pit observations do not depend on fuel learning or its
     # interval validity. Mixed fuel/traffic answers retain both dependencies.
     base = binding[:6]
-    if all(key.startswith(("traffic.", "pit.", "driving.")) for key in fact_ids):
+    if all(key.startswith(("traffic.", "pit.", "driving.", "stint.", "tire.")) for key in fact_ids):
         base = (binding[0], None, *binding[2:6])
     return (*base, binding[6] if situation else None, binding[7] if driving else None,
-            binding[9] if strategy else None)
+            binding[9] if strategy else None, binding[10] if stint else None)
 
 
 class EngineerService:
@@ -253,7 +262,10 @@ class EngineerService:
                 age = max(0.0, now - self._answer_at)
                 fact_ids = answer.get("fact_ids", [])
                 intent = answer.get("intent")
-                ttl = TRAFFIC_ANSWER_TTL_S if _situation_answer(fact_ids, intent) else ANSWER_TTL_S
+                short_lived = (_situation_answer(fact_ids, intent)
+                               or intent in ("stint", "tire", "pace")
+                               or any(key.startswith(("stint.", "tire.")) for key in fact_ids))
+                ttl = TRAFFIC_ANSWER_TTL_S if short_lived else ANSWER_TTL_S
                 stale = answer["scope"] == "live_snapshot" and (
                     self._answer_invalidated or age > ttl
                     or _selected_binding(_binding(current), fact_ids, intent)

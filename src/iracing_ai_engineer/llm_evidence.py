@@ -16,7 +16,8 @@ from pathlib import Path
 from typing import Any
 
 from .engineer_session import validate_engineer_session
-from .live_driving import driving_notice, validated_driving
+from .live_driving import driving_notice, validated_driving, validated_pace
+from .live_stint import validated_stint
 from .live_strategy import strategy_notice, validated_strategy
 from .live_traffic import validated_traffic
 
@@ -285,6 +286,35 @@ def _live_strategy_facts(result, snapshot):
                 f"仅通道与泵油时间损失 {loss[0]:.1f} 至 {loss[1]:.1f} 秒；不含其他停站服务。"))
 
 
+def _live_stint_facts(result, snapshot):
+    if not _live_frame_ready(snapshot):
+        return
+    value = validated_stint(snapshot)
+    if value is not None:
+        stint = value["stint"]
+        label = ("上次观测出站后" if stint["origin_kind"] == "OBSERVED_PIT_EXIT"
+                 else "仅连续观察区间")
+        pit = "当前在进站通道。" if value["on_pit_road"] else ""
+        result["facts"].append(_entry("stint.observed",
+            f"{label} {stint['elapsed_s'] / 60:.1f} 分钟，计圈增加 {stint['counter_increase']}。"
+            + pit + "中途接入不代表完整 stint，出站也不代表已换胎。"))
+        tires = value["tire_observation"]
+        if tires is not None:
+            result["facts"].append(_entry("tire.observed_context",
+                f"轮胎配方与用胎计数未变的连续观察区间为 {tires['elapsed_s'] / 60:.1f} 分钟，"
+                f"计圈增加 {tires['counter_increase']}；这不是完整胎龄或磨损读数。"))
+            result["capabilities"]["tire"] = "COUNTER_OBSERVATION_ONLY"
+    pace = validated_pace(snapshot)
+    if pace is not None:
+        first, last = pace["laps"][0]["lap"], pace["laps"][-1]["lap"]
+        trend = "慢" if pace["delta_s"] >= 0 else "快"
+        result["facts"].append(_entry("tire.pace",
+            f"第 {last - 2}–{last} 圈相比第 {first}–{first + 2} 圈，"
+            f"干净可比圈中位配速{trend} {abs(pace['delta_s']):.2f} 秒，"
+            f"起始油量中位变化 {pace['fuel_delta_l']:+.2f} 升；未做油重修正，不能归因为胎耗。"))
+        result["capabilities"]["tire"] = "RAW_PACE_OBSERVATION_ONLY"
+
+
 def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     """Project fresh observations and separately admitted fuel-budget estimates.
 
@@ -306,6 +336,7 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     _live_situation_facts(result, snapshot)
     _live_driving_facts(result, snapshot)
     _live_strategy_facts(result, snapshot)
+    _live_stint_facts(result, snapshot)
     monitor = _mapping(snapshot.get("monitor"))
     fuel = _mapping(snapshot.get("fuel"))
     direct = current_fuel_observation(snapshot)

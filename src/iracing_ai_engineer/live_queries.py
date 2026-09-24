@@ -52,6 +52,10 @@ _QUERIES = {
     "pit_permission": ("现在允许进站吗", "维修区开放吗", "进站通道开放吗", "are pits open"),
     "driving": ("哪里丢时间", "哪里可以改进", "我哪里可以改进", "我该练什么", "驾驶建议",
                 "弯道分析", "driving advice", "where am i losing time"),
+    "stint": ("这一段跑了多久", "这段跑了几圈", "当前stint", "本段情况", "stint status"),
+    "tire": ("轮胎怎么样", "轮胎状态", "轮胎磨损多少", "该换胎了吗", "这套胎还能跑几圈",
+             "tire status", "tyre status", "should i change tires"),
+    "pace": ("配速变化", "配速怎么样", "最近配速怎么样", "pace trend"),
 }
 
 
@@ -76,6 +80,24 @@ def live_query_intent(question: object) -> str | None:
 
 def _situation_speech(facts, intent, fallback):
     """Short local facts fit a short-lived situation; the full text keeps detail."""
+    if intent == "stint" and "stint.observed" in facts:
+        fact = facts["stint.observed"]
+        observed = re.search(r"([0-9.]+) 分钟，计圈增加 ([0-9]+)", fact)
+        if observed:
+            label = "观测出站后约" if fact.startswith("上次观测出站后") else "仅观测约"
+            pit = "当前在站内。" if "当前在进站通道" in fact else ""
+            return (f"{pit}{label} {float(observed[1]):.0f} 分钟，计圈增加 {observed[2]}；"
+                    "不是胎龄。")
+    if intent in ("tire", "pace"):
+        counter = re.search(r"计圈增加 ([0-9]+)", facts.get("tire.observed_context", ""))
+        if intent == "tire" and counter:
+            return f"计圈增加 {counter[1]}，胎组计数未变；不是胎龄，换胎证据不足。"
+        pace = re.search(r"中位配速([慢快]) ([0-9.]+) 秒", facts.get("tire.pace", ""))
+        if pace:
+            limit = "换胎证据不足" if intent == "tire" else "非胎耗结论"
+            return (f"近三圈比前三圈中位配速{pace[1]} {pace[2]} 秒；未修正油重，{limit}。")
+        return ("配速比较需六个连续可比圈；目前证据不足。" if intent == "pace"
+                else "证据不足，暂不判断胎耗或换胎。")
     if intent == "driving" and "driving.location" in facts:
         # Render only fixed-template fact text; no model-authored prose.
         location = facts["driving.location"].split("的参考刹车区在", 1)[-1].rstrip("。")
@@ -138,6 +160,9 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         "behind": ("traffic.behind", "traffic.overlap", "traffic.coverage"),
         "pit_permission": ("pit.permission", "pit.flags"),
         "driving": ("driving.location", "driving.loss", "driving.pattern", "driving.practice"),
+        "stint": ("stint.observed",),
+        "tire": ("tire.observed_context", "tire.pace"),
+        "pace": ("tire.pace",),
     }
     chosen = [key for key in preferences[intent] if key in facts]
     # A reserve alone is not an answer about range; it is a configuration value.
@@ -145,7 +170,10 @@ def render_live_query(context: Mapping, intent: str) -> dict:
         chosen = []
     fallback = None
     if not chosen:
-        if intent == "driving":
+        if intent in ("stint", "tire", "pace"):
+            fallback = ("当前本段观测未就绪。" if intent == "stint" else
+                        "当前缺少轮胎连续观测或六个连续干净可比圈，配速比较尚未就绪。")
+        elif intent == "driving":
             if "driving.learning_progress" in facts:
                 chosen = ["driving.learning_progress"]
             else:
@@ -194,12 +222,15 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     elif intent == "stops":
         body += ("仅手填参数下的完整圈预算，未定位进站口，不含赛事强制进站。"
                  if "strategy.window" in chosen else "") + "不代表应当现在进站。"
+    if intent in ("tire", "pace"):
+        body += "不能据此估计轮胎剩余寿命或决定换胎；还需匹配的轮胎表现与服务证据。"
     if len(body) > 280:
         raise ValueError("LIVE_QUERY_RENDER_LIMIT")
     spoken = _situation_speech(facts, intent, body)
     return {
         "topic": "driving" if intent == "driving" else "strategy" if intent in (
-            "pit", "stops", "add", "pit_permission", "traffic", "ahead", "behind") else "fuel",
+            "pit", "stops", "add", "pit_permission", "traffic", "ahead", "behind",
+            "stint", "tire", "pace") else "fuel",
         "fact_ids": chosen, "spoken_text": spoken,
         "text": body + "\n这是提问时的证据解读；不会操作车辆或进站设置。",
         "intent": intent,

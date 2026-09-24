@@ -37,12 +37,61 @@ required running dependency. The final goal remains active and unaccepted.
 | Incremental recent-lap coaching | Packaged local trial; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
 | Private proximity / audio replay | Packaged local trial; synthetic checks | Bounded local journal, exact detector recomputation, software-playback correlation and optional capture byte links; not audio reproduction, source authentication or human hearing. |
 | Conditional live fuel-stop comparison | Packaged local trial; synthetic checks | Session-scoped hand-entered assumptions, shared complete-lap stop arithmetic, next-fill/stint budgets and local PTT; not mapped pit-entry timing, optimal strategy or future rejoin. |
+| Observed stint / tire-counter interval / raw pace | Packaged local trial; synthetic checks | Separate stint and tire observations, six consecutive clean-lap median comparison and local questions; not physical tire age, fuel-corrected degradation or a tire-change decision. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Integrated native trial and numerical resource milestone
+## Observed stint and raw pace milestone
+
+Current-source questions now connect a constant-space stint/tire-counter tracker
+and the recent-lap worker's raw pace summary to the native UI and local PTT.
+Attachment during a run is partial. Fuel-only pit exits reset the observed stint,
+not the tire interval. Counter/read/source discontinuities retract old facts,
+including brief read loss between display publications. Tracker faults remain
+visible without stopping independent fuel, traffic, coaching or proximity.
+
+Pace compares two non-overlapping groups of three consecutive clean comparable
+laps. Rejected intervening laps cannot be skipped. Starting-fuel change is
+disclosed; there is no fuel-weight correction, causal wear claim, tire-life
+forecast or tire-change recommendation. Exact questions bypass the provider;
+free-form evidence selection remains opt-in and summary-only. See
+[the observed-stint/pace contract](LIVE_STINT_PACE.md).
+
+New regression cases cover source and counter transitions, malformed projections,
+fault isolation, raw medians, local answer binding/expiry, fake PTT and native
+shortcut activation. Every required stint-contract field is checked before fact
+rendering; missing fields withdraw the observation instead of raising an error.
+Short voice examples measured **6.427 / 7.197 / 8.166
+seconds** using memory-only local synthesis for stint / tire / pace. These are
+example waveform lengths, not measured response latency, selected-output hearing
+or guarantees for every number, installed voice or rate. Full explanations stay
+visible; unknown-evidence speech is also kept short.
+
+The repeated **500-lap / 892,192-frame** accelerated numerical run passed all
+seven numerical checks, including the new local observations. Peak retained
+state remained 12 corner laps / 346,176 trace bytes, 1,894 rows, one worker job /
+387,904 bytes, 50 fuel samples and 42 proximity audit rows. Measured private
+commit growth after 24 warmup laps was **4.33 MiB**. This run took **185.125 wall
+seconds** for **14,869.85 virtual seconds**, with the existing worker barriers;
+it is not an SDK/audio/recording/VR endurance soak. It preceded the final speech
+and malformed-projection refinements; the numerical producer and observation
+shapes were unchanged.
+
+Final complete regression: **2,844 passed, 44 skipped**, including 84 new cases.
+The three new fake-PTT questions also passed five consecutive runs. Existing
+skips retain data/platform/private-deployment or explicit opt-in boundaries.
+Ruff, public safety including history and exact staged-file/diff review passed.
+The rebuilt unsigned local EXE passed all **15 frozen self-test checks**, with
+seven numerical checks plus native lifecycle and memory-only voice checks under
+system-only PATH. The native observation row, shortcuts and no-evidence response
+were also checked in a visible synthetic window; no hardware acceptance is claimed.
+Existing installations, shortcuts, credentials and device preferences were not
+replaced. Hardware hearing, genuine in-car laps, physical tire/service calibration
+and strategy/rejoin integration remain open. The final endurance goal is active.
+
+## Earlier integrated native trial and numerical resource milestone
 
 A new unsigned local EXE packages the supported source slices together. Default
 build verification now requires five numerical checks in addition to the native

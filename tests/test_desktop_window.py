@@ -471,6 +471,15 @@ def _native_settings(native_window) -> None:
 
 def _native_question(native_window) -> None:
     _, controller, window = native_window
+    for label, question in (("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
+                            ("问配速", "配速变化")):
+        button = next(item for item in window._question_buttons if item.cget("text") == label)
+        button.invoke()
+        assert controller.questions[-1] == (question, "live")
+        controller.value["engineer"]["status"] = "DISABLED"
+        window._poll()
+    controller.questions.clear()
+    window.question_text.delete("1.0", "end")
     window.question_text.insert("1.0", "根据证据解释燃油")
     window._submit()
     assert controller.questions == [("根据证据解释燃油", "live")]

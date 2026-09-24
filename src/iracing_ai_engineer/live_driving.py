@@ -16,6 +16,7 @@ from array import array
 from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from statistics import median
 
 import numpy as np
 
@@ -105,7 +106,7 @@ def _empty(reason="WAIT_COMPLETE_LAP"):
     return {
         "status": "WAIT_LAPS", "reason": reason, "completed_laps": None,
         "eligible_laps": 0, "retained_laps": 0, "retained_trace_bytes": 0,
-        "reference_lap": None, "point": None,
+        "reference_lap": None, "point": None, "pace": None,
     }
 
 
@@ -145,6 +146,7 @@ def _conditions(channels, lap):
         return None, "WEATHER_CHANGED_OR_WET"
     return {
         "fuel_start": float(window["FuelLevelPct"][0]),
+        "fuel_start_l": float(window["FuelLevel"][0]),
         "compound": int(window["PlayerTireCompound"][0]), "sets": int(window["TireSetsUsed"][0]),
         "track_min": float(np.min(window["TrackTempCrew"])),
         "track_max": float(np.max(window["TrackTempCrew"])),
@@ -221,6 +223,9 @@ class _CornerModel:
             while selected and any(not _comparable(a[1], b[1]) for a in selected for b in selected):
                 selected.pop(0)
             result["eligible_laps"] = len(selected)
+            result["pace"] = pace_comparison([
+                {"lap": row[0].lap_ordinal, "duration_s": round(row[0].duration_s, 6),
+                 "fuel_start_l": round(row[1]["fuel_start_l"], 6)} for row in selected[-6:]])
             reason = "NEED_COMPARABLE_LAPS"
             if len(selected) >= MODEL_CONFIG.min_clean_laps:
                 analysis = _analyze_resampled_laps(tuple(row[0] for row in selected),
@@ -516,6 +521,45 @@ def coaching_binding(snapshot):
     point = _mapping(value.get("point"))
     return (value.get("epoch"), value.get("revision"), value.get("status"),
             value.get("completed_laps"), point.get("evidence_sha256"))
+
+
+def pace_comparison(laps):
+    """Two non-overlapping groups of three consecutive admitted clean laps.
+
+    The caller owns condition admission. Report raw pace and fuel change, not a
+    fuel-corrected slope, tire degradation, a confidence interval or causality.
+    """
+    if (type(laps) is not list or len(laps) != 6
+            or any(not isinstance(lap, Mapping) or set(lap) != {"lap", "duration_s", "fuel_start_l"}
+                   or not _integer(lap["lap"], 1, 1_000_000)
+                   or type(lap["duration_s"]) not in (int, float)
+                   or not 1 <= lap["duration_s"] <= 7200
+                   or type(lap["fuel_start_l"]) not in (int, float)
+                   or not 0 <= lap["fuel_start_l"] <= 1000 for lap in laps)
+            or any(b["lap"] != a["lap"] + 1 for a, b in zip(laps[:-1], laps[1:], strict=True))):
+        return None
+    early, recent = laps[:3], laps[3:]
+    times = [median(row["duration_s"] for row in group) for group in (early, recent)]
+    fuel = [median(row["fuel_start_l"] for row in group) for group in (early, recent)]
+    return {"laps": laps, "baseline_median_s": round(times[0], 3),
+            "recent_median_s": round(times[1], 3), "delta_s": round(times[1] - times[0], 3),
+            "fuel_delta_l": round(fuel[1] - fuel[0], 3),
+            "attribution": "UNRESOLVED", "fuel_corrected": False, "physical_wear": None}
+
+
+def validated_pace(snapshot):
+    value = validated_driving(snapshot)
+    if value is None or value.get("status") not in ("READY", "NO_REPEAT", "WAIT_LAPS"):
+        return None
+    pace = _mapping(value.get("pace"))
+    rebuilt = pace_comparison(pace.get("laps"))
+    if (rebuilt is None or pace != rebuilt or value["eligible_laps"] < 6
+            or rebuilt["laps"][-1]["lap"] != value.get("completed_laps")
+            or pace.get("fuel_corrected") is not False or pace.get("physical_wear") is not None
+            or any(type(pace.get(key)) not in (int, float) for key in (
+                "baseline_median_s", "recent_median_s", "delta_s", "fuel_delta_l"))):
+        return None
+    return rebuilt
 
 
 def driving_notice(snapshot):

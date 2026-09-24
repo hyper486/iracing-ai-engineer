@@ -16,8 +16,9 @@ from collections import Counter
 import numpy as np
 
 from .live_app import AppState, _LiveAnalysis
-from .live_driving import MAX_JOB_BYTES, MAX_LAPS, MAX_ROWS, validated_driving
+from .live_driving import MAX_JOB_BYTES, MAX_LAPS, MAX_ROWS, validated_driving, validated_pace
 from .live_fuel import LiveFuelConfig
+from .live_stint import validated_stint
 from .live_strategy import StrategyParameters, validated_strategy
 from .llm_engineer import EngineerService
 from .sdk_probe import RawSdkFrame
@@ -49,7 +50,7 @@ def _profile(coast, rate):
 
 def synthetic_frames(laps, rate=60):
     """Streaming fixture with two cached lap profiles, not a race-long matrix."""
-    if (type(laps) is not int or not 6 <= laps <= 3000
+    if (type(laps) is not int or not 8 <= laps <= 3000
             or type(rate) is not int or rate not in (20, 60)):
         raise ValueError("SYNTHETIC_RUNTIME_ARGUMENT")
     profiles = (_profile(False, rate), _profile(True, rate))
@@ -115,14 +116,14 @@ def process_private_bytes():
     return int(counters.PrivateUsage)
 
 
-def run_synthetic_runtime(*, laps=6, rate=60, progress=lambda _value: None):
+def run_synthetic_runtime(*, laps=8, rate=60, progress=lambda _value: None):
     """Exercise real numerical owners; emit aggregates, never invented telemetry.
 
     A virtual-clock lap-worker barrier prevents acceleration from masquerading
     as live overload. SDK scheduling, disk writes, UI, STT, TTS and audio routing
     are outside this measurement and must be tested separately.
     """
-    if (type(laps) is not int or not 6 <= laps <= 3000
+    if (type(laps) is not int or not 8 <= laps <= 3000
             or type(rate) is not int or rate not in (20, 60)):
         raise ValueError("SYNTHETIC_RUNTIME_ARGUMENT")
     now, started = [1.0], time.monotonic()
@@ -194,6 +195,14 @@ def run_synthetic_runtime(*, laps=6, rate=60, progress=lambda _value: None):
                     query = ("比较进站方案", "strategy.window")
             if query is None and fuel.get("status") == "READY" and not counts["fuel.current"]:
                 query = ("还有多少油", "fuel.current")
+            stint = validated_stint(value)
+            if query is None and stint is not None:
+                if not counts["stint.observed"]:
+                    query = ("这一段跑了多久", "stint.observed")
+                elif stint["tire_observation"] is not None and not counts["tire.observed_context"]:
+                    query = ("轮胎怎么样", "tire.observed_context")
+            if query is None and validated_pace(value) is not None and not counts["tire.pace"]:
+                query = ("配速变化", "tire.pace")
             if query is not None and now[0] - last_query_at >= 1.01:
                 # Ordinary local rate guards and fresh publications, not a
                 # forced snapshot or query-clock jump. No audio is requested.
@@ -224,7 +233,8 @@ def run_synthetic_runtime(*, laps=6, rate=60, progress=lambda _value: None):
                 and counts["strategy_ready_publications"]
                 and {"CAR_LEFT", "ALL_CLEAR"} <= proximity_kinds
                 and all(counts[key] for key in ("fuel.current", "strategy.window",
-                                                "driving.practice"))):
+                                                "driving.practice", "stint.observed",
+                                                "tire.observed_context", "tire.pace"))):
             raise RuntimeError("SYNTHETIC_LOOPS_NOT_REACHED")
         phase = "RETAINED_STATE_BOUNDS"
         if not (peaks["retained_laps"] <= MAX_LAPS and peaks["buffered_rows"] <= MAX_ROWS * 2
@@ -239,6 +249,7 @@ def run_synthetic_runtime(*, laps=6, rate=60, progress=lambda _value: None):
         checks = [{"id": name, "status": "PASS"} for name in (
             "SYNTHETIC_PROXIMITY_TRANSITIONS", "SYNTHETIC_LEARNED_FUEL_QUERY",
             "SYNTHETIC_REPEATED_CORNER_QUERY", "SYNTHETIC_FUEL_STOP_QUERY",
+            "SYNTHETIC_STINT_OBSERVATION_QUERY", "SYNTHETIC_RAW_PACE_QUERY",
             "SYNTHETIC_RETAINED_STATE_BOUNDS")]
     except Exception:
         checks.append({"id": "SYNTHETIC_NUMERICAL_RUNTIME", "status": "FAIL"})

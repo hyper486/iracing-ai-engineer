@@ -12,6 +12,7 @@ from tkinter import filedialog, ttk
 from typing import Any
 
 from .live_driving import driving_notice, validated_driving
+from .live_stint import stint_notice
 from .live_strategy import StrategyParameters, strategy_notice, validated_strategy
 from .live_traffic import validated_traffic
 from .llm_evidence import _live_frame_ready
@@ -173,6 +174,7 @@ class DesktopView:
     traffic: str
     driving: str
     strategy: str
+    stint: str
 
 
 class DesktopPresenter:
@@ -479,6 +481,7 @@ class DesktopPresenter:
             answer_header=header, answer_text=answer,
             notice=_text(value.get("notice"), limit=600),
             spotter=spotter, traffic=traffic_text, driving=driving_text, strategy=strategy_text,
+            stint=stint_notice(telemetry if fresh and _live_frame_ready(telemetry) else {}),
         )
 
 
@@ -620,6 +623,7 @@ class DesktopWindow:
         self._label(outer, "driving", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
         self._label(outer, "strategy", style="Muted.TLabel", wraplength=920).pack(
             anchor="w", pady=3)
+        self._label(outer, "stint", style="Muted.TLabel", wraplength=920).pack(anchor="w", pady=3)
         self._label(outer, "source", style="Muted.TLabel").pack(anchor="w", pady=3)
         self._label(outer, "notice", style="Warn.TLabel", wraplength=980).pack(anchor="w", pady=4)
         ttk.Label(outer, textvariable=self.action_var, style="Warn.TLabel",
@@ -724,6 +728,12 @@ class DesktopWindow:
         ):
             self._button(buttons, label, lambda q=question: self._quick(q),
                          question=True).pack(side="left", padx=5)
+        stint_buttons = ttk.Frame(parent)
+        stint_buttons.pack(fill="x", pady=(0, 8))
+        for label, question in (("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
+                                ("问配速", "配速变化")):
+            self._button(stint_buttons, label, lambda q=question: self._quick(q),
+                         question=True).pack(side="left", padx=(0, 10))
         ttk.Label(parent, textvariable=self.request_var, wraplength=950,
                   style="Muted.TLabel").pack(anchor="w")
         history = ttk.Frame(parent)
@@ -1118,7 +1128,8 @@ class DesktopWindow:
             "已配置密钥（不显示内容）" if settings.get("key_configured") is True
             else "尚未确认已配置密钥；无密钥时使用本地解读。"
         )
-        for key in ("connection", "spotter", "traffic", "driving", "strategy", "source", "context",
+        for key in ("connection", "spotter", "traffic", "driving", "strategy", "stint", "source",
+                    "context",
                     "advice", "learning", "recording",
                     "quality", "engineer_status", "engineer_error", "budget", "answer_header",
                     "notice"):

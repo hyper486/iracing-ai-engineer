@@ -139,8 +139,21 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   unsigned local EXE passed frozen numerical, Tk and memory-only voice checks;
   installed copies, shortcuts and device settings were not replaced. See
   [the native trial guide](NATIVE_TRIAL_BUILD.md).
-- Next: check selected microphone and headphones, wheel/PTT, actual proximity
-  latency and VR performance in a
+- Implemented: constant-space observed stint/tire-counter intervals
+  and six-consecutive-clean-lap raw pace comparison, native shortcuts and local
+  PTT answers. Fuel-only pit exits do not reset tire observations. Mid-run
+  attachment, missing signals, source gaps and unknown physical tire age remain
+  explicit. Raw medians disclose starting-fuel change without claiming causal
+  degradation or deciding tire replacement. See [the observation contract](LIVE_STINT_PACE.md).
+  Physical tire/service calibration and its strategy integration remain open.
+- Integration blocker: the older offline tire-context origin is pit-bounded
+  (`OBSERVED_PIT_EXIT` or zero completed laps), which is not proof of a fresh
+  tire installation. Correct that provenance before admitting its age-based
+  tire-service tradeoff into the native live planner. This slice does not use
+  that offline belief to issue a tire recommendation.
+- Next: establish matched tire/service provenance and connect calibrated
+  performance/service costs to endurance strategy. Check selected microphone
+  and headphones, wheel/PTT, actual proximity latency and VR performance in a
   user-driven session. A local TTS duration is not output or end-to-end latency;
   a trial build does not close the full tire/rule/action-bound rejoin goal.
 

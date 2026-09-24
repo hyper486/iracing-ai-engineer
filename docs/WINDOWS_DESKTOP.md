@@ -6,7 +6,7 @@ install a service or schedule background launches. Legacy browser/report code
 remains available separately; it is not the native UI.
 
 The 2026-09-24 local trial build includes the proximity, local question,
-recent-corner, conditional fuel-stop and private replay slices below. See
+recent-corner, observed-stint/raw-pace, conditional fuel-stop and private replay slices below. See
 [the integrated trial checklist](NATIVE_TRIAL_BUILD.md). Installed older copies
 are not automatically replaced; run the newly built `dist/AEIS-Engineer.exe`.
 
@@ -47,6 +47,13 @@ are not automatically replaced; run the newly built `dist/AEIS-Engineer.exe`.
 “几整圈后”从提问位置起算，未定位进站口；这不是最佳进站圈、换胎或回场预测。
 **还要加多少油**仍回答终点累计缺油，不是下一停加油量。
 见 [进站比较说明](LIVE_FUEL_STOP_COMPARISON.md)。旧安装需改用新构建的 EXE。
+
+**问本段／问轮胎／问配速** 同样走本地快速问答，也可按 PTT 说
+**这一段跑了多久／轮胎怎么样／配速变化**。本段状态行区分“观测出站后”和
+“中途接入的已观察区间”；只加油出站不会被当成换了新胎。轮胎计数连续不变的
+时长不是完整胎龄，六个连续干净可比圈的原始中位配速变化也不等于胎耗。
+回答会说明油量变化及尚未做油重修正，不会据此给出轮胎寿命或换胎指令。
+见 [本段与配速说明](LIVE_STINT_PACE.md)。真实轮胎表现模型与策略联动仍待补齐。
 
 ## VR 语音设置（无需在驾驶时打字）
 
