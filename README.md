@@ -84,6 +84,10 @@ web server are not required on the target computer. In **模型与本地设置**
 questions are off by default; enter your DeepSeek key locally and explicitly
 enable them if desired. Without a key, local explanations still work.
 
+中文快速测试步骤：[原生 EXE 上车测试速查](docs/LIVE_TRIAL_ZH.md)。
+原生版启动先显示“上车检查”，直达语音/录制/问答和复盘；只显示已应用设置与软件
+状态，不自动开启麦克风、近车语音或云端，也不把就绪状态当作真实听音/驾驶验收。
+
 From a source checkout on Windows, build the standalone executable with:
 
 ```powershell
@@ -160,7 +164,7 @@ at least five valid complete laps by default. Practice speech is opt-in and uses
 only browser-reported local English voices. Race speech is disabled, and a hidden
 browser tab automatically mutes, so game-background speech is not guaranteed.
 Read [the setup, recording and safety limits](docs/LIVE_APP.md) before using it.
-中文快速测试步骤：[上车测试速查](docs/LIVE_TRIAL_ZH.md)。
+These browser-only restrictions do not apply to the native app above.
 This milestone does not establish new authentic `SDK_LIVE` driving acceptance.
 
 ### Optional DeepSeek engineer

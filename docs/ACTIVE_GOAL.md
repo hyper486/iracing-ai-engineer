@@ -99,6 +99,12 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
 
 ## Delivery progress and next implementation slice
 
+- First-trial usability: the native startup page now exposes applied voice/PTT
+  preferences, independent module state and navigation to setup/testing/replay.
+  Fixed unavailable-Spotter reasons include the SDK-off code without calling it
+  all-clear. The [Chinese trial guide](LIVE_TRIAL_ZH.md) now targets the native EXE,
+  not the legacy browser. No preferences, hardware acceptance or goal status are
+  automatically changed by this read-only overview.
 - Implemented: independent proximity worker/guard, fast detector snapshots with
   no EngineerService/fuel dependency, warmed device enumeration and fixed PCM cache.
 - Implemented: priority ownership with cancellation acknowledgment, partial-PTT

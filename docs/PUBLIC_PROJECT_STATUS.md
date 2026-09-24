@@ -29,6 +29,7 @@ required running dependency. The final goal remains active and unaccepted.
 | Local practice speech | Opt-in browser prototype | Only local English voices in confirmed Practice; Race speech is disabled. A hidden tab auto-mutes, so game-background playback is not guaranteed. |
 | DeepSeek engineer framework | Implemented; constrained evidence selection | Opt-in asynchronous questions, local grounding/rendering, bounded attempts and safe fallback; validated historical receipt context is separate from live fuel. Real provider/account and in-car acceptance remain unverified. |
 | Native Windows EXE | Experimental native Tk/ttk app | Standalone windowed binary, direct Python service calls, masked/optional DPAPI key storage and private recording. No HTML/WebView/server. |
+| First-trial setup overview | Read-only native startup page | Applied voice switches, device/PTT choices, independent module states and setup/replay navigation. No automatic configuration, device test or acceptance promotion. |
 | Native VR voice | Implemented; hardware/race acceptance pending | Opt-in background PTT, input/output selectors or refreshed Windows defaults, local Whisper STT and Windows TTS, interruption and optional guarded low-fuel facts. No continuous listening or raw-audio upload. |
 | Tick-level proximity | Detector plus opt-in native audio in the local trial build | Independent fixed-phrase cache, priority cancellation, fast snapshots and bounded playback diagnostics; synthetic/local-synthesis checks only, no hardware or in-car acceptance. |
 | Reader / analysis / recording isolation | Bounded worker lanes in source | Recorder and analysis failures no longer synchronously block the SDK reader; explicit incomplete prefixes, generation guards and streaming event digests. Not GIL isolation or a hardware latency guarantee. |
@@ -56,6 +57,43 @@ required running dependency. The final goal remains active and unaccepted.
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Native first-trial setup and guidance
+
+The native app now opens **上车检查**. It reports applied voice switches rather
+than unchecked/edited widget state, keeps the Spotter lane independent of absent
+fuel/analysis evidence, and links to voice setup, recording settings, local
+questions, fuel progress and replay. Only fixed preference descriptions appear;
+device enumeration is not interpreted as a successful microphone/headset test.
+Zero/invalid volume, binding-in-progress, preparation and known voice faults
+have explicit next steps. Missing snapshots clear the overview instead of
+stopping the UI poll. There is no global green-light or live-acceptance state.
+
+Unavailable Spotter messages now distinguish SDK-off, invalid lateral field,
+read error and mismatched ticks with fixed text. Unknown errors remain generic;
+source values/exception text do not become messages, and code zero never means
+all-clear. The [Chinese quickstart](LIVE_TRIAL_ZH.md) now describes the native
+EXE, separate voice switches, parked audio/PTT checks, three on-track loops and
+orderly private-recording closure/replay. It no longer sends native users to
+the legacy browser/Practice-only voice workflow.
+
+This is setup usability and software evidence, not real hardware or in-car/VR
+acceptance. The goal remains active; existing settings are not silently changed.
+
+The unsigned EXE passed all **28 frozen checks** under a system-only child PATH
+without saved keys, including the updated native-window startup assertion.
+Size/hash matched the build receipt. Source and packaged synthetic windows were
+inspected with Computer Use: first page, voice-settings navigation, scrolling
+and acceptance limits. Both were closed normally. Tests add 31 pure setup cases,
+five fixed-Spotter-reason cases and one isolated native scenario at minimum
+width, with no SDK/provider calls or preference mutation. Existing installations,
+shortcuts and audio settings were not replaced.
+
+Full regression with `uv` on the child PATH passed **3,547 tests, 44 skipped** in
+**742.84 s**, including both locked-wheel checks. All 37 new tests passed; skips
+require absent data, private deployment, platform capabilities or explicit local
+speech opt-in. Ruff, local document links and public-safety including history
+passed. No admission, freshness or audio timing thresholds were relaxed.
 
 ## Same-action mapped pit briefing
 

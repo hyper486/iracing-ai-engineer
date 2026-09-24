@@ -156,9 +156,12 @@ def run_self_test() -> dict:
         root = tk.Tk()
         root.report_callback_exception = lambda *_args: callback_errors.append("TK_CALLBACK_FAILED")
         root.withdraw()
-        DesktopWindow(root, controller)
+        window = DesktopWindow(root, controller)
         root.update_idletasks()
         root.update()
+        if (window.notebook.tab(window.notebook.select(), "text") != "上车检查"
+                or "尚未载入" not in window._vars["trial_action"].get()):
+            raise ValueError("NATIVE_TRIAL_SETUP_FAILED")
         checks.append({"id": "NATIVE_TK_WINDOW", "status": "PASS"})
         if controller.submit("当前油量证据够吗？")[0] != 202:
             raise ValueError("LOCAL_SUBMIT_FAILED")

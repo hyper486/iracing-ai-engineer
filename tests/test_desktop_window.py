@@ -108,7 +108,7 @@ def _native_tire_comparison(native_window):
                       if item.cget("text") == "问换胎收益")
         root.geometry("860x680")
         root.deiconify()
-        window.notebook.select(1)
+        window.notebook.select(2)
         root.update()
         # The added shortcut must not clip the following pit-observation
         # button at the supported minimum width; the page scrolls vertically.
@@ -136,7 +136,7 @@ def _native_pit_briefing(native_window):
         window._poll()
         root.geometry("860x680")
         root.deiconify()
-        window.notebook.select(1)
+        window.notebook.select(2)
         root.update()
         button = next(item for item in window._question_buttons
                       if item.cget("text") == "综合进站")
@@ -197,6 +197,24 @@ def test_proximity_diagnostic_readiness_is_never_presented_as_working_audio():
     snapshot["telemetry"]["spotter"]["status"] = "STALE"
     view = DesktopPresenter().project(snapshot, now=10.0)
     assert "过期" in view.spotter
+
+
+@pytest.mark.parametrize("reason,expected", [
+    ("SDK_SPOTTER_OFF", "不代表左右清空"),
+    ("PROXIMITY_FIELD_INVALID", "未提供有效"),
+    ("FIELD_READ_ERROR", "字段读取失败"),
+    ("TICK_MISMATCH", "帧序号不匹配"),
+    ("PRIVATE_EXCEPTION", "必要字段不可用"),
+])
+def test_spotter_fixed_unavailable_reasons_are_visible_without_private_details(reason, expected):
+    value = _snapshot()
+    value["telemetry"]["spotter"] = {"status": "UNAVAILABLE", "reason": reason}
+    view = DesktopPresenter().project(value, now=10)
+    assert expected in view.spotter and "PRIVATE_EXCEPTION" not in view.spotter
+    assert "近车判定数据就绪" not in view.spotter
+    value["lifecycle"] = "STOPPED"
+    assert "已停止" in DesktopPresenter().project(value, now=10).spotter
+    assert "SDK" not in DesktopPresenter().project(value, now=10).spotter
 
 
 def test_cloud_busy_does_not_disable_local_fuel_questions_or_hide_local_answer():
@@ -529,6 +547,45 @@ def _execute_native_scenario(name: str) -> None:
             root.destroy()
     assert not callback_errors, callback_errors
     print(f"NATIVE_CASE_PASS:{name}")
+
+
+def _native_trial_setup(native_window) -> None:
+    root, controller, window = native_window
+    assert window.notebook.index(window.notebook.select()) == 0
+    assert window.notebook.tab(0, "text") == "上车检查"
+    assert "分别开启" in window._vars["trial_action"].get()
+    assert "已关闭" in window._vars["trial_voice"].get()
+    # Unapplied widget changes must not masquerade as the active configuration.
+    window.voice_enabled_var.set(True)
+    window.voice_spotter_var.set(True)
+    window._poll()
+    assert "已关闭" in window._vars["trial_voice"].get()
+    controller.value["voice"]["settings"].update(enabled=True, spotter_enabled=True)
+    controller.value["voice"].update(status="READY", spotter={"status": "READY"})
+    controller.value["telemetry"].update(monitor=None, fuel=None,
+                                        spotter={"status": "READY"})
+    window._poll()
+    assert "已开启" in window._vars["trial_voice"].get()
+    assert "无可用实时建议" in window._vars["trial_fuel"].get()
+    assert "近车判定数据就绪" in window._vars["trial_spotter"].get()
+    root.geometry("860x680")
+    root.deiconify()
+    root.update()
+    for button, title in zip(window.trial_buttons, (
+        "语音与 VR", "模型与本地设置", "工程师问答与复盘", "实时燃油与质量", "采集复盘",
+    ), strict=True):
+        window.notebook.select(0)
+        root.update()
+        assert button.winfo_rootx() + button.winfo_reqwidth() < root.winfo_rootx() + 840
+        button.invoke()
+        assert window.notebook.tab(window.notebook.select(), "text") == title
+    assert controller.questions == [] and controller.voice_calls == []
+    assert controller.configurations == [] and controller.voice_configurations == []
+    assert controller.recordings == []
+    controller.snapshot = lambda: None
+    window._poll()
+    assert "尚未确认" in window._vars["trial_voice"].get()
+    assert "未运行" in window._vars["trial_action"].get()
 
 
 def _native_settings(native_window) -> None:
@@ -1020,6 +1077,7 @@ def _native_tire_review(native_window):
 
 
 _NATIVE_SCENARIOS = {
+    "trial_setup": _native_trial_setup,
     "settings": _native_settings, "question": _native_question,
     "close": _native_close, "validation": _native_validation,
     "voice_defaults": _native_voice_defaults_and_configuration,

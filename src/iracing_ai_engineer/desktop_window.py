@@ -11,6 +11,7 @@ from pathlib import Path
 from tkinter import filedialog, ttk
 from typing import Any
 
+from .desktop_preflight import trial_setup
 from .live_car_context import car_context_notice
 from .live_driving import driving_notice, validated_driving
 from .live_pit_observation import pit_observation_draft, pit_observation_notice
@@ -512,6 +513,15 @@ class DesktopPresenter:
             "STOPPED": "已停止",
         }
         proximity_text = proximity_labels.get(proximity_status, "尚未启动")
+        if proximity_status == "UNAVAILABLE":
+            detail = {
+                "SDK_SPOTTER_OFF": "SDK 近车字段处于关闭/不可用状态，不代表左右清空",
+                "PROXIMITY_FIELD_INVALID": "SDK 未提供有效的左右近车字段",
+                "FIELD_READ_ERROR": "必要 SDK 字段读取失败",
+                "TICK_MISMATCH": "SDK 帧序号不匹配，已拒绝判定",
+            }.get(proximity.get("reason"))
+            if detail:
+                proximity_text += "（" + detail + "）"
         if lifecycle != "RUNNING":
             proximity_text = "已停止" if lifecycle in ("STOPPED", "CLOSED") else "尚未就绪"
         audio = _mapping(_mapping(value.get("voice")).get("spotter"))
@@ -751,17 +761,48 @@ class DesktopWindow:
                   wraplength=980).pack(anchor="w")
         self.notebook = ttk.Notebook(outer)
         self.notebook.pack(fill="both", expand=True, pady=(8, 0))
-        live, engineer, settings, voice, replay = (ttk.Frame(self.notebook) for _ in range(5))
+        trial, live, engineer, settings, voice, replay = (
+            ttk.Frame(self.notebook) for _ in range(6)
+        )
+        self.notebook.add(trial, text="上车检查")
         self.notebook.add(live, text="实时燃油与质量")
         self.notebook.add(engineer, text="工程师问答与复盘")
         self.notebook.add(settings, text="模型与本地设置")
         self.notebook.add(voice, text="语音与 VR")
         self.notebook.add(replay, text="采集复盘")
+        self._build_trial(self._scroll_page(trial), live=live, engineer=engineer,
+                          settings=settings, voice=voice, replay=replay)
         self._build_live(self._scroll_page(live))
         self._build_engineer(self._scroll_page(engineer))
         self._build_settings(self._scroll_page(settings))
         self._build_voice(self._scroll_page(voice))
         self._build_capture_replay(replay)
+
+    def _build_trial(self, parent, **pages) -> None:
+        ttk.Label(parent, text="停车检查，再戴上 VR；本页不是实车验收结果。",
+                  style="Warn.TLabel", wraplength=720).pack(anchor="w", pady=(0, 8))
+        self._label(parent, "trial_action", style="Warn.TLabel", wraplength=720).pack(
+            anchor="w", pady=(0, 8))
+        navigation = ttk.Frame(parent)
+        navigation.pack(anchor="w", pady=(0, 8))
+        self.trial_buttons = []
+        for index, (title, key) in enumerate((
+            ("1. 设置语音与试听", "voice"), ("2. 查看本机录制设置", "settings"),
+            ("3. 停车测试本地问答", "engineer"), ("4. 查看有效圈进度", "live"),
+            ("5. 跑完检查本机记录", "replay"),
+        )):
+            button = self._button(navigation, title,
+                                  lambda page=pages[key]: self.notebook.select(page))
+            button.grid(row=index // 2, column=index % 2, sticky="w", padx=(0, 8), pady=3)
+            self.trial_buttons.append(button)
+        for key in ("voice", "devices", "ptt", "spotter", "fuel", "driving", "recording", "cloud"):
+            self._label(parent, "trial_" + key, wraplength=720).pack(anchor="w", pady=5)
+        ttk.Label(parent, text=(
+            "首次测试：自然遇到并排车时核对近车提示；首次过线后积累有效完整圈，"
+            "问‘还有多少油’；有可比重复证据后问‘哪里可以改进’。没有证据时等待是正常的。\n"
+            "不要刻意制造事故或并排场景。软件就绪、调用播放、回放一致都不能证明人耳听到，"
+            "也不能证明 VR 负载下及时可用。退出驾驶后旧建议应撤回。"
+        ), style="Muted.TLabel", wraplength=720).pack(anchor="w", pady=8)
 
     @staticmethod
     def _scroll_page(parent):
@@ -1318,13 +1359,22 @@ class DesktopWindow:
                 self.root.destroy()
                 return
         try:
-            snapshot = self.controller.snapshot()
+            snapshot = _mapping(self.controller.snapshot())
             view = self.presenter.project(snapshot, now=monotonic_now())
         except Exception:
             snapshot = {}
             view = self.presenter.project({"lifecycle": "ERROR"}, now=monotonic_now())
             self.action_var.set("无法读取本地状态；旧估计与回答已撤回，不显示原始异常。")
         self._view = view
+        for key, text in trial_setup(snapshot).items():
+            self._vars["trial_" + key].set(text)
+        self._vars["trial_spotter"].set(view.spotter)
+        self._vars["trial_fuel"].set(
+            f"燃油：{view.context} · 有效完整圈 {view.learning}。详见‘实时燃油与质量’。")
+        self._vars["trial_driving"].set(view.driving)
+        self._vars["trial_recording"].set("本机留证：" + view.recording)
+        self._vars["trial_cloud"].set(
+            view.engineer_status + "。近车、常用燃油和驾驶问题不需要云端；云端配置不是 API 验证。")
         engineer = _mapping(_mapping(snapshot).get("engineer"))
         answer = _mapping(engineer.get("answer"))
         self._answer_key = ((engineer.get("instance_id"), answer.get("id"))

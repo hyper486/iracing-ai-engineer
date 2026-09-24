@@ -5,7 +5,25 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current rebuild adds [same-action pit briefing](LIVE_PIT_BRIEFING.md).
+The current rebuild adds a read-only **上车检查** startup page and the
+[native Chinese first-trial guide](LIVE_TRIAL_ZH.md). Applied voice switches,
+device/PTT preferences, independent module states and navigation are visible
+without enabling a microphone, output, recording or cloud request. The page has
+no overall acceptance/pass claim. Fixed SDK-off/missing-field/read-error/tick
+reasons now explain unavailable proximity instead of implying all-clear.
+The existing native-window frozen check also verifies this startup page.
+
+The unsigned rebuild passed all **28 frozen checks** with a system-only child
+PATH and without saved keys. Artifact size/hash matched its receipt. Computer
+Use inspected the final startup page, navigation to voice settings and scrolling
+to the acceptance limits, then closed the synthetic window normally. The native
+test also covers navigation at 860 pixels, unapplied widget changes, independent
+Spotter state during unavailable analysis and clearing a missing snapshot.
+No installed copy, shortcut, credential or saved audio preference was changed.
+No real-device playback, microphone recording, provider call or SDK driving
+acceptance is added by this build.
+
+The preceding rebuild added [same-action pit briefing](LIVE_PIT_BRIEFING.md).
 **综合进站 / 综合进站方案** joins each actual mapped action's fuel dose,
 service-specific rejoin traffic and supported complete-lap tire benefit.
 Missing partial-lap effects remain unknown, not a fabricated whole-stint net

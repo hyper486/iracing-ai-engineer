@@ -13,6 +13,9 @@ are not automatically replaced; run the newly built `dist/AEIS-Engineer.exe`.
 ## 使用方法
 
 1. 双击 `AEIS-Engineer.exe`。首次解包可能需要几秒；不需要安装 Python。
+   默认先显示 **上车检查**：已应用语音开关、PTT/设备选择和各模块状态，以及
+   直达设置/测试/复盘的按钮。它不打开设备、不调用 API、不自动启用语音或录制，
+   不把软件就绪当成实际听音成功。首次测试按 [原生上车速查](LIVE_TRIAL_ZH.md) 操作。
 2. 自己启动 iRacing 并进入车辆。应用只读遥测，不会启动或控制模拟器。
 3. **实时燃油与质量**显示连接、完整圈学习进度、油量和可用的燃油估计。
    缺少有效数据时显示等待，不会捏造策略。
@@ -114,7 +117,7 @@ are not automatically replaced; run the newly built `dist/AEIS-Engineer.exe`.
 第一句不会修改观测；等待“已记录你的确认”，不要把排队当作成功。
 说 **取消记录** 仅取消未提交的草稿。详见 [VR 换胎确认](VR_TIRE_CONFIRMATION.md)。
 
-停车时打开第四个页签 **语音与 VR**：
+停车时打开 **语音与 VR** 页签：
 
 1. 输入、输出分别选择麦克风和耳机；保持 **系统默认** 则在每次录播前重新
    读取 Windows 当前默认设备。不会替你更改 Windows 默认音频设置。
