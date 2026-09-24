@@ -108,7 +108,7 @@ def run_self_test() -> dict:
         run_synthetic_tire_confirmation,
         run_synthetic_tire_review,
     )
-    from .synthetic_tire_comparison import run_synthetic_tire_comparison
+    from .synthetic_tire_comparison import run_synthetic_pit_briefing, run_synthetic_tire_comparison
     from .synthetic_tire_voice import run_synthetic_tire_voice
 
     checks = []
@@ -132,6 +132,9 @@ def run_self_test() -> dict:
         checks.append(run_synthetic_tire_comparison())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_TIRE_COMPARISON_FAILED")
+        checks.append(run_synthetic_pit_briefing())
+        if checks[-1]["status"] != "PASS":
+            raise ValueError("SYNTHETIC_PIT_BRIEFING_FAILED")
         checks.append(run_synthetic_tire_voice())
         if checks[-1]["status"] != "PASS":
             raise ValueError("SYNTHETIC_TIRE_VOICE_FAILED")

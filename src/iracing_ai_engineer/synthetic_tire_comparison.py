@@ -8,6 +8,7 @@ No SDK startup, provider request, actual calibration, or simulator controls.
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -80,7 +81,8 @@ def _request(event_identity, identity):
     return request
 
 
-def run_synthetic_tire_comparison():
+@contextmanager
+def _case(*, mapped=False):
     now = [1.]
     state = AppState(clock=lambda: now[0])
     state.connection("CONNECTED")
@@ -95,7 +97,6 @@ def run_synthetic_tire_comparison():
         "DriverInfo": {"DriverCarIdx": 0, "Drivers": [{"CarIdx": 0, "CarID": 123,
                                                        "CarClassID": 27}]},
         "CarSetup": {"Chassis": {"WingSetting": 7}, "UpdateCount": 1}}
-    passed = False
     try:
         with TemporaryDirectory(prefix="aeis-synthetic-tire-comparison-") as directory:
             for raw in synthetic_frames(8):
@@ -122,8 +123,25 @@ def run_synthetic_tire_comparison():
                         expected_binding=car_context_binding(snapshot, parked=True),
                         expected_revision=snapshot["tire_calibration"]["revision"])
                     state.confirm_tire_service("FULL_NEW_SET")
-            state.configure_strategy(StrategyParameters(4., 2., 20., 24.,
-                tire_change_time_s=1., fuel_tire_service_timing="PARALLEL"))
+                if mapped and tick == 70:
+                    state.configure_strategy(StrategyParameters(4., 2., 20., 24.,
+                        pit_entry_fraction=.9, pit_exit_fraction=.1, other_service_low_s=1.,
+                        other_service_high_s=2., tire_change_time_s=1.,
+                        fuel_tire_service_timing="PARALLEL"))
+            if not mapped:
+                state.configure_strategy(StrategyParameters(4., 2., 20., 24.,
+                    tire_change_time_s=1., fuel_tire_service_timing="PARALLEL"))
+            yield state, service, now
+    finally:
+        service.close(wait=True)
+        analysis.close()
+        state.connection("STOPPED")
+
+
+def run_synthetic_tire_comparison():
+    passed = False
+    try:
+        with _case() as (state, service, _):
             value = validated_tire_comparison(state.snapshot())
             if (value is None or value["status"] != "CONDITIONAL"
                     or value["scenarios"][0]["net_gain_range_s"][0] <= 0
@@ -140,8 +158,34 @@ def run_synthetic_tire_comparison():
             passed = answer["stale"] and "spoken_text" not in answer
     except Exception:
         pass
-    finally:
-        service.close(wait=True)
-        analysis.close()
-        state.connection("STOPPED")
     return {"id": "SYNTHETIC_CONDITIONAL_TIRE_COMPARISON", "status": "PASS" if passed else "FAIL"}
+
+
+def run_synthetic_pit_briefing():
+    from .live_pit_briefing import project_pit_briefing
+
+    passed = False
+    try:
+        with _case(mapped=True) as (state, service, _):
+            value = project_pit_briefing(state.snapshot())
+            first = value["actions"][0]
+            if (value["status"] != "CONDITIONAL" or len(first["services"]) != 2
+                    or not all(row["status"] == "READY" for row in first["services"])
+                    or first["tires"]["covered_gain_range_s"][0] <= 0
+                    or first["tires"]["complete_laps"] < 1
+                    or first["tires"]["unmodeled_partial_laps"] <= 0
+                    or first["tires"]["net_stint_gain_range_s"] is not None
+                    or service.submit("综合进站方案")[0] != 202):
+                raise ValueError("SYNTHETIC_PIT_BRIEFING_FAILED")
+            answer = service.snapshot()["answer"]
+            if (answer["stale"] or "整段收益未知" not in answer["spoken_text"]
+                    or "完整圈收益" not in answer["text"]
+                    or "仅加油" not in answer["text"] or "加油并换四胎" not in answer["text"]
+                    or service.snapshot()["requests_used"] != 0):
+                raise ValueError("SYNTHETIC_PIT_BRIEFING_QUERY_FAILED")
+            state.set_tire_calibration(None)
+            answer = service.snapshot()["answer"]
+            passed = answer["stale"] and "spoken_text" not in answer
+    except Exception:
+        pass
+    return {"id": "SYNTHETIC_SAME_ACTION_PIT_BRIEFING", "status": "PASS" if passed else "FAIL"}

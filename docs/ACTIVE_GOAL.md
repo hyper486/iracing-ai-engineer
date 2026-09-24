@@ -88,6 +88,10 @@ historical slope, driver-confirmed counter origin, full next-stint fuel/age
 bounds and extra service time. Local PTT gives a net range without claiming wear,
 keeping-tire safety or a mapped rejoin decision; see
 [the calculation and limits](LIVE_TIRE_COMPARISON.md).
+The new same-action briefing connects mapped dose, both service traffic states
+and supported complete-lap tire gain. Unmodeled partial segments remain explicit;
+there is no whole-stint net gain or race ranking. See
+[the mapped integration boundary](LIVE_PIT_BRIEFING.md).
 Stage B hardware acceptance, D's real-lap acceptance, E's actual in-car trial
 and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.

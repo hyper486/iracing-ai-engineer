@@ -125,6 +125,37 @@ def _native_tire_comparison(native_window):
         assert "净收益" not in window.tire_comparison_var.get()
 
 
+def _native_pit_briefing(native_window):
+    from iracing_ai_engineer.synthetic_tire_comparison import _case
+
+    root, controller, window = native_window
+    with _case(mapped=True) as (state, service, _):
+        controller.value["telemetry"] = state.snapshot()
+        controller.value["engineer"] = service.snapshot()
+        controller.submit = service.submit
+        window._poll()
+        root.geometry("860x680")
+        root.deiconify()
+        window.notebook.select(1)
+        root.update()
+        button = next(item for item in window._question_buttons
+                      if item.cget("text") == "综合进站")
+        assert button.grid_info()["row"] == 1 and button.grid_info()["column"] == 3
+        assert button.winfo_rootx() + button.winfo_reqwidth() <= (
+            root.winfo_rootx() + root.winfo_width() - 20)
+        button.invoke()
+        controller.value["engineer"] = service.snapshot()
+        window._poll()
+        text = window.answer_text.get("1.0", "end-1c")
+        assert "完整圈收益" in text and "仅加油" in text and "加油并换四胎" in text
+        assert "不是整段净收益" in text
+        state.set_tire_calibration(None)
+        controller.value["engineer"] = service.snapshot()
+        window._poll()
+        text = window.answer_text.get("1.0", "end-1c")
+        assert "已撤回" in text and "完整圈收益" not in text
+
+
 def test_numeric_formatting_and_question_validation() -> None:
     assert format_number(0, " L") == "0.0 L"
     assert format_number(3.14159, " L/圈", 2) == "3.14 L/圈"
@@ -1005,6 +1036,7 @@ _NATIVE_SCENARIOS = {
     "tire_review": _native_tire_review,
     "tire_calibration": _native_tire_calibration_controls,
     "tire_comparison": _native_tire_comparison,
+    "pit_briefing": _native_pit_briefing,
 }
 
 

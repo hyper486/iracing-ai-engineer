@@ -45,6 +45,17 @@ def _verify_model() -> None:
             raise ValueError("VOICE_TEST_MODEL_HASH")
 
 
+def _pit_briefing_phrases():
+    from .live_pit_briefing import pit_briefing_text, pit_briefing_voice_facts, project_pit_briefing
+    from .synthetic_tire_comparison import _case
+
+    with _case(mapped=True) as (state, _, _):
+        value = project_pit_briefing(state.snapshot())
+        if value["status"] != "CONDITIONAL":
+            raise ValueError("VOICE_TEST_PIT_BRIEFING_UNAVAILABLE")
+        return [pit_briefing_text(value)[0], *[text for _, text in pit_briefing_voice_facts(value)]]
+
+
 def run_voice_self_test() -> list[dict]:
     """Check packaged dependencies and real Chinese TTS -> STT without audio I/O."""
     checks = []
@@ -78,6 +89,12 @@ def run_voice_self_test() -> list[dict]:
             if result["confidence"] < .5 or tire_voice_intent(result["text"]) != expected:
                 raise ValueError("VOICE_TEST_TIRE_RECOGNITION")
         checks.append({"id": "CHINESE_TIRE_REVIEW_TTS_TO_STT", "status": "PASS"})
+        for phrase in _pit_briefing_phrases():
+            with wave.open(io.BytesIO(speech.synthesize(phrase)), "rb") as handle:
+                duration = handle.getnframes() / handle.getframerate()
+            if not 0 < duration <= 9.5:
+                raise ValueError("VOICE_TEST_PIT_BRIEFING_TOO_LONG")
+        checks.append({"id": "CHINESE_PIT_BRIEFING_TTS_DURATION", "status": "PASS"})
     except Exception:
         checks.append({"id": "SYNTHETIC_VOICE_RUNTIME", "status": "FAIL"})
     finally:

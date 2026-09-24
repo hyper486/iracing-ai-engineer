@@ -45,6 +45,10 @@ _QUERIES = {
     ),
     "pit_plan": ("比较进站方案", "进站方案", "进站计划", "进站窗口", "这次进站加多少油",
                  "下一次进站加多少油", "pit plan", "pit comparison"),
+    "pit_briefing": ("综合进站方案", "综合进站比较", "进站简报", "pit briefing"),
+    "pit_briefing_tires": ("综合换胎收益", "mapped tire benefit"),
+    "pit_briefing_fuel_traffic": ("综合仅加油交通", "fuel only rejoin"),
+    "pit_briefing_tire_traffic": ("综合换胎交通", "four tire rejoin"),
     "service": ("换胎会多花多久", "换胎多花多久", "比较换胎耗时", "比较进站服务",
                 "tire service time", "tyre service time"),
     "tire_comparison": ("比较换胎收益", "换胎值不值得", "换胎值得吗", "换胎能追回多少时间",
@@ -156,6 +160,22 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     if intent not in _QUERIES or context.get("scope") != "live_snapshot":
         raise ValueError("INVALID_LIVE_QUERY")
     facts = {item["id"]: item["text"] for item in context["facts"]}
+    if intent.startswith("pit_briefing"):
+        notices = {item["id"]: item["text"] for item in context.get("notices", [])}
+        brief_key = "pit_briefing." + {
+            "pit_briefing": "brief", "pit_briefing_tires": "tires_brief",
+            "pit_briefing_fuel_traffic": "fuel_traffic_brief",
+            "pit_briefing_tire_traffic": "tire_traffic_brief",
+        }[intent]
+        chosen = [key for key in (brief_key, "pit_briefing.early",
+                                  "pit_briefing.late", "pit_briefing.limits") if key in facts]
+        spoken = facts.get(brief_key, notices.get(
+            "PIT_BRIEFING_UNAVAILABLE", "综合进站未就绪。"))
+        body = "\n".join(facts[key] for key in chosen if key != brief_key) or spoken
+        if len(spoken) > 280:
+            raise ValueError("LIVE_QUERY_RENDER_LIMIT")
+        return {"topic": "strategy", "fact_ids": chosen, "spoken_text": spoken,
+                "text": body + "\n提问时的条件比较；不会操作车辆或进站设置。", "intent": intent}
     if intent == "tire_comparison" or (intent == "tire" and "tire.comparison_brief" in facts):
         notices = {item["id"]: item["text"] for item in context.get("notices", [])}
         chosen = [key for key in ("tire.comparison_brief", "tire.comparison_early",

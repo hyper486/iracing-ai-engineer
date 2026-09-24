@@ -17,6 +17,8 @@ from typing import Any
 
 from .engineer_session import validate_engineer_session
 from .live_driving import driving_notice, validated_driving, validated_pace
+from .live_pit_briefing import LIMITS as PIT_BRIEFING_LIMITS
+from .live_pit_briefing import pit_briefing_text, pit_briefing_voice_facts, project_pit_briefing
 from .live_pit_observation import pit_observation_notice, validated_pit_observation
 from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import validated_stint
@@ -449,6 +451,27 @@ def _live_tire_comparison_facts(result, snapshot):
     result["capabilities"]["tire"] = "CONDITIONAL_PERFORMANCE_COMPARISON"
 
 
+def _live_pit_briefing_facts(result, snapshot):
+    try:
+        value = project_pit_briefing(snapshot if _live_frame_ready(snapshot) else {})
+        brief, details = pit_briefing_text(value)
+        voice_facts = pit_briefing_voice_facts(value)
+    except Exception:
+        # Optional combined analysis must not disable any independent lane.
+        value = {"status": "WAIT", "reason": "PROCESSING_ERROR"}
+        brief, details = pit_briefing_text(value)
+        voice_facts = []
+    if value["status"] != "CONDITIONAL":
+        result["notices"].append(_entry("PIT_BRIEFING_UNAVAILABLE", brief))
+        return
+    result["facts"].append(_entry("pit_briefing.brief", brief))
+    result["facts"].extend(_entry(f"pit_briefing.{key}", text) for key, text in voice_facts)
+    result["facts"].extend(_entry(f"pit_briefing.{endpoint}", text)
+                           for endpoint, text in details)
+    result["facts"].append(_entry("pit_briefing.limits", PIT_BRIEFING_LIMITS))
+    result["notices"].append(_entry("PIT_BRIEFING_CONDITIONAL", PIT_BRIEFING_LIMITS))
+
+
 def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     """Project fresh observations and separately admitted fuel-budget estimates.
 
@@ -474,6 +497,7 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     _live_pit_observation_facts(result, snapshot)
     _live_stint_facts(result, snapshot)
     _live_tire_comparison_facts(result, snapshot)
+    _live_pit_briefing_facts(result, snapshot)
     monitor = _mapping(snapshot.get("monitor"))
     fuel = _mapping(snapshot.get("fuel"))
     direct = current_fuel_observation(snapshot)

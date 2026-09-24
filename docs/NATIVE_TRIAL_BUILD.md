@@ -5,7 +5,25 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current rebuild adds [conditional next-stint tire benefit](LIVE_TIRE_COMPARISON.md).
+The current rebuild adds [same-action pit briefing](LIVE_PIT_BRIEFING.md).
+**综合进站 / 综合进站方案** joins each actual mapped action's fuel dose,
+service-specific rejoin traffic and supported complete-lap tire benefit.
+Missing partial-lap effects remain unknown, not a fabricated whole-stint net
+gain or optimal choice. The additional frozen check requires real numerical
+owners on invented frames, pinned invented calibration, confirmed tire origin,
+local answer and withdrawal. It never starts the SDK or calls a provider.
+
+The unsigned EXE passed **28 frozen checks** under a system-only child PATH
+without saved keys. The second new check synthesizes four short production
+replies to memory and requires each to fit 9.5 seconds; it does not measure
+actual-device playback or end-to-end latency. Size/SHA-256 matched the build
+receipt. Computer Use checked the final native shortcut, scrolling and local
+unavailable response; the synthetic window closed normally. Source native tests
+also exercise the numerical answer and withdrawal at 860 pixels. Existing
+installations, shortcuts, credentials and audio settings were not replaced.
+No authentic SDK, microphone/headphone hearing or VR acceptance is added.
+
+The preceding rebuild added [conditional next-stint tire benefit](LIVE_TIRE_COMPARISON.md).
 **问换胎收益 / 比较换胎收益** connects a frozen validated historical model,
 driver-confirmed counter origin, whole-stint age/fuel bounds and extra four-tire
 service. The local numerical answer assumes unchanged conditions and does not
@@ -14,7 +32,7 @@ The new frozen check reconstructs an invented request, learns fuel from invented
 laps and uses the real confirmation owner/local-answer/withdrawal path. It does
 not use an SDK transport, provider or audio endpoint.
 
-The unsigned EXE passed **26 frozen checks** with a system-only child PATH and
+That unsigned EXE passed **26 frozen checks** with a system-only child PATH and
 saved keys removed. Its size and SHA-256 matched the build receipt. Computer
 Use checked the packaged two-row shortcuts, scrolling, local unavailable
 answer and settings notice; the synthetic window closed normally. The minimum

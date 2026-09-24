@@ -51,10 +51,51 @@ required running dependency. The final goal remains active and unaccepted.
 | Tire-model holdout validation | Offline source/CLI; invented-data checks | Frozen-model prediction on source-disjoint stints, explicit car/setup/condition bindings and exact report reconstruction. Not source authentication, statistical coverage, native model admission or real tire calibration. |
 | Native tire-calibration preflight | Packaged session-only context matching; synthetic checks | Parked pinned-request verification, owned car/setup/event binding, current compound/weather checks and source/setup withdrawal. Not current tire belief, live model admission or a tire recommendation. |
 | Conditional next-stint tire benefit | Native local calculation; invented-data checks | Frozen model plus driver-confirmed origin, whole-stint age/fuel bounds and extra four-tire service yield a net time interval. Not wear, leave-tire safety, mapped rejoin, rule-aware race optimization or actual calibration. |
+| Same-action pit briefing | Native local integration; invented-data checks | Actual mapped dose, separate service traffic states and complete-lap tire gain share one action. Partial-lap benefit and full-stint net gain remain unknown; no ranking, wear claim or live acceptance. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Same-action mapped pit briefing
+
+**综合进站 / 综合进站方案** now joins a mapped action's fuel, service and
+traffic with the supported complete-lap portion of its conditional tire gain.
+It does not join by an unrelated whole-lap endpoint name or subtract post-exit
+tire gain from the immediate rejoin loss. Each service keeps its own traffic
+state; unavailable tire or traffic evidence does not erase independent facts.
+
+The current historical model has no spatial partial-lap evidence. Head/tail
+segments remain explicitly unmodeled; there is no whole-stint net gain, optimal
+ranking or keep/change safety judgment. Local PTT, mandatory provider limits,
+selected-evidence withdrawal and fixed fault isolation are included. The new
+frozen path exercises real owners with invented fuel/calibration/confirmation
+inputs. See [the calculation and limits](LIVE_PIT_BRIEFING.md).
+
+The voice summary is split into a short fuel/service budget and three optional
+local subquestions: **综合换胎收益**, **综合仅加油交通**, **综合换胎交通**.
+Each takes fresh evidence, not a locked multi-question plan. Four source replies
+synthesized to memory in about 8.14–8.23 seconds; selected-device playback,
+different voices and end-to-end latency are not verified by that measurement.
+The rebuilt unsigned EXE passed **28 frozen checks**, including the numerical
+path and a 9.5-second per-reply memory-only speech bound. Artifact hash/size
+matched its receipt; Computer Use checked the final native shortcut, scroll and
+unavailable answer, then closed the synthetic window normally. No existing
+installation or settings were replaced.
+
+Validation adds **36 invented briefing tests, one isolated native scenario and
+one overlong-speech rejection case**. Final regression with `uv` on the child
+PATH passed **3,510 tests, 44 skipped** in **728.43 s**, including both locked-wheel
+checks. Skips require absent data, private deployment, platform capabilities or
+explicit local-speech opt-in. An earlier run identified the old 41-fact test
+ceiling: the new seven-field allowlist raises it to 48 while retaining the
+existing 18,000-byte summary bound and privacy checks. Both 20 Hz and 60 Hz
+end-to-end cases now pass. Source/quality/admission thresholds were not relaxed.
+Ruff and public-safety including history passed; this remains synthetic/software
+evidence, not a real calibration or driving acceptance result.
+
+Full calibration, rule-aware endurance decisions and hardware/in-car/VR
+acceptance remain open. The full goal remains active, not completed.
 
 ## Conditional next-stint tire benefit
 

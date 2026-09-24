@@ -91,5 +91,8 @@ numerical answer followed by withdrawal. It uses no real SDK, provider or audio
 hardware. No authentic calibration is shipped.
 
 Real reviewed calibration, actual in-car numerical accuracy, selected-device
-hearing/VR performance, mapped service/rejoin integration and event-rule-aware
-endurance decisions remain open. The full product goal remains active.
+hearing/VR performance and full event-rule-aware endurance decisions remain open.
+The separate [same-action briefing](LIVE_PIT_BRIEFING.md) now combines mapped
+service/rejoin and supported complete-lap tire gains, without transplanting this
+whole-lap comparison or inventing missing partial-lap benefit. The full product
+goal remains active.

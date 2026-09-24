@@ -182,6 +182,8 @@ def test_build_script_bounds_outputs_and_checks_frozen_synthetic_receipt():
         "'PINNED_LOCAL_STT_MODEL_HASHES'",
         "'CHINESE_SYNTHETIC_TTS_TO_STT'",
         "'CHINESE_TIRE_REVIEW_TTS_TO_STT'",
+        "'CHINESE_PIT_BRIEFING_TTS_DURATION'",
+        "'SYNTHETIC_SAME_ACTION_PIT_BRIEFING'",
         "'SYNTHETIC_TIRE_VOICE_CONFIRMATION'",
         "'SYNTHETIC_PROXIMITY_TRANSITIONS'",
         "'SYNTHETIC_LEARNED_FUEL_QUERY'",

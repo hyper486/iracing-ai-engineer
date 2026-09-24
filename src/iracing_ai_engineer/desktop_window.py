@@ -857,7 +857,7 @@ class DesktopWindow:
             ("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
             ("问配速", "配速变化"), ("问出站", "出站预测"),
             ("问换胎耗时", "换胎会多花多久"), ("问换胎收益", "比较换胎收益"),
-            ("问耗时", "这次进站用了多久"),
+            ("问耗时", "这次进站用了多久"), ("综合进站", "综合进站方案"),
         )):
             self._button(stint_buttons, label, lambda q=question: self._quick(q),
                          question=True).grid(row=index // 4, column=index % 4,

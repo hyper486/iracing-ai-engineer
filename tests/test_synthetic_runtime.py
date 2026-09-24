@@ -31,9 +31,14 @@ def test_actual_numerical_pipeline_reaches_all_local_features_without_io(monkeyp
         context = original_context(snapshot)
         # The combined stop/coaching/stint features add allowlisted fact IDs,
         # not raw lap traces, identities or unchecked source strings.
-        # Two endpoint service facts + a short service answer, and two extra
-        # rejoin variants, extend the old 36-fact bound by at most five.
-        assert len(context["facts"]) <= 41
+        # The mapped briefing adds at most seven fixed facts to the prior 41:
+        # four short voice views, two action details, one mandatory limit.
+        briefing = {item["id"] for item in context["facts"]
+                    if item["id"].startswith("pit_briefing.")}
+        assert briefing <= {"pit_briefing.brief", "pit_briefing.tires_brief",
+            "pit_briefing.fuel_traffic_brief", "pit_briefing.tire_traffic_brief",
+            "pit_briefing.early", "pit_briefing.late", "pit_briefing.limits"}
+        assert len(context["facts"]) <= 48
         encoded = json.dumps(context, allow_nan=False)
         assert len(encoded) < 18_000 and "SYNTHETIC_SECRET" not in encoded
         assert "SessionTick" not in encoded and "synthetic-runtime-only" not in encoded

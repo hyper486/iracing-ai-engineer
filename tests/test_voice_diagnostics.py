@@ -36,15 +36,18 @@ def test_invalid_synthetic_wav_fails(kwargs):
         diagnostics.wav_to_pcm(wav(**kwargs))
 
 
-@pytest.mark.parametrize("accepted", [True, False])
-def test_voice_check_closes_local_worker_without_starting_io(monkeypatch, accepted):
+@pytest.mark.parametrize("accepted,duration,passed", [(True, .1, True),
+                                                     (False, .1, False), (True, 10., False)])
+def test_voice_check_closes_local_worker_without_starting_io(
+    monkeypatch, accepted, duration, passed,
+):
     calls = []
 
     class Speech:
         def synthesize(self, text):
             calls.append("synthesize")
             self.text = text
-            return wav()
+            return wav(seconds=duration)
 
         def recognize(self, pcm, culture):
             calls.append("recognize")
@@ -59,9 +62,12 @@ def test_voice_check_closes_local_worker_without_starting_io(monkeypatch, accept
     monkeypatch.setitem(sys.modules, "iracing_ai_engineer.voice_speech",
                         SimpleNamespace(LocalSpeech=Speech))
     monkeypatch.setattr(diagnostics, "_verify_model", lambda: calls.append("verify"))
+    monkeypatch.setattr(diagnostics, "_pit_briefing_phrases", lambda: ["测试"] * 4)
     result = diagnostics.run_voice_self_test()
-    assert calls == ["verify", *(["synthesize", "recognize"] * (6 if accepted else 1)), "close"]
-    assert all(check["status"] == "PASS" for check in result) is accepted
+    extra = 4 if passed else (1 if accepted else 0)
+    assert calls == ["verify", *(["synthesize", "recognize"] * (6 if accepted else 1)),
+                     *(["synthesize"] * extra), "close"]
+    assert all(check["status"] == "PASS" for check in result) is passed
 
 
 def test_voice_cli_is_explicit_and_preserves_synthetic_provenance(monkeypatch, tmp_path):
