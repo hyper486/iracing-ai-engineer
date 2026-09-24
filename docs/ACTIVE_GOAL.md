@@ -88,6 +88,12 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
 - Remaining isolation boundary: SDK access, metadata binding and bounded input
   inspection still run on the reader; Python threads do not isolate the GIL or
   forcibly recover a hung native call. Final shutdown waits for actual release.
+- Implemented: the native reader's unused 10 ms polling budget now uses a short
+  high-resolution sleep instead of an Event timeout. CPU/timer-only diagnostics
+  and synthetic real-reader shutdown/pacing tests cover the change. SDK event
+  behavior, decoder, capture format and 99.9% / 0.1 s quality gates are unchanged;
+  stop during the pause waits for the requested sleep and scheduling. Actual
+  in-car/VR collection rate remains unmeasured. See [the timing boundary](SDK_READER_PACING.md).
 - Implemented: exact routine fuel questions use local facts without provider
   waits or budget use, including PTT while an older cloud answer is pending.
   Fresh observations are separate from learned range; finish deficits and

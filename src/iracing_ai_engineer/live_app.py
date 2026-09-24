@@ -14,6 +14,7 @@ import json
 import math
 import re
 import threading
+import time
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 from dataclasses import replace
@@ -925,6 +926,20 @@ def _start_analysis(state, config, identifier, tick_rate, descriptors, worker_fa
     return worker
 
 
+def _pace_reader(stop, began, clock, sleeper):
+    """Fill only the unused 10 ms polling budget, without a coarse Event timeout.
+
+    Python 3.12 sleep uses a high-resolution Windows timer. Never busy-spin or
+    change system timer settings. Stop is checked before sleeping and by the
+    reader immediately afterwards. A stop during sleep cannot interrupt it;
+    the request is capped at 10 ms, not a promise of actual scheduling latency.
+    SDK event waits and the interruptible disconnected backoff stay separate.
+    """
+    remaining = min(0.01, 0.01 - (clock() - began))
+    if remaining > 0 and not stop.is_set():
+        sleeper(remaining)
+
+
 def run_reader(
     state: AppState,
     stop: threading.Event,
@@ -935,6 +950,7 @@ def run_reader(
     record_directory: Path | None = None,
     record_max_bytes: int = 4 * 1024**3,
     worker_factory: Callable = FrameWorker,
+    sleeper: Callable[[float], None] = time.sleep,
 ) -> None:
     """One SDK owner and at most one worker per slow lane; never join in the loop.
 
@@ -1064,7 +1080,7 @@ def run_reader(
                     else:
                         active_analysis.submit((projected, session_type, observed, track_length_mm),
                                                size=size, observed_at=observed)
-                stop.wait(max(0.0, 0.01 - (clock() - began)))
+                _pace_reader(stop, began, clock, sleeper)
             orderly = True
         except SdkProbeUnavailable:
             state.connection("DISCONNECTED" if connected_once else "WAIT_SIM")

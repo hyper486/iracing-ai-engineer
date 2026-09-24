@@ -227,6 +227,74 @@ class PacedWorker(FrameWorker):
         assert self.join(3)
 
 
+class PollingSdk(FakeSdk):
+    """Invented 60 Hz clock, immediate reads and 1.5 ms work; no SDK event model."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.ticks = []
+
+    def read_frozen(self, fields):
+        self.read_count += 1
+        tick = math.floor(self.clock() * 60 + 1e-8)
+        self.ticks.append(tick)
+        self.clock.now += .0015
+        values = _values(tick)
+        if self.stop_on_last and self.read_count == self.frame_count:
+            self.stop.stopped = True
+        return RawSdkFrame(
+            buffer_tick=tick, session_info_update=1,
+            values={name: values[name] for name in fields}, sim_mode_raw="full",
+            captured_monotonic_s=self.clock(),
+        )
+
+
+def test_reader_pacing_with_invented_clock_exposes_coarse_timeout_gaps():
+    def run(*, coarse):
+        clock, stop = Clock(), Stop()
+        clock.now = 0.0
+        state = live_app.AppState(clock=clock)
+        sdk = PollingSdk(clock, stop, 120, stop_on_last=True)
+        requests = []
+
+        def sleep(seconds):
+            requests.append(seconds)
+            clock.now += math.ceil(seconds / .015625) * .015625 if coarse else seconds
+
+        live_app.run_reader(
+            state, stop, LiveFuelConfig(), transport_factory=lambda: sdk,
+            clock=clock, worker_factory=PacedWorker, sleeper=sleep,
+        )
+        assert sdk.closed and state.snapshot()["connection"] == "STOPPED"
+        assert len(requests) == 119 and all(0 < value <= .01 for value in requests)
+        assert stop.retries == [] and state.report()["live_acceptance"] is False
+        return set(sdk.ticks)
+
+    precise, coarse = run(coarse=False), run(coarse=True)
+    assert precise == set(range(max(precise) + 1))
+    assert coarse < set(range(max(coarse) + 1))
+
+
+def test_reader_stop_during_short_sleep_closes_before_reading_another_frame():
+    clock, stop = Clock(), Stop()
+    clock.now = 0.0
+    state = live_app.AppState(clock=clock)
+    sdk = PollingSdk(clock, stop, 100)
+    requests = []
+
+    def sleep(seconds):
+        requests.append(seconds)
+        stop.stopped = True
+
+    live_app.run_reader(
+        state, stop, LiveFuelConfig(), transport_factory=lambda: sdk,
+        clock=clock, worker_factory=PacedWorker, sleeper=sleep,
+    )
+    assert requests == [pytest.approx(.0085)]
+    assert sdk.read_count == 1 and sdk.closed
+    assert state.snapshot()["connection"] == "STOPPED" and stop.retries == []
+
+
 def _run(specs, *, record_directory=None, record_max_bytes=32 * MIB):
     clock, stop = Clock(), Stop()
     state = ObservedState(clock)

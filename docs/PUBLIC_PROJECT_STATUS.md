@@ -32,6 +32,7 @@ required running dependency. The final goal remains active and unaccepted.
 | Native VR voice | Implemented; hardware/race acceptance pending | Opt-in background PTT, input/output selectors or refreshed Windows defaults, local Whisper STT and Windows TTS, interruption and optional guarded low-fuel facts. No continuous listening or raw-audio upload. |
 | Tick-level proximity | Detector plus opt-in native audio in the local trial build | Independent fixed-phrase cache, priority cancellation, fast snapshots and bounded playback diagnostics; synthetic/local-synthesis checks only, no hardware or in-car acceptance. |
 | Reader / analysis / recording isolation | Bounded worker lanes in source | Recorder and analysis failures no longer synchronously block the SDK reader; explicit incomplete prefixes, generation guards and streaming event digests. Not GIL isolation or a hardware latency guarantee. |
+| Native reader pacing | Packaged short high-resolution polling pause | Unused 10 ms budget no longer uses an Event timeout; SDK event waits and quality gates are unchanged. Idle timer and synthetic checks are not live sample-rate acceptance. |
 | Routine current-fuel questions | Packaged local trial; synthetic checks | Current observations, learned range and conditional race fuel budgets bypass cloud waits; not live pit tactics or in-car acceptance. |
 | Current physical traffic / pit-state questions | Packaged local trial; synthetic checks | Bound ahead/behind distance, player permission and flag facts in native display/PTT; independent of fuel readiness, not time gaps or optimal pit/rejoin advice. |
 | Incremental recent-lap coaching | Packaged local trial; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
@@ -45,6 +46,32 @@ required running dependency. The final goal remains active and unaccepted.
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Native reader pacing correction
+
+The connected reader now sleeps only for its unused 10 ms minimum-poll budget,
+using the Python runtime's short high-resolution sleep. The stop Event still
+interrupts disconnected retries. Stop during a short sleep is observed afterwards;
+the requested pause is capped at 10 ms, not a hard scheduling/shutdown deadline.
+No system timer settings, SDK data-event semantics, field decoder, recording
+format or lap-quality thresholds are changed.
+
+An anonymous-memory diagnostic measured roughly 0.25 ms median field decoding,
+so no replacement decoder was introduced. A separate idle timer comparison
+measured about 15.07 ms median for the former 10 ms Event timeout versus 10.09 ms
+for the new pause. These are local timer measurements, not current game sampling
+rate or proof of the historical missing-tick cause. See
+[the diagnostic, tests and remaining acceptance](SDK_READER_PACING.md).
+
+The rebuilt unsigned local EXE passed all **18 frozen checks** with a system-only
+child PATH and no provider credentials. These exercise numerical, Tk/runtime and
+memory-only voice paths, not a real microphone/speaker or simulator. Installed
+copies, shortcuts and saved preferences remain unchanged.
+
+Full regression passed **3,073 tests, with 44 skips**, in **593.01 seconds**.
+Skips retain the existing data, platform, private-deployment and opt-in boundaries.
+Ruff, public-safety including history and exact staged-diff checks passed. No
+live acquisition, hardware hearing or VR acceptance is inferred from these gates.
 
 ## Native sealed capture recomputation
 

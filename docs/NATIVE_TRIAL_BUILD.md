@@ -5,6 +5,14 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
+The current rebuilt EXE also corrects connected-reader short polling waits, with an
+anonymous-memory CPU benchmark and optional idle timer comparison. It does not
+change SDK event waits or lap-quality thresholds; the measured timer improvement
+is not a real in-car/VR sampling-rate result. See [the timing boundary](SDK_READER_PACING.md).
+This pacing rebuild passed the same **18 frozen checks** using a system-only
+child PATH and no provider credentials. No UI layout change or new real-device
+acceptance is claimed; installed copies, shortcuts and saved settings are untouched.
+
 The rebuilt trial includes the offline reviewed tire-origin v2 correction and
 conditional mapped-rejoin lane, plus historical pit-visit observations and the
 reviewed settings draft. The new **采集复盘** tab also recomputes completed raw
