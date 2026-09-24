@@ -66,10 +66,14 @@ def test_native_voice_delegates_without_recursive_snapshot_or_key_access(
     finished = threading.Event()
 
     class Voice:
-        def __init__(self, source, submit, store, *, clock, spotter_source):
+        def __init__(self, source, submit, store, *, clock, spotter_source, audit_sink):
             self.source = source
             self.spotter_source = spotter_source
             self.submit = submit
+            self.audit_sink = audit_sink
+
+        def trace_state(self):
+            pass
 
         def start(self):
             calls.append("start")
@@ -112,6 +116,131 @@ def test_voice_runtime_is_opt_in_in_controller_tests(tmp_path, created):
     assert "voice" not in controller.snapshot()
     with pytest.raises(ValueError, match="VOICE_UNAVAILABLE"):
         controller.voice_press()
+
+
+def test_native_recording_switch_owns_one_bounded_trial_per_enabled_interval(tmp_path, created):
+    import json
+
+    from iracing_ai_engineer.trial_replay import replay_trial
+
+    reader = Reader()
+    controller = created(store=Store(tmp_path), reader=reader)
+    controller.start()
+    assert reader.entered.wait(1)
+    wait_for(lambda: controller.snapshot()["telemetry"]["trial_audit"]["status"] == "RUNNING")
+    controller.set_recording(False)
+    wait_for(lambda: not controller._configuring)
+    assert controller._trial is None
+    [first] = (tmp_path / "trials").glob("*.jsonl")
+    assert replay_trial(first)["status"] == "NO_DETECTOR_DATA"
+    assert controller.snapshot()["telemetry"]["trial_audit"]["enabled"] is False
+    used = first.stat().st_size
+    controller.set_recording(True)
+    wait_for(lambda: not controller._configuring)
+    assert controller._trial.snapshot()["max_file_bytes"] == 1024**3 - used
+    controller.close()
+    wait_for(controller.is_closed)
+    paths = list((tmp_path / "trials").glob("*.jsonl"))
+    assert len(paths) == 2 and reader.max_active == 1
+    assert controller._trial_bytes == sum(path.stat().st_size for path in paths)
+    assert all(json.loads(path.read_text().splitlines()[-1])["record"] == "footer"
+               for path in paths)
+
+
+def test_disabled_recording_creates_no_trial_directory(tmp_path, created):
+    controller = created(store=Store(tmp_path, DesktopSettings(recording_enabled=False)),
+                         reader=Reader())
+    controller.start()
+    controller.close()
+    wait_for(controller.is_closed)
+    assert not (tmp_path / "trials").exists()
+
+
+def test_exhausted_trial_budget_keeps_raw_reader_running(tmp_path, created):
+    reader = Reader()
+    controller = created(store=Store(tmp_path), reader=reader)
+    controller._trial_bytes = 1024**3
+    controller.start()
+    assert reader.entered.wait(1)
+    assert controller.snapshot()["telemetry"]["trial_audit"]["status"] == "LIMIT_REACHED"
+    assert reader.calls[0]["record_directory"] is not None and controller._trial is None
+    assert not (tmp_path / "trials").exists()
+
+
+def test_failed_journal_is_not_reallocated_by_repeated_recording_toggles(tmp_path, created):
+    controller = created(store=Store(tmp_path), reader=Reader())
+    controller.start()
+    wait_for(lambda: controller._trial.snapshot()["status"] == "RUNNING")
+    controller._trial.fail()
+    controller.set_recording(False)
+    wait_for(lambda: not controller._configuring)
+    assert controller._trial_failed
+    controller.set_recording(True)
+    wait_for(lambda: not controller._configuring)
+    assert controller._trial is None
+    assert controller.snapshot()["telemetry"]["trial_audit"]["status"] == "ERROR"
+    assert len(list((tmp_path / "trials").glob("*.jsonl"))) == 1
+
+
+def test_trial_close_runs_off_ui_and_waits_for_actual_file_owner_exit(
+    monkeypatch, tmp_path, created,
+):
+    from iracing_ai_engineer import trial_audit
+
+    entered, release = threading.Event(), threading.Event()
+    original = trial_audit._Journal.close
+
+    def slow_close(self):
+        entered.set()
+        assert release.wait(4)
+        original(self)
+
+    monkeypatch.setattr(trial_audit._Journal, "close", slow_close)
+    reader = Reader()
+    controller = created(store=Store(tmp_path), reader=reader)
+    controller.start()
+    controller.close()
+    assert entered.wait(1)
+    try:
+        before = time.perf_counter()
+        value = controller.snapshot()
+        assert time.perf_counter() - before < 0.3
+        assert value["lifecycle"] == "STOPPING" and not controller.is_closed()
+        assert controller._state._trial is None  # No producers after seal began.
+    finally:
+        release.set()
+    wait_for(controller.is_closed)
+    assert controller._trial is None and controller._last_trial["done"] is True
+
+
+def test_replay_runs_as_background_job_and_exposes_no_path_or_provider_call(
+    monkeypatch, tmp_path, created,
+):
+    from iracing_ai_engineer import trial_replay
+
+    entered, release = threading.Event(), threading.Event()
+
+    def delayed(path, **_kwargs):
+        entered.set()
+        assert release.wait(3)
+        raise trial_replay.TrialReplayError("TRIAL_FILE_CHANGED")
+
+    monkeypatch.setattr(trial_replay, "replay_trial", delayed)
+    controller = created(store=Store(tmp_path), reader=Reader())
+    controller.start()
+    controller.replay_trial(tmp_path / "private file.jsonl")
+    assert entered.wait(1)
+    try:
+        value = controller.snapshot()
+        assert value["lifecycle"] == "RUNNING"
+        assert value["engineer"]["requests_used"] == 0
+    finally:
+        release.set()
+    wait_for(lambda: not controller._configuring)
+    report = controller.snapshot()["trial_report"]
+    assert report == {"status": "REJECTED", "reason": "TRIAL_FILE_CHANGED",
+                      "heard": False, "live_acceptance": False}
+    assert "private file" not in str(controller.snapshot())
 
 
 @pytest.fixture

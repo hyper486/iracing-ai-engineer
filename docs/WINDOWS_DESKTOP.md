@@ -119,6 +119,13 @@ remains available separately; it is not the native UI.
   The record checkbox can disable it; toggling safely reconnects the single
   reader and resets fuel learning. Settings/key storage and capture destinations
   reject links and repository paths, including in the frozen executable.
+- The same recording preference now starts a separate private proximity/audio
+  journal in `trials`, bounded to 1 GiB per application run. It saves fixed
+  numeric/enum diagnostics, not mic audio, recognized text, names or credentials.
+  Its health is shown separately; a logging fault does not stop proximity.
+  **模型与本地设置 → 回放近车诊断日志…** silently recomputes completed intervals
+  in the background. See [the trial replay guide](PRIVATE_TRIAL_REPLAY.md) for
+  incomplete prefixes, optional capture-byte checks and hearing limitations.
 - Close a separately running legacy browser worker before switching to the
   EXE, to avoid two independent recorders. The native instance lock prevents a
   second native window in the same login session, not a separate CLI process.

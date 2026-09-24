@@ -15,6 +15,7 @@ import math
 import re
 import threading
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -42,6 +43,7 @@ from .runtime_clock import monotonic_now
 from .sdk_probe import SdkProbeUnavailable, WindowsPyirsdkTransport
 from .spotter import SPOTTER_FIELDS, ProximitySpotter
 from .telemetry import SourceKind
+from .trial_audit import detector_reset, frame_projection
 
 FRESHNESS_S = 2.0
 LIMITATIONS = [
@@ -162,6 +164,8 @@ class AppState:
         self._situation_revision = 0
         self._spotter = ProximitySpotter()
         self._spotter_failed = False
+        self._trial = None
+        self._trace_generation = None
         self._workers = {}
         self._recording_base_bytes = 0
         self._value: dict[str, Any] = {
@@ -200,13 +204,66 @@ class AppState:
             self._generation += 1
             if status == "CONNECTED":
                 self._summary["connections"] += 1
+                self._trace_generation = None
             else:
-                self._spotter.unavailable(status, now=self.clock())
+                self._spotter_step("UNAVAILABLE", status=status)
 
     def start_spotter(self, tick_rate_hz: int) -> None:
         with self._lock:
             self._spotter = ProximitySpotter(tick_rate_hz=tick_rate_hz)
             self._spotter_failed = False
+            self._trace_generation = self._generation
+            if self._trial is not None:
+                self._trial.offer("detector", detector_reset(self._generation, tick_rate_hz))
+
+    def attach_trial(self, journal):
+        """Attach only between reader runs; no file I/O under the state lock."""
+        with self._lock:
+            self._trial = journal
+            self._trace_generation = None
+
+    def audit_audio(self, payload):
+        with self._lock:
+            journal = self._trial
+        if journal is not None:
+            journal.offer("audio", payload)
+
+    def audit_capture(self, payload):
+        with self._lock:
+            journal = self._trial
+        if journal is not None:
+            journal.offer("capture", payload)
+
+    def _spotter_step(self, operation, *, frame=None, status=None):
+        now = self.clock()
+        cursor = self._spotter.trace_cursor() if self._trial is not None else None
+        raised = True
+        try:
+            if operation == "FEED":
+                result = self._spotter.feed(frame, now=now)
+            elif operation == "UNAVAILABLE":
+                result = self._spotter.unavailable(status, now=now)
+            else:
+                result = self._spotter.snapshot(now=now)
+            raised = False
+            return result
+        finally:
+            if self._trial is not None and self._trace_generation is not None:
+                try:
+                    decisions = self._spotter.audit_since(cursor[0])
+                    # Silent polls only advance a high-water clock. Carry that
+                    # clock into the next recorded operation instead of logging
+                    # every UI/audio poll or losing timeout reproducibility.
+                    if operation != "TIME" or decisions or raised or cursor[1] is None:
+                        self._trial.offer("detector", {
+                            "operation": operation, "generation": self._trace_generation,
+                            "now": now, "prior_clock": cursor[1], "raised": raised,
+                            "frame": frame_projection(frame) if frame is not None else None,
+                            "unavailable_status": status, "decisions": decisions,
+                            "event_count": self._spotter.trace_cursor()[2],
+                        })
+                except Exception:
+                    self._trial.fail()
 
     def feed_spotter(self, frame) -> None:
         """Fast, non-audible branch before recording and slower display analysis.
@@ -220,10 +277,10 @@ class AppState:
             try:
                 # A snapshot may advance the detector while this caller waits
                 # for the lock. Sample time here, not before acquiring it.
-                self._spotter.feed(frame, now=self.clock())
+                self._spotter_step("FEED", frame=frame)
             except Exception:
                 self._spotter_failed = True
-                self._spotter.unavailable("ERROR", now=self.clock())
+                self._spotter_step("UNAVAILABLE", status="ERROR")
 
     def spotter_audit(self) -> list[dict]:
         with self._lock:
@@ -233,7 +290,7 @@ class AppState:
         """Fast consumer contract: no fuel/display freshness or LLM dependency."""
         with self._lock:
             return {
-                "spotter": self._spotter.snapshot(now=self.clock()),
+                "spotter": self._spotter_step("TIME"),
                 "generation": self._generation, "connection": self._value["connection"],
                 "source_mode": self._value["source_mode"],
             }
@@ -350,7 +407,7 @@ class AppState:
             value["workers"] = workers
             if recording is not None:
                 value["recording"] = recording
-            value["spotter"] = self._spotter.snapshot(now=self.clock())
+            value["spotter"] = self._spotter_step("TIME")
             age = None if self._updated is None else max(0.0, self.clock() - self._updated)
             analysis = workers.get("analysis")
             if analysis is not None and (
@@ -383,7 +440,7 @@ class AppState:
                     "recording_bytes": (self._summary["recording_bytes"] if recording is None
                                         else recording["bytes"]),
                     "limitations": list(LIMITATIONS),
-                    "spotter": self._spotter.snapshot(now=self.clock())}
+                    "spotter": self._spotter_step("TIME")}
 
 
 def _csp() -> str:
@@ -577,11 +634,22 @@ class _LiveAnalysis:
 
 
 class _RecordingSink:
-    def __init__(self, directory, *, identifier, max_bytes):
+    def __init__(self, directory, *, identifier, max_bytes, audit=None, generation=0):
         from .live_app_recording import AppRecorder
 
         self._recorder = AppRecorder(directory, source_id="local-fuel-app",
                                      session_id=identifier, max_bytes=max_bytes)
+        self._audit, self._generation, self._terminal = audit, generation, False
+        self._trace("OPEN")
+
+    def _trace(self, status):
+        # Diagnostic failure is not permission to fail or alter raw capture.
+        if self._audit is not None:
+            with suppress(Exception):
+                self._audit({"status": status, "generation": self._generation,
+                             "capture_id": self._recorder.capture_id,
+                             "bytes": self.byte_count,
+                             "sha256": self._recorder.capture_sha256})
 
     @property
     def byte_count(self):
@@ -591,10 +659,17 @@ class _RecordingSink:
         self._recorder.ingest(sample)
 
     def finish(self):
-        self._recorder.finish()
+        receipt = self._recorder.finish()
+        self._trace("COMPLETE" if receipt is not None else "EMPTY")
+        self._terminal = True
 
     def close(self):
-        self._recorder.close()
+        try:
+            self._recorder.close()
+        finally:
+            if not self._terminal:
+                self._trace("INCOMPLETE")
+                self._terminal = True
 
 
 def _start_analysis(state, config, identifier, tick_rate, descriptors, worker_factory, clock):
@@ -671,9 +746,11 @@ def run_reader(
                         recorded_bytes += previous["bytes"]
                 if not recording_disabled:
                     active_recording = worker_factory(
-                        lambda identifier=identifier, remaining=record_max_bytes - recorded_bytes:
+                        lambda identifier=identifier, remaining=record_max_bytes - recorded_bytes,
+                        generation=state.generation:
                             _RecordingSink(record_directory, identifier=identifier,
-                                           max_bytes=remaining),
+                                           max_bytes=remaining, audit=state.audit_capture,
+                                           generation=generation),
                         name="private-recording", clock=clock,
                     )
                     recording_worker = active_recording

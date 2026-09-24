@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from dataclasses import replace
@@ -12,6 +13,7 @@ import iracing_ai_engineer.collector as collector_module
 import iracing_ai_engineer.live_app_recording as recording
 from iracing_ai_engineer.adapters import open_collector_jsonl
 from iracing_ai_engineer.collector import CollectorConsistencyError, CollectorSample
+from iracing_ai_engineer.live_app import _RecordingSink
 from iracing_ai_engineer.live_app_recording import AppRecorder
 from iracing_ai_engineer.sdk_probe import RawSdkFrame, VariableDescriptor
 
@@ -79,6 +81,8 @@ def test_complete_clip_is_strictly_replayable_and_receipt_is_aggregate_only(tmp_
     assert receipt["frame_record_count"] == 2
     assert receipt["record_count"] == len(_records(tmp_path))
     assert receipt["byte_count"] == path.stat().st_size == recorder.byte_count
+    assert recorder.capture_sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert path.name == f"capture-{recorder.capture_id}.jsonl"
     assert all(type(value) is int for key, value in receipt.items() if key != "completion_status")
     assert "PRIVATE DRIVER" not in path.read_text(encoding="utf-8")
     assert "DriverInfo" not in _records(tmp_path)[2]["payload"]
@@ -89,6 +93,41 @@ def test_complete_clip_is_strictly_replayable_and_receipt_is_aggregate_only(tmp_
     recorder.close()
     with pytest.raises(RuntimeError):
         recorder.ingest(_sample(3))
+
+
+@pytest.mark.parametrize("finish,empty,expected", [
+    (True, False, "COMPLETE"), (False, False, "INCOMPLETE"), (True, True, "EMPTY"),
+])
+def test_recording_sink_emits_linkable_diagnostics_only(tmp_path, finish, empty, expected):
+    rows = []
+    sink = _RecordingSink(tmp_path, identifier="synthetic-session", max_bytes=1024**2,
+                          audit=rows.append, generation=2)
+    if not empty:
+        sink.process(_sample())
+    if finish:
+        sink.finish()
+    sink.close()
+    sink.close()
+    assert [row["status"] for row in rows] == ["OPEN", expected]
+    [path] = tmp_path.glob("capture-*.jsonl")
+    assert rows[1]["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert rows[1]["bytes"] == path.stat().st_size
+    assert rows[1]["generation"] == 2
+    assert "synthetic-session" not in str(rows) and "PRIVATE" not in str(rows)
+
+
+def test_recording_sink_diagnostic_failure_does_not_break_capture(tmp_path):
+    def fail(_payload):
+        raise RuntimeError("private detail")
+
+    sink = _RecordingSink(tmp_path, identifier="synthetic-session", max_bytes=1024**2,
+                          audit=fail, generation=1)
+    sink.process(_sample())
+    sink.finish()
+    sink.close()
+    [path] = tmp_path.glob("capture-*.jsonl")
+    with open_collector_jsonl(path) as run:
+        assert len(list(run.samples)) == 1
 
 
 def test_close_keeps_prefix_without_complete_and_cannot_be_finished_later(tmp_path):

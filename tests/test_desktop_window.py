@@ -15,6 +15,7 @@ from iracing_ai_engineer.desktop_window import (
     DesktopPresenter,
     DesktopWindow,
     format_number,
+    trial_report_text,
     validate_question,
     voice_choices,
 )
@@ -76,6 +77,31 @@ def test_numeric_formatting_and_question_validation() -> None:
     assert format_number(3.14159, " L/圈", 2) == "3.14 L/圈"
     assert validate_question("  现在有什么证据？  ") == "现在有什么证据？"
     assert validate_question("字" * 500) == "字" * 500
+
+
+def test_trial_report_fixed_text_separates_replay_playback_and_hearing():
+    report = {"status": "REPLAY_MATCH", "frames": 300, "decisions": {"CANDIDATE": 2},
+              "audio_outcomes": {"ATTEMPTED": 1, "PLAYBACK_STARTED": 1},
+              "event_results": {"DETECTED_NO_RECORDED_ATTEMPT": 1},
+              "health_transitions": {"SDK_SPOTTER_OFF": 1}, "unbound_audio_records": 0,
+              "private": "NEVER DISPLAY THIS"}
+    text = trial_report_text(report)
+    assert "已调用音频输出：1" in text and "未记录播放尝试：1" in text
+    assert "不等于功能验收" in text and "不能证明人耳听到" in text
+    assert "关闭状态" in text and "NEVER DISPLAY THIS" not in text
+    assert "不完整" in trial_report_text({"status": "INCOMPLETE_PREFIX"})
+    assert "失败" in trial_report_text({"status": "REJECTED", "reason": "PRIVATE ERROR"})
+    assert "PRIVATE ERROR" not in trial_report_text(
+        {"status": "REJECTED", "reason": "PRIVATE ERROR"})
+
+
+def test_trial_fault_is_visible_without_withdrawing_independent_proximity():
+    value = _snapshot()
+    value["telemetry"]["spotter"] = {"status": "READY"}
+    value["telemetry"]["trial_audit"] = {"status": "ERROR"}
+    view = DesktopPresenter().project(value, now=10)
+    assert "日志故障" in view.recording
+    assert "判定数据就绪" in view.spotter
 
 
 def test_proximity_diagnostic_readiness_is_never_presented_as_working_audio():
@@ -631,6 +657,27 @@ def _native_voice_delayed_initial_settings(native_window) -> None:
     assert not window.voice_enabled_var.get()  # Subsequent polls preserve edits.
 
 
+def _native_trial_replay(native_window):
+    from unittest.mock import patch
+
+    _, controller, window = native_window
+    paths = []
+    controller.replay_trial = paths.append
+    with patch("iracing_ai_engineer.desktop_window.filedialog.askopenfilename",
+               return_value="C:/Users/racer/trial-synthetic.jsonl"):
+        window._load_trial()
+    assert paths == [Path("C:/Users/racer/trial-synthetic.jsonl")]
+    assert not controller.questions and not controller.voice_calls
+    controller.value["trial_report"] = {"status": "INCOMPLETE_PREFIX", "frames": 12}
+    window._poll()
+    assert "日志不完整" in window.trial_text.get("1.0", "end")
+    controller.value["trial_report"] = {"status": "REPLAY_MATCH", "frames": 30,
+                                        "audio_outcomes": {"PLAYBACK_STARTED": 1}}
+    window._poll()
+    assert "已调用音频输出：1" in window.trial_text.get("1.0", "end")
+    assert "不等于功能验收" in window.trial_text.get("1.0", "end")
+
+
 _NATIVE_SCENARIOS = {
     "settings": _native_settings, "question": _native_question,
     "close": _native_close, "validation": _native_validation,
@@ -640,6 +687,7 @@ _NATIVE_SCENARIOS = {
     "voice_errors": _native_voice_errors_and_unavailable,
     "voice_pending": _native_voice_pending_binding_and_lost_snapshot,
     "voice_initialization": _native_voice_delayed_initial_settings,
+    "trial_replay": _native_trial_replay,
 }
 
 

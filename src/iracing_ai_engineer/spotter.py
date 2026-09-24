@@ -13,6 +13,7 @@ import json
 import math
 from collections import Counter, deque
 from dataclasses import asdict, dataclass
+from itertools import islice
 
 from .sdk_probe import RawSdkFrame
 
@@ -267,3 +268,15 @@ class ProximitySpotter:
 
     def audit(self) -> list[dict]:
         return copy.deepcopy(list(self._audit))
+
+    def trace_cursor(self):
+        """Single-owner journal cursor; does not advance detector time."""
+        return self._audit_serial, self._now, self._serial
+
+    def audit_since(self, sequence):
+        if type(sequence) is not int:
+            raise ValueError("SPOTTER_AUDIT_CURSOR_GAP")
+        count = self._audit_serial - sequence
+        if not 0 <= count <= len(self._audit):
+            raise ValueError("SPOTTER_AUDIT_CURSOR_GAP")
+        return copy.deepcopy(list(islice(self._audit, len(self._audit) - count, None)))

@@ -183,6 +183,33 @@ class FakeSdk:
         self.closed = True
 
 
+def test_real_reader_pipeline_links_private_raw_capture_and_detector_replay(tmp_path):
+    from iracing_ai_engineer.trial_audit import TrialAudit
+    from iracing_ai_engineer.trial_replay import replay_trial
+
+    clock, stop = Clock(), Stop()
+    state = live_app.AppState(clock=clock)
+    journal = TrialAudit(tmp_path / "trials", clock=clock)
+    state.attach_trial(journal)
+    sdk = FakeSdk(clock, stop, 12, stop_on_last=True,
+                  value_changes={tick: {"CarLeftRight": 2} for tick in range(1, 13)})
+    try:
+        live_app.run_reader(state, stop, LiveFuelConfig(), transport_factory=lambda: sdk,
+                            clock=clock, record_directory=tmp_path / "captures")
+    finally:
+        state.attach_trial(None)
+        journal.close()
+    assert sdk.closed
+    [path] = (tmp_path / "trials").glob("*.jsonl")
+    report = replay_trial(path, capture_directory=tmp_path / "captures")
+    assert report["status"] == "REPLAY_MATCH" and report["frames"] == 12
+    assert report["decisions"]["CANDIDATE"] == 1
+    assert report["captures"] == {"OPEN": 1, "COMPLETE": 1}
+    assert report["capture_byte_checks"] == {"MATCH": 1}
+    assert report["heard"] is report["live_acceptance"] is False
+    assert b"PRIVATE PERSON" not in path.read_bytes()
+
+
 class PacedWorker(FrameWorker):
     """Synchronize synthetic clock advancement, still using the real worker.
 

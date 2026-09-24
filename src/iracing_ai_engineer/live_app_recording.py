@@ -82,7 +82,8 @@ class AppRecorder:
         # Re-resolve after mkdir too, including Windows junctions. Do not use
         # the original alias when creating the file.
         resolved = _private_directory(resolved)
-        path = resolved / f"capture-{uuid4().hex}.jsonl"
+        self.capture_id = uuid4().hex
+        path = resolved / f"capture-{self.capture_id}.jsonl"
         self._handle = path.open("x+b", buffering=0)
         self._closed = False
         self._failed = False
@@ -110,6 +111,10 @@ class AppRecorder:
     @property
     def byte_count(self) -> int:
         return self._writer.byte_size
+
+    @property
+    def capture_sha256(self) -> str:
+        return self._writer.capture_sha256
 
     def _require_active(self) -> None:
         if self._failed:

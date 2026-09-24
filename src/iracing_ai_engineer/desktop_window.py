@@ -48,6 +48,56 @@ def format_number(value: object, suffix: str = "", digits: int = 1) -> str:
     return f"{value:.{digits}f}{suffix}" if _finite(value) else _DASH
 
 
+def trial_report_text(report: object) -> str:
+    """Fixed report vocabulary: no file contents or provider errors are displayed."""
+    value = _mapping(report)
+    labels = {
+        "REPLAY_MATCH": "近车判定重算一致（不等于功能验收）",
+        "NO_DETECTOR_DATA": "没有采集到可回放的近车输入",
+        "INCOMPLETE_PREFIX": "日志不完整，仅核对已保存前缀，不能确认全程",
+        "REJECTED": "日志校验失败或文件不可用，未接受其结果",
+    }
+    if type(value.get("status")) is not str or value["status"] not in labels:
+        return "选择已结束的本机 trial-*.jsonl 日志；不会播放音频或调用模型。"
+    result = [labels[value["status"]]]
+    if value.get("status") != "REJECTED":
+        outcomes = _mapping(value.get("audio_outcomes"))
+        events = _mapping(value.get("event_results"))
+        decisions = _mapping(value.get("decisions"))
+        for label, count in (
+            ("输入帧", value.get("frames")), ("判定候选", decisions.get("CANDIDATE", 0)),
+            ("尝试播放", outcomes.get("ATTEMPTED", 0)),
+            ("已调用音频输出", outcomes.get("PLAYBACK_STARTED", 0)),
+            ("记录到播放错误", outcomes.get("PLAYBACK_ERROR", 0)),
+            ("音频服务故障", outcomes.get("FAILED", 0)),
+            ("已判定但未记录播放尝试", events.get("DETECTED_NO_RECORDED_ATTEMPT", 0)),
+            ("无法关联的音频记录", value.get("unbound_audio_records")),
+        ):
+            if type(count) is int and 0 <= count <= 2**53:
+                result.append(f"{label}：{count}")
+        reasons = _mapping(value.get("health_transitions"))
+        for code, text in (
+            ("SDK_SPOTTER_OFF", "SDK 近车字段为关闭状态"),
+            ("NOT_DRIVING_ON_TRACK", "未处于本人赛道驾驶状态"),
+            ("FIELD_READ_ERROR", "近车字段读取失败"),
+            ("NO_FRESH_TICK", "近车输入停止更新"),
+        ):
+            if type(reasons.get(code)) is int and reasons[code] > 0:
+                result.append("曾观察到：" + text)
+        audio_reasons = _mapping(value.get("audio_health_records"))
+        for code, text in (
+            ("DISABLED", "近车语音未启用"), ("ZERO_VOLUME", "音量为零"),
+            ("PHRASE_CACHE_FAILED", "短语音准备失败"),
+            ("AUDIO_DEVICE_MISSING", "所选输出设备不可用"),
+            ("AUDIO_DEVICE_AMBIGUOUS", "输出设备选择不唯一"),
+            ("AUDIO_OUTPUT_UNDERRUN", "音频输出中断"),
+        ):
+            if type(audio_reasons.get(code)) is int and audio_reasons[code] > 0:
+                result.append("音频记录曾显示：" + text)
+    result.append("仅本地记录核对；原始采集文件未在此校验，不能证明人耳听到或真实驾驶验收。")
+    return "\n".join(result)
+
+
 def validate_question(question: object) -> str:
     """Mirror the service's bounded text input without sending or saving it."""
     if type(question) is not str:
@@ -273,6 +323,17 @@ class DesktopPresenter:
             record_text = "正在结束上一段记录，当前未录制"
         if _finite(recording.get("bytes")):
             record_text += f" · {recording['bytes'] / 1048576:.1f} MiB"
+        trial = _mapping(telemetry.get("trial_audit"))
+        trial_labels = {
+            "RUNNING": "诊断日志正在记录", "STARTING": "诊断日志初始化中",
+            "ERROR": "诊断日志故障，需重启应用恢复记录；近车判定独立运行",
+            "LIMIT_REACHED": "诊断日志已达容量上限，本段可能不完整",
+            "DRAINING": "诊断日志正在收尾",
+            "COMPLETE": "上段诊断日志已完成，非驾驶验收", "INCOMPLETE": "上段诊断日志不完整",
+            "DISABLED": "诊断日志未启用",
+        }
+        if trial:
+            record_text += "\n" + trial_labels.get(trial.get("status"), "诊断日志状态未知")
         reasons: list[str] = []
         for source_list in (monitor.get("reasons"), fuel.get("reason_codes"),
                             telemetry.get("limitations")):
@@ -666,14 +727,18 @@ class DesktopWindow:
         self._button(parent, "应用模型设置", self._configure).pack(anchor="w", pady=12)
         ttk.Separator(parent).pack(fill="x", pady=12)
         self.recording_check = ttk.Checkbutton(
-            parent, text="将原始遥测记录到本机（隐私数据，不上传）",
+            parent, text="将原始遥测及近车诊断日志记录到本机（隐私数据，不上传）",
             variable=self.recording_var, command=self._recording,
         )
         self.recording_check.pack(anchor="w", pady=4)
         self._controls.append(self.recording_check)
         ttk.Label(parent, text="切换记录会安全重启采集连接；不会启动、关闭或控制 iRacing。\n"
+                  "诊断日志不保存麦克风录音、识别文本或密钥；每次启动最多 1 GiB，原始遥测另计。\n"
                   "语音在“语音与 VR”页单独启用。没有密钥、云端异常或额度耗尽时仍可使用本地解读。",
                   wraplength=920, style="Muted.TLabel").pack(anchor="w", pady=8)
+        self._button(parent, "回放近车诊断日志…", self._load_trial).pack(anchor="w", pady=6)
+        frame, self.trial_text = self._readonly_text(parent, height=10)
+        frame.pack(fill="both", expand=True, pady=6)
 
     def _build_voice(self, parent) -> None:
         self._label(parent, "voice_status", style="Warn.TLabel").pack(anchor="w")
@@ -1003,6 +1068,7 @@ class DesktopWindow:
         self.progress["value"] = view.progress
         self._replace_text(self.issues_text, view.issues)
         self._replace_text(self.answer_text, view.answer_text)
+        self._replace_text(self.trial_text, trial_report_text(snapshot.get("trial_report")))
         all_disabled = self._closing or view.lifecycle in ("STOPPING", "STOPPED")
         for control in self._controls:
             control.state(["disabled"] if all_disabled else ["!disabled"])
@@ -1103,6 +1169,23 @@ class DesktopWindow:
             self.action_var.set("未能加载会话报告，请检查格式和本地服务状态。")
         else:
             self.action_var.set("正在后台验证会话报告。" if path else "已请求清除历史报告。")
+
+    def _load_trial(self) -> None:
+        if self._closing:
+            return
+        directory = getattr(self.controller, "trial_directory", None)
+        name = filedialog.askopenfilename(
+            parent=self.root, title="选择已结束的本机近车诊断日志（不会播放声音）",
+            filetypes=[("本机诊断 JSONL", "trial-*.jsonl")],
+            **({"initialdir": str(directory)} if isinstance(directory, Path) else {}),
+        )
+        if name:
+            try:
+                self.controller.replay_trial(Path(name))
+            except Exception:
+                self.action_var.set("暂时无法回放，请等待当前后台操作完成。")
+            else:
+                self.action_var.set("正在后台核对日志；不播放声音、不调用模型。")
 
     def _recording(self) -> None:
         if self._closing:

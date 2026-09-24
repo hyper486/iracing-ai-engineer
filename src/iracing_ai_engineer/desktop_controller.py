@@ -15,6 +15,7 @@ from .live_queries import live_query_intent
 from .llm_client import DeepSeekClient, LLMError
 from .llm_engineer import EngineerConfig, EngineerService
 from .runtime_clock import monotonic_now
+from .trial_audit import MAX_TRIAL_BYTES, TrialAudit
 
 
 class DesktopController:
@@ -51,6 +52,11 @@ class DesktopController:
         self._session_path: Path | None = None
         self._last_question_at = -float("inf")
         self._capture_bytes = 0
+        self._trial = None
+        self._trial_bytes = 0
+        self._trial_failed = False
+        self._last_trial = {"status": "DISABLED", "reason": "NOT_STARTED", "bytes": 0}
+        self._trial_report = None
         self._service_epoch = 0
         self._notice = "原生桌面窗口；不会启动游戏或发送车辆、进站控制指令。"
         self._lifecycle = "STOPPED"
@@ -77,7 +83,8 @@ class DesktopController:
         if voice_runtime:
             from .voice_service import VoiceService
             self._voice = VoiceService(self._core_snapshot, self.submit, self._store, clock=clock,
-                                       spotter_source=self._spotter_snapshot)
+                                       spotter_source=self._spotter_snapshot,
+                                       audit_sink=self._state.audit_audio)
 
     def _new_service(self, settings: DesktopSettings, key: str, path: Path | None, used: int):
         return self._factory(
@@ -108,6 +115,17 @@ class DesktopController:
                 warning = "录制目录未通过隐私检查；已停用录制，只读遥测监视继续运行。"
         if warning:
             self._notice = warning
+        if directory is not None and not self._trial_failed:
+            budget = max(0, MAX_TRIAL_BYTES - self._trial_bytes)
+            if budget < 1024:
+                self._last_trial = {"status": "LIMIT_REACHED", "reason": "SESSION_BUDGET"}
+            else:
+                try:
+                    self._trial = TrialAudit(self._store.root.parent / "trials",
+                                             max_bytes=budget, clock=self._clock)
+                    self._state.attach_trial(self._trial)
+                except Exception:
+                    self._last_trial = {"status": "ERROR", "reason": "STARTUP_FAILED"}
         self._reader = threading.Thread(
             target=self._read,
             args=(self._stop, directory, remaining),
@@ -116,6 +134,22 @@ class DesktopController:
         )
         self._reader.start()
         return warning
+
+    def _finish_trial(self):
+        # Called only on the background lifecycle owner, after SDK owners exit.
+        with self._lock:
+            journal = self._trial
+            self._state.attach_trial(None)
+        if journal is not None:
+            journal.close()
+            with self._lock:
+                self._last_trial = journal.snapshot()
+                self._trial_bytes += self._last_trial["bytes"]
+                # A short failed write may contain uncommitted bytes. Do not
+                # repeatedly allocate new clips against the committed-only
+                # budget after a fault; restart is required for this lane.
+                self._trial_failed = self._last_trial["failed"]
+                self._trial = None
 
     def _read(self, stop: threading.Event, directory: Path | None, budget: int) -> None:
         try:
@@ -141,6 +175,7 @@ class DesktopController:
             self._start_reader()
             self._lifecycle = "RUNNING"
         if self._voice is not None:
+            self._voice.trace_state()
             self._voice.start()
 
     def _core_snapshot(self) -> dict:
@@ -163,6 +198,12 @@ class DesktopController:
                 engineer["status"] = "BUSY"
                 engineer["local_live_available"] = False
             recording = telemetry.get("recording") or {}
+            telemetry["trial_audit"] = {
+                **(self._trial.snapshot() if self._trial else self._last_trial),
+                "enabled": self._trial is not None,
+                "session_bytes": self._trial_bytes,
+                "heard": False, "live_acceptance": False,
+            }
             amount = recording.get("bytes", 0)
             if type(amount) is int and amount >= 0:
                 recording["bytes"] = min(4 * 1024**3, self._capture_bytes + amount)
@@ -171,6 +212,7 @@ class DesktopController:
                 "engineer": engineer,
                 "lifecycle": self._lifecycle,
                 "notice": self._notice,
+                "trial_report": self._trial_report,
                 "settings": {
                     **asdict(self._settings),
                     "key_configured": bool(self._api_key),
@@ -318,6 +360,27 @@ class DesktopController:
             )
         )
 
+    @property
+    def trial_directory(self) -> Path:
+        return self._store.root.parent / "trials"
+
+    def replay_trial(self, path: Path) -> None:
+        if not isinstance(path, Path):
+            raise ValueError("INVALID_TRIAL_PATH")
+
+        def replay():
+            from .trial_replay import TrialReplayError, replay_trial
+            try:
+                report = replay_trial(path, cancelled=lambda: self._closing)
+            except TrialReplayError as error:
+                report = {"status": "REJECTED", "reason": error.code,
+                          "heard": False, "live_acceptance": False}
+            with self._lock:
+                self._trial_report = report
+                self._notice = "本地诊断回放结束；未播放音频，不代表真实驾驶验收。"
+
+        self._schedule(replay)
+
     def set_recording(self, enabled: bool) -> None:
         if type(enabled) is not bool:
             raise ValueError("INVALID_RECORDING_SETTING")
@@ -334,6 +397,7 @@ class DesktopController:
                             "记录停止仍在等待本机写入；没有启动第二个读取器，请稍后关闭应用。"
                         )
                     return
+            self._finish_trial()
             with self._lock:
                 if self._closing:
                     return
@@ -345,6 +409,8 @@ class DesktopController:
                 self._settings = settings
                 warning = self._start_reader()
                 self._notice = warning or "记录设置已应用；读取器已重连，燃油学习重新开始。"
+            if self._voice is not None:
+                self._voice.trace_state()
             try:
                 key = self._api_key
                 self._store.save(settings, api_key=key or None)
@@ -388,6 +454,9 @@ class DesktopController:
             with self._lock:
                 self._api_key = ""
                 self._state.connection("STOPPED")
+                self._notice = "正在完成本机诊断日志；窗口等待写入线程实际退出。"
+            self._finish_trial()
+            with self._lock:
                 self._lifecycle = "STOPPED"
                 self._closed.set()
 

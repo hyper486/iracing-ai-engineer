@@ -51,8 +51,11 @@ implemented in source, including player pit permission and flag observations.
 Action-bound strategy integration and real lap comparisons remain open. Stage D's
 bounded recent-lap model and local coaching questions are now implemented in source;
 this is descriptive evidence, not causal coaching or offline gate promotion.
-Stage B hardware acceptance, D's real-lap acceptance, E and the final endurance
-goal remain open.
+Stage E now has a bounded private proximity/capture/audio journal and silent
+native replay in source. It reproduces detector decisions and correlates
+recorded software playback; it does not certify hearing or live source origin.
+Stage B hardware acceptance, D's real-lap acceptance, E's actual in-car trial
+and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.
 LLM use is opt-in, summary-only, for question interpretation and explanation.
 
@@ -96,9 +99,18 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   source/epoch-bound local driving answers do not depend on fuel or DeepSeek.
   Synthetic SDK-shaped and fake PTT tests are not real coaching acceptance. See
   [the coaching contract](LIVE_DRIVING_COACHING.md).
-- Verify endurance-duration resource limits, integrate supported live strategy
-  and connect private capture replay to the new
-  event/playback audit before claiming an integrated trial build.
+- Implemented: private bounded native trial journaling, fixed numeric/enum
+  projection, ordered detector/audio correlation, optional capture byte links,
+  strict silent replay and visible recording faults. No microphone recording,
+  transcript or provider call; no synthetic result becomes hearing acceptance.
+  See [the replay contract](PRIVATE_TRIAL_REPLAY.md).
+- Verify endurance-duration resource limits and integrate supported live strategy
+  before claiming an integrated trial build. Journal replay currently covers
+  proximity and software audio, not a simulated hardware/PTT/LLM rerun.
+- Before packaging, check observation-only fuel-answer liveness when unrelated
+  fuel-model inputs are absent, and corner-collection continuity at the observed
+  reader coverage. Treat these as open verification tasks, not proven defects
+  or permission to silently relax evidence gates.
 - Rebuild/package after those integrations, then check selected microphone and
   headphones, wheel/PTT, actual proximity latency and VR performance in a
   user-driven session. A local TTS duration is not output or end-to-end latency.

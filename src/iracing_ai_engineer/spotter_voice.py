@@ -14,10 +14,12 @@ import threading
 import wave
 from array import array
 from collections import Counter, deque
+from contextlib import suppress
 
 from .priority_audio import AudioPreempted
 from .runtime_clock import monotonic_now
 from .spotter import PHRASES, SPOTTER_CONTRACT_VERSION
+from .trial_audit import AUDIO_KINDS, AUDIO_REASONS
 from .voice_audio import AudioError, _decode_wav
 
 _STATES = {
@@ -121,7 +123,7 @@ class SpotterVoice:
     default, and existing v1 voice preferences migrate with it disabled.
     """
 
-    def __init__(self, source, audio, *, speech=None, clock=monotonic_now):
+    def __init__(self, source, audio, *, speech=None, clock=monotonic_now, audit_sink=None):
         if speech is None:
             from .voice_windows import WindowsSpeech
             speech = WindowsSpeech()
@@ -145,6 +147,35 @@ class SpotterVoice:
         self._audit = deque(maxlen=128)
         self._counts = Counter()
         self._origin = self._clock()
+        self._audit_sink, self._trace_serial = audit_sink, 0
+
+    def _trace(self, outcome="HEALTH", event=None, *, start_delay_ms=None, reason=None):
+        if self._audit_sink is None:
+            return
+        self._trace_serial += 1
+        settings = self._settings or {}
+        reason = self._reason if reason is None else reason
+        # Never pass device names, voice names, settings, PCM, or exception text.
+        with suppress(Exception):
+            self._audit_sink({
+                "sequence": self._trace_serial, "revision": self._revision, "now": self._clock(),
+                "outcome": outcome, "status": self._status,
+                "reason": reason if reason in AUDIO_REASONS | AUDIO_KINDS else "UNKNOWN",
+                "output_status": self._output,
+                "kind": None if event is None else event["kind"],
+                "event_id": None if event is None else list(event["id"]),
+                "start_delay_ms": start_delay_ms,
+                "enabled": settings.get("spotter_enabled") is True,
+                "muted": settings.get("volume", 0) <= 0,
+                "output_selection": ("unset" if not settings else "default"
+                                     if settings.get("output_device") == "default" else "selected"),
+                "heard": False, "live_acceptance": False,
+            })
+
+    def trace_state(self):
+        """Bind current audio health at the start of a new private trial segment."""
+        with self._lock:
+            self._trace()
 
     def start(self):
         with self._lock:
@@ -166,6 +197,7 @@ class SpotterVoice:
             "heard": False, "live_acceptance": False,
             "start_delay_ms": start_delay_ms,
         })
+        self._trace(outcome, event, start_delay_ms=start_delay_ms)
 
     def _cancel_locked(self):
         if self._active is not None:
@@ -191,6 +223,7 @@ class SpotterVoice:
                 self._status, self._reason = "PAUSED", "ZERO_VOLUME"
             else:
                 self._status, self._reason = "PREPARING", "PHRASE_CACHE"
+            self._trace()
             self._wake.set()
 
     def suspend(self, reason="USER_PAUSED"):
@@ -200,6 +233,7 @@ class SpotterVoice:
             self._settings = self._cache = None
             self._notice_pending = False
             self._status, self._reason = "PAUSED", reason
+            self._trace()
             self._wake.set()
 
     def interrupted_question(self):
@@ -249,6 +283,7 @@ class SpotterVoice:
             if self._current(revision):
                 self._cache = cache
                 self._status, self._reason = "WAIT_DATA", "NEED_FRESH_IN_CAR_DATA"
+                self._trace()
 
     def _valid_event(self, revision, event, *, starting):
         if not self._current(revision):
@@ -317,12 +352,18 @@ class SpotterVoice:
                         and event.get("notice_serial") == self._notice_serial):
                     self._notice_pending = False
             raise
+        except Exception as error:
+            with self._lock:
+                self._trace("PLAYBACK_ERROR", event,
+                            reason=error.code if isinstance(error, AudioError) else "AUDIO_FAILED")
+            raise
         finally:
             with self._lock:
                 if self._active is playback:
                     self._active = None
                 if self._current(revision) and self._status == "PLAYING":
                     self._status, self._reason = "WAIT_DATA", "NEED_FRESH_IN_CAR_DATA"
+                    self._trace()
 
     def _step(self, revision, settings):
         snapshot = self._source()
@@ -355,8 +396,11 @@ class SpotterVoice:
         """Called under the state lock; never performs device I/O or synthesis."""
         ready = _ready(snapshot)
         event = _candidate(snapshot)
+        previous = self._status, self._reason
         self._status = "READY" if ready else "WAIT_DATA"
         self._reason = "DETECTOR_READY" if ready else "NEED_FRESH_IN_CAR_DATA"
+        if previous != (self._status, self._reason):
+            self._trace()
         if ready:
             self._armed, self._lost_since, self._loss_reported = True, None, False
         else:
@@ -437,3 +481,4 @@ class SpotterVoice:
                     worker.join()
             with self._lock:
                 self._status, self._reason = "CLOSED", "CLOSED"
+                self._trace()

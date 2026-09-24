@@ -158,9 +158,12 @@ class FuelVoicePolicy:
 class VoiceService:
     """One bounded work queue; input/guard workers never run Tk operations."""
 
+    def trace_state(self):
+        self._spotter.trace_state()
+
     def __init__(self, source: Callable[[], dict], submit: Callable, store,
                  *, audio=None, speech=None, input_factory=None, clock=monotonic_now,
-                 spotter_source=None, spotter_speech=None):
+                 spotter_source=None, spotter_speech=None, audit_sink=None):
         if audio is None:
             from .voice_audio import AudioIO
             audio = AudioIO()
@@ -178,7 +181,7 @@ class VoiceService:
             return {**_map(value.get("telemetry")), "lifecycle": value.get("lifecycle")}
 
         self._spotter = SpotterVoice(spotter_source or fallback_spotter_source, self._audio,
-                                     speech=spotter_speech, clock=clock)
+                                     speech=spotter_speech, clock=clock, audit_sink=audit_sink)
         self._store = store if isinstance(store, VoiceSettingsStore) else VoiceSettingsStore(store)
         self._lock = threading.RLock()
         self._close_lock = threading.Lock()

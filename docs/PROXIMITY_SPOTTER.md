@@ -183,7 +183,11 @@ start/completion, cancellation, pre-start drops and start deadline misses. Its
 `start_delay_ms` measures the consumer attempt to the backend start call, not
 first audible sample. `heard=false` and `live_acceptance=false` remain explicit.
 Raw driver identity, microphone data, device labels, keys and backend errors are
-not included in this audit; full durable session replay remains Stage E.
+not included in this audit. Stage E's new [private trial journal](PRIVATE_TRIAL_REPLAY.md)
+persists the fixed proximity/health/audio projections and optional raw-capture
+byte links. Silent offline replay recomputes detector decisions and correlates
+software receipts; it cannot reproduce hardware timing or prove hearing. The
+rest of integrated live acceptance remains open.
 
 ```powershell
 uv run pytest -q tests/test_priority_audio.py tests/test_spotter_voice.py tests/test_voice_service.py tests/test_voice_audio.py tests/test_voice_windows.py tests/test_voice_settings.py

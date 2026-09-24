@@ -35,12 +35,40 @@ required running dependency. The final goal remains active and unaccepted.
 | Routine current-fuel questions | Local source implementation; synthetic checks | Current observations, learned range and conditional race fuel budgets bypass cloud waits; not live pit tactics or an updated EXE. |
 | Current physical traffic / pit-state questions | Local source implementation; synthetic checks | Bound ahead/behind distance, player permission and flag facts in native display/PTT; independent of fuel readiness, not time gaps or optimal pit/rejoin advice. |
 | Incremental recent-lap coaching | Local source implementation; synthetic checks | Complete laps feed the existing repeated-pattern model via a bounded worker; local PTT gives an observed loss and practice hypothesis, not a causal gain or live acceptance. |
+| Private proximity / audio replay | Native source implementation; synthetic checks | Bounded local journal, exact detector recomputation, software-playback correlation and optional capture byte links; not audio reproduction, source authentication or human hearing. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
-## Incremental recent-lap coaching milestone
+## Private proximity / audio replay milestone
+
+The native recording switch now owns an independent private diagnostic journal
+as well as the existing raw collector. The journal links fixed proximity inputs,
+time-driven decisions, native audio outcomes and raw capture IDs/hashes. A native
+background replay button and source CLI recompute decisions and distinguish no
+recorded attempt, pre-start drops, cancellation, playback failures and software
+completion. They do not play audio, call a model or authenticate live source.
+
+The 1 GiB per-run journal budget and bounded queue are separate from raw capture.
+Strict projection prevents raw dictionaries, transcripts, device/voice names,
+credentials and arbitrary errors entering the journal. Overflow or I/O failure
+is visible and does not stop proximity; lifecycle operations await actual file
+owner exit. Missing seals remain incomplete prefixes, and malformed/mutating
+files are rejected. Raw byte-link matches do not promote SDK_LIVE gates.
+
+Complete regression: **2,614 passed, 44 skipped**, including 68 new checks.
+Eight asynchronous lifecycle/correlation cases also passed five consecutive
+runs. Ruff, public safety including history and exact staged-file/diff review
+passed. Existing skips remain data/platform/private-deployment or explicit
+opt-in boundaries, not live acceptance. Hidden native-window checks exercise
+the replay action and fixed report text with synthetic state only.
+No selected device, microphone, live SDK session, provider or installed EXE was
+used for acceptance. See [the replay contract](PRIVATE_TRIAL_REPLAY.md).
+Full live pit/rejoin integration, packaging and real selected-device/in-car/VR
+checks remain open under the unchanged active goal.
+
+## Earlier incremental recent-lap coaching milestone
 
 The native **问驾驶** button and exact PTT questions now use the same completed-lap
 reference and repeated-pattern algorithms as offline analysis. The source path
@@ -68,8 +96,8 @@ driving or hearing acceptance. Memory-only local TTS clips were 14.6–16.6 seco
 no input/output device was opened. No EXE, game or Simulator Controller
 configuration was changed. See [the coaching contract](LIVE_DRIVING_COACHING.md).
 
-Full live pit/rejoin integration, private event/audio replay, packaging and
-real selected-device/in-car/VR checks remain open under the unchanged goal.
+At that milestone, full live pit/rejoin integration, private event/audio replay,
+packaging and real selected-device/in-car/VR checks remained open.
 
 ## Earlier local traffic and pit-state question milestone
 
