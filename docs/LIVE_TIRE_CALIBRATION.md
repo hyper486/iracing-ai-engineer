@@ -54,9 +54,12 @@ capture and journal formats are unchanged. Historical captures that omitted
    metadata loss, setup changes and stale source withdraw it. An in-flight
    verification cannot restore a canceled or differently bound selection.
 
-The retained object contains only hashes, car/compound ids and observed
-condition bounds, not a live performance slope. No automatic startup reload,
-saved-path preference, source restart or cloud call is introduced.
+The retained object now contains hashes, car/compound ids, the validated frozen
+historical model and observed age/fuel/condition bounds. It excludes raw samples
+and labels. The separate [conditional comparison](LIVE_TIRE_COMPARISON.md) uses
+it only with a confirmed current counter origin and valid fuel/service inputs;
+loading alone never generates a benefit. No automatic startup reload, saved-path
+preference, source restart or cloud call is introduced.
 
 Each publication checks current compound, numeric air/track temperature and
 wind components. SDK precipitation is converted from a fraction to percent;
@@ -75,9 +78,10 @@ controls. `SYNTHETIC_TIRE_CALIBRATION_BINDING` in the frozen self-test uses an
 explicitly invented prevalidated object to check matching and withdrawal; it
 does not verify a real evidence file, contact the SDK/provider or test hearing.
 
-Real reviewed calibration remains absent. Current installation-derived tire
-age and fuel-domain admission, performance-benefit uncertainty, future-condition
-support, rules and action-bound service/rejoin integration remain open. An
+Real reviewed calibration remains absent. A conditional driver-confirmed-origin
+comparison now checks full projected age/fuel ranges and an empirical benefit
+envelope; it does not admit an independently reviewed live tire belief. Future
+condition support, rules and action-bound service/rejoin integration remain open. An
 offline holdout pass plus a matching current car is not sufficient to recommend
 keeping or replacing tires. Hardware, real in-car and VR acceptance are separate
 and remain pending.

@@ -83,6 +83,11 @@ matches its car/setup/event identity to the owned SDK frame. Current compound
 and observed weather ranges gate a session-only context match; source/setup
 loss withdraws it. This is not current-tire belief or live model admission.
 See [the native preflight boundary](LIVE_TIRE_CALIBRATION.md).
+The separate native conditional tire comparison now combines the frozen
+historical slope, driver-confirmed counter origin, full next-stint fuel/age
+bounds and extra service time. Local PTT gives a net range without claiming wear,
+keeping-tire safety or a mapped rejoin decision; see
+[the calculation and limits](LIVE_TIRE_COMPARISON.md).
 Stage B hardware acceptance, D's real-lap acceptance, E's actual in-car trial
 and the final endurance goal remain open.
 Data collection is user-started; no vehicle, simulator-launch or pit-box commands.
@@ -223,8 +228,9 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   Native settings, short local service questions and revision-bound PTT keep
   user assumptions separate from tire condition and calibrated benefits.
   See [the service comparison contract](LIVE_SERVICE_COMPARISON.md).
-- Still open: obtain reviewed matched tire/service evidence and connect calibrated
-  performance/service costs to endurance strategy. Check selected microphone
+- Still open: obtain real reviewed matched tire/service evidence and complete
+  rule-aware, mapped endurance integration beyond the conditional next-stint
+  performance/service comparison. Check selected microphone
   and headphones, wheel/PTT, actual proximity latency and VR performance in a
   user-driven session. A local TTS duration is not output or end-to-end latency;
   a trial build does not close the full tire/rule/action-bound rejoin goal.
@@ -234,6 +240,13 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
   expand its domain or promote source authenticity, physical wear or live
   acceptance. See [the validation contract](TIRE_MODEL_VALIDATION.md).
   Real data, native identity/model admission and live strategy integration remain open.
+- Implemented: native conditional next-stint time gain minus extra four-tire
+  service, using a validated frozen model and explicit driver-confirmed counter
+  origin. Whole-stint age/fuel bounds, empirical intervals, short local PTT,
+  mandatory assumptions and stale-answer withdrawal are covered with invented
+  tests and a production-owner synthetic path. It does not establish physical
+  wear, future conditions, rules or combined mapped rejoin/race optimization.
+  See [the conditional comparison](LIVE_TIRE_COMPARISON.md).
 
 For each major advance: update status, run Ruff and all pytest tests, scan public
 safety including history, review exact staged files/diff, commit with the configured

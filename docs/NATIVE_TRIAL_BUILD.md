@@ -5,7 +5,24 @@ binary release. It runs without Simulator Controller or a browser. Existing
 installed copies and shortcuts are not automatically upgraded; build output is
 `dist/AEIS-Engineer.exe` with an adjacent SHA-256/build receipt.
 
-The current rebuild adds [native tire-calibration context preflight](LIVE_TIRE_CALIBRATION.md).
+The current rebuild adds [conditional next-stint tire benefit](LIVE_TIRE_COMPARISON.md).
+**问换胎收益 / 比较换胎收益** connects a frozen validated historical model,
+driver-confirmed counter origin, whole-stint age/fuel bounds and extra four-tire
+service. The local numerical answer assumes unchanged conditions and does not
+provide physical wear, a keep/change safety judgment or mapped rejoin/rules.
+The new frozen check reconstructs an invented request, learns fuel from invented
+laps and uses the real confirmation owner/local-answer/withdrawal path. It does
+not use an SDK transport, provider or audio endpoint.
+
+The unsigned EXE passed **26 frozen checks** with a system-only child PATH and
+saved keys removed. Its size and SHA-256 matched the build receipt. Computer
+Use checked the packaged two-row shortcuts, scrolling, local unavailable
+answer and settings notice; the synthetic window closed normally. The minimum
+860-pixel layout is also covered by an isolated native test. Existing installs,
+shortcuts, credentials and audio settings were not replaced. Real calibration,
+microphone/headphone hearing and in-car/VR acceptance remain open.
+
+The preceding rebuild added [native tire-calibration context preflight](LIVE_TIRE_CALIBRATION.md).
 **停车载入校准 / 清除校准** verify a private pinned training/holdout request
 off the UI thread and retain only a session-bound context selection. Current
 owned-car/setup/event identity, compound and observed weather ranges are checked;
@@ -112,8 +129,8 @@ The rebuilt trial includes the offline reviewed tire-origin v2 correction and
 conditional mapped-rejoin lane, plus historical pit-visit observations and the
 reviewed settings draft. The new **采集复盘** tab also recomputes completed raw
 captures in a separate offline-only owner; see [the workflow](NATIVE_CAPTURE_REPLAY.md).
-Native live tire questions remain bounded observations,
-not physical tire age or model-selected tire service. Use current source for
+Native live tire questions now include the conditional next-stint comparison
+above, not physical tire age or model-selected tire service. Use current source for
 offline finalization/verification; do not use an older packaged CLI
 to regenerate tire-strategy evidence. See [the v2 contract](TIRE_PERFORMANCE_BELIEF.md).
 

@@ -25,6 +25,7 @@ from .live_rejoin import rejoin_binding
 from .live_stint import stint_binding
 from .live_strategy import strategy_binding
 from .live_tire_age import tire_age_binding
+from .live_tire_comparison import tire_comparison_binding
 from .live_traffic import TRAFFIC_ANSWER_TTL_S, situation_binding
 from .llm_client import DeepSeekClient, LLMError
 from .llm_evidence import build_live_context, current_fuel_observation, load_session_context
@@ -95,6 +96,9 @@ def fallback_plan(context: Mapping, question: str) -> dict:
                         "rejoin.late_fuel", "rejoin.late_tires", "rejoin.assumptions", *observed)
         if any(word in question.lower() for word in ("换胎耗时", "服务", "service", "多花")):
             observed = ("strategy.early_service", "strategy.late_service", *observed)
+        elif any(word in question.lower() for word in ("换胎", "轮胎", "tire", "tyre")):
+            observed = ("tire.comparison_early", "tire.comparison_late",
+                        "tire.comparison_limits", *observed)
         if any(word in question.lower() for word in ("进站耗时", "这次进站用了", "last pit")):
             observed = ("pit_observation.elapsed", "pit_observation.baseline",
                         "pit_observation.fuel_change", "pit_observation.limits", *observed)
@@ -166,6 +170,7 @@ def _binding(snapshot: Mapping) -> tuple:
         observation, strategy_binding(snapshot),
         (stint_binding(snapshot), tire_age_binding(snapshot)), rejoin_binding(snapshot),
         pit_observation_binding(snapshot),
+        tire_comparison_binding(snapshot),
     )
 
 
@@ -173,8 +178,9 @@ def _situation_answer(fact_ids, intent=None):
     # An unavailable-traffic response still belongs to this lane. Otherwise
     # unrelated bad-fuel intervals would cancel its fault notice every 0.5 s.
     return intent in ("traffic", "ahead", "behind", "pit_permission", "pit", "pit_plan",
-                      "rejoin", "pit_observation", "service") or any(
-        key.startswith(("traffic.", "pit.", "strategy.", "rejoin.", "pit_observation."))
+                      "rejoin", "pit_observation", "service", "tire_comparison") or any(
+        key.startswith(("traffic.", "pit.", "strategy.", "rejoin.", "pit_observation.",
+                        "tire.comparison_"))
         for key in fact_ids)
 
 
@@ -185,30 +191,39 @@ def _selected_binding(binding, fact_ids, intent=None):
         # retain it, including any learning/availability explanation.
         return (binding[0], binding[8], *binding[2:6])
     situation = _situation_answer(fact_ids, intent)
+    tire_comparison = intent == "tire_comparison" or any(
+        key.startswith("tire.comparison_") for key in fact_ids)
     driving = intent in ("driving", "pace") or any(
         key.startswith("driving.") or key == "tire.pace" for key in fact_ids)
-    stint = intent in ("stint", "tire") or any(
+    stint = tire_comparison or intent in ("stint", "tire") or any(
         key.startswith("stint.") or key in ("tire.observed_context", "tire.driver_confirmed_age")
         for key in fact_ids)
     rejoin = intent == "rejoin" or any(key.startswith("rejoin.") for key in fact_ids)
     pit_observation = intent == "pit_observation" or any(
         key.startswith("pit_observation.") for key in fact_ids)
-    strategy = rejoin or intent in ("pit", "pit_plan", "service") or any(
+    strategy = tire_comparison or rejoin or intent in ("pit", "pit_plan", "service") or any(
         key.startswith("strategy.") for key in fact_ids)
     if not situation and not driving and not stint:
         return binding[:6]
     # Standalone traffic/pit observations do not depend on fuel learning or its
     # interval validity. Mixed fuel/traffic answers retain both dependencies.
     base = binding[:6]
-    if all(key.startswith(("traffic.", "pit.", "driving.", "stint.", "tire.",
-                           "pit_observation.")) for key in fact_ids):
+    if not tire_comparison and all(key.startswith((
+        "traffic.", "pit.", "driving.", "stint.", "tire.", "pit_observation."
+    )) for key in fact_ids):
         base = (binding[0], None, *binding[2:6])
     # Historical pit timing is independent of changing opponent relations.
     traffic = situation and (not pit_observation or any(
         key.startswith(("traffic.", "pit.", "strategy.", "rejoin.")) for key in fact_ids))
-    return (*base, binding[6] if traffic else None, binding[7] if driving else None,
+    if tire_comparison and not any(key.startswith(("traffic.", "pit.", "strategy.", "rejoin."))
+                                   for key in fact_ids):
+        # Pit permission/flags already gate the comparison itself. Its fuel
+        # budget does not claim opponent motion or a traffic-sensitive rejoin.
+        traffic = False
+    selected = (*base, binding[6] if traffic else None, binding[7] if driving else None,
             binding[9] if strategy else None, binding[10] if stint else None,
             binding[11] if rejoin else None, binding[12] if pit_observation else None)
+    return (*selected, binding[13]) if tire_comparison else selected
 
 
 class EngineerService:

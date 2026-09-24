@@ -58,6 +58,7 @@ from .live_tire_age import (
     unavailable_tire_age,
 )
 from .live_tire_calibration import calibration_status, matches_identity
+from .live_tire_comparison import project_tire_comparison, unavailable_tire_comparison
 from .live_traffic import (
     bound_track_length_mm,
     project_live_traffic,
@@ -705,7 +706,14 @@ class AppState:
                 else:
                     intent["expires_in_s"] = remaining
                     intent["id"] = f"{self._generation}:{intent['id']}"
-            return value
+        # Use the coherent copied snapshot, outside the shared Spotter lock.
+        # Model validation/arithmetic has no I/O or SDK calls; it cannot hold
+        # this lock across independent detector reads (not GIL isolation).
+        try:
+            value["tire_comparison"] = project_tire_comparison(value)
+        except Exception:
+            value["tire_comparison"] = unavailable_tire_comparison(value, "PROCESSING_ERROR")
+        return value
 
     def report(self) -> dict[str, Any]:
         workers, recording = self._worker_status()

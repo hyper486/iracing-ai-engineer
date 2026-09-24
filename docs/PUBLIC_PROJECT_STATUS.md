@@ -50,10 +50,52 @@ required running dependency. The final goal remains active and unaccepted.
 | VR tire-record confirmation | Two-utterance local PTT workflow | Same parked-visit binding, explicit readback/confirmation and matched analysis-owner acknowledgement. No game control, automatic approval, model request or real hearing acceptance. |
 | Tire-model holdout validation | Offline source/CLI; invented-data checks | Frozen-model prediction on source-disjoint stints, explicit car/setup/condition bindings and exact report reconstruction. Not source authentication, statistical coverage, native model admission or real tire calibration. |
 | Native tire-calibration preflight | Packaged session-only context matching; synthetic checks | Parked pinned-request verification, owned car/setup/event binding, current compound/weather checks and source/setup withdrawal. Not current tire belief, live model admission or a tire recommendation. |
+| Conditional next-stint tire benefit | Native local calculation; invented-data checks | Frozen model plus driver-confirmed origin, whole-stint age/fuel bounds and extra four-tire service yield a net time interval. Not wear, leave-tire safety, mapped rejoin, rule-aware race optimization or actual calibration. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
 | Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
 | Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
+
+## Conditional next-stint tire benefit
+
+The native app now connects previously separate calibration, confirmed-origin,
+fuel-budget and service-cost slices. **问换胎收益 / 比较换胎收益** gives the
+modeled next-stint time range minus extra four-tire service without a provider
+request. Complete projected ages and lap-start fuel must remain inside observed
+training bounds; unsupported endpoints retain explicit reasons and no net
+numbers. Normal tire questions can use the same evidence when supported.
+
+The current tire basis remains a driver assertion, not independently reviewed
+SDK service truth. The empirical envelope assumes unchanged clean/dry running
+and linear-age behavior; marginal bounds do not establish joint support or a
+future new/old-tire counterfactual. Negative net gain does not prove old tires
+safe. There is no physical wear value, keep/change command, mapped traffic or
+event-rule claim. See [the calculation and workflow](LIVE_TIRE_COMPARISON.md).
+
+Model reconstruction runs outside the shared Spotter lock. Unavailable/fault
+notices do not disable fuel or proximity. Local answers have selected-evidence
+bindings and ten-second expiry; recovery cannot revive a withdrawn answer.
+The new frozen-path check builds and verifies an invented request, learns fuel
+from eight invented laps, confirms service through the real owner, answers
+locally and then withdraws the answer. These are software checks, not actual
+calibration, headset hearing or in-car/VR acceptance. The full goal stays active.
+
+Validation added **40 invented-data tests and one isolated native scenario**.
+Full regression with `uv` on the child PATH passed **3,472 tests, 44 skipped**
+in **703.08 s**, including both locked-wheel checks. Skips require absent data,
+private deployments, platform capabilities or explicit local-speech opt-in.
+The subsequent minimum-width layout adjustment also passed its isolated native
+scenario; supplemental shortcuts now use two rows. Source-mode Computer Use
+confirmed the question, unavailable response, expiry and settings notice.
+Ruff and public-safety including history passed; the synthetic window closed
+normally without using a simulator, microphone or output endpoint.
+
+The rebuilt unsigned EXE passed **26 frozen checks** with a system-only child
+PATH and saved keys removed; its size/hash matched the build receipt. Computer
+Use confirmed the packaged two-row shortcuts, local unavailable answer,
+scrolling and settings notice. The synthetic window was closed normally;
+installed copies, shortcuts, saved keys and device selections were not replaced.
+The EXE remains a local trial artifact, not a GitHub binary release or in-car pass.
 
 ## Native tire-calibration context preflight
 

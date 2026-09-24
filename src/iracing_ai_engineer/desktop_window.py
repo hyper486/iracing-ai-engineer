@@ -19,6 +19,7 @@ from .live_stint import stint_notice
 from .live_strategy import StrategyParameters, strategy_notice, validated_strategy
 from .live_tire_age import confirmation_command, tire_age_notice
 from .live_tire_calibration import calibration_notice
+from .live_tire_comparison import tire_comparison_text
 from .live_traffic import validated_traffic
 from .llm_evidence import _live_frame_ready
 from .runtime_clock import monotonic_now
@@ -852,12 +853,15 @@ class DesktopWindow:
                          question=True).pack(side="left", padx=5)
         stint_buttons = ttk.Frame(parent)
         stint_buttons.pack(fill="x", pady=(0, 8))
-        for label, question in (("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
-                                ("问配速", "配速变化"), ("问出站", "出站预测"),
-                                ("问换胎耗时", "换胎会多花多久"),
-                                ("问耗时", "这次进站用了多久")):
+        for index, (label, question) in enumerate((
+            ("问本段", "这一段跑了多久"), ("问轮胎", "轮胎怎么样"),
+            ("问配速", "配速变化"), ("问出站", "出站预测"),
+            ("问换胎耗时", "换胎会多花多久"), ("问换胎收益", "比较换胎收益"),
+            ("问耗时", "这次进站用了多久"),
+        )):
             self._button(stint_buttons, label, lambda q=question: self._quick(q),
-                         question=True).pack(side="left", padx=(0, 10))
+                         question=True).grid(row=index // 4, column=index % 4,
+                                             padx=(0, 10), pady=(0, 6), sticky="w")
         ttk.Label(parent, textvariable=self.request_var, wraplength=950,
                   style="Muted.TLabel").pack(anchor="w")
         history = ttk.Frame(parent)
@@ -879,6 +883,9 @@ class DesktopWindow:
                   wraplength=920).pack(anchor="w", pady=4)
         self.tire_calibration_var = tk.StringVar(self.root, "尚未载入轮胎校准。")
         ttk.Label(parent, textvariable=self.tire_calibration_var, style="Muted.TLabel",
+                  wraplength=920).pack(anchor="w", pady=4)
+        self.tire_comparison_var = tk.StringVar(self.root, "换胎收益尚未就绪。")
+        ttk.Label(parent, textvariable=self.tire_comparison_var, style="Muted.TLabel",
                   wraplength=920).pack(anchor="w", pady=4)
         calibration = ttk.Frame(parent)
         calibration.pack(anchor="w", pady=6)
@@ -1381,6 +1388,7 @@ class DesktopWindow:
         self.tire_age_var.set(status_text.get(status, "") + tire_age_notice(tire_snapshot))
         self.car_context_var.set(car_context_notice(tire_snapshot))
         self.tire_calibration_var.set(calibration_notice(tire_snapshot.get("tire_calibration")))
+        self.tire_comparison_var.set(tire_comparison_text(tire_snapshot)[0])
         for button in self.tire_calibration_buttons:
             button.state(["disabled"] if all_disabled or not callable(
                 getattr(self.controller, "load_tire_calibration", None)) else ["!disabled"])

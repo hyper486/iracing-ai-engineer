@@ -47,6 +47,8 @@ _QUERIES = {
                  "下一次进站加多少油", "pit plan", "pit comparison"),
     "service": ("换胎会多花多久", "换胎多花多久", "比较换胎耗时", "比较进站服务",
                 "tire service time", "tyre service time"),
+    "tire_comparison": ("比较换胎收益", "换胎值不值得", "换胎值得吗", "换胎能追回多少时间",
+                        "tire tradeoff", "tyre tradeoff"),
     "rejoin": ("出站预测", "进站后会落在哪", "出站后前后车情况", "预测出站交通",
                "rejoin prediction", "where will i rejoin"),
     "pit_observation": ("这次进站用了多久", "本次进站耗时", "上次进站用了多久",
@@ -154,6 +156,17 @@ def render_live_query(context: Mapping, intent: str) -> dict:
     if intent not in _QUERIES or context.get("scope") != "live_snapshot":
         raise ValueError("INVALID_LIVE_QUERY")
     facts = {item["id"]: item["text"] for item in context["facts"]}
+    if intent == "tire_comparison" or (intent == "tire" and "tire.comparison_brief" in facts):
+        notices = {item["id"]: item["text"] for item in context.get("notices", [])}
+        chosen = [key for key in ("tire.comparison_brief", "tire.comparison_early",
+                                  "tire.comparison_late", "tire.comparison_limits") if key in facts]
+        spoken = facts.get("tire.comparison_brief", notices.get(
+            "TIRE_COMPARISON_UNAVAILABLE", "换胎收益未就绪；需要校准、确认胎组和有效燃油方案。"))
+        body = "\n".join(facts[key] for key in chosen if key != "tire.comparison_brief") or spoken
+        if len(spoken) > 280:
+            raise ValueError("LIVE_QUERY_RENDER_LIMIT")
+        return {"topic": "strategy", "fact_ids": chosen, "spoken_text": spoken,
+                "text": body + "\n仅条件计算；不会操作车辆或进站设置。", "intent": intent}
     if intent == "service":
         chosen = [key for key in ("strategy.service_brief", "strategy.early_service",
                                   "strategy.late_service") if key in facts]

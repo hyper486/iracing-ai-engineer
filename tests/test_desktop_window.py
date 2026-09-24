@@ -93,6 +93,38 @@ def _native_tire_calibration_controls(native_window):
     assert len(calls) == before
 
 
+def _native_tire_comparison(native_window):
+    from tempfile import TemporaryDirectory
+
+    from test_live_tire_comparison import runtime
+
+    root, controller, window = native_window
+    with TemporaryDirectory(prefix="aeis-native-comparison-test-") as directory:
+        state, _, _, _ = runtime.__wrapped__(Path(directory))
+        controller.value["telemetry"] = state.snapshot()
+        window._poll()
+        assert "净收益" in window.tire_comparison_var.get()
+        button = next(item for item in window._question_buttons
+                      if item.cget("text") == "问换胎收益")
+        root.geometry("860x680")
+        root.deiconify()
+        window.notebook.select(1)
+        root.update()
+        # The added shortcut must not clip the following pit-observation
+        # button at the supported minimum width; the page scrolls vertically.
+        for item in window._question_buttons:
+            assert item.winfo_rootx() + item.winfo_reqwidth() <= (
+                root.winfo_rootx() + root.winfo_width() - 20)
+        assert button.grid_info()["row"] == 1
+        button.invoke()
+        assert controller.questions == [("比较换胎收益", "live")]
+        state.set_tire_calibration(None)
+        controller.value["telemetry"] = state.snapshot()
+        window._poll()
+        assert "校准未载入" in window.tire_comparison_var.get()
+        assert "净收益" not in window.tire_comparison_var.get()
+
+
 def test_numeric_formatting_and_question_validation() -> None:
     assert format_number(0, " L") == "0.0 L"
     assert format_number(3.14159, " L/圈", 2) == "3.14 L/圈"
@@ -972,6 +1004,7 @@ _NATIVE_SCENARIOS = {
     "tire_confirmation": _native_tire_confirmation,
     "tire_review": _native_tire_review,
     "tire_calibration": _native_tire_calibration_controls,
+    "tire_comparison": _native_tire_comparison,
 }
 
 

@@ -22,6 +22,8 @@ from .live_rejoin import rejoin_notice, validated_rejoin
 from .live_stint import validated_stint
 from .live_strategy import strategy_notice, validated_strategy
 from .live_tire_age import tire_age_notice, validated_tire_age
+from .live_tire_comparison import LIMITS as TIRE_COMPARISON_LIMITS
+from .live_tire_comparison import tire_comparison_text, validated_tire_comparison
 from .live_traffic import validated_traffic
 
 LLM_CONTEXT_CONTRACT_VERSION = "engineer-llm-context-v1"
@@ -433,6 +435,20 @@ def _live_stint_facts(result, snapshot):
         result["capabilities"]["tire"] = "RAW_PACE_OBSERVATION_ONLY"
 
 
+def _live_tire_comparison_facts(result, snapshot):
+    value = validated_tire_comparison(snapshot) if _live_frame_ready(snapshot) else None
+    brief, details = tire_comparison_text(snapshot if value is not None else {})
+    if value is None or value["status"] != "CONDITIONAL":
+        result["notices"].append(_entry("TIRE_COMPARISON_UNAVAILABLE", brief))
+        return
+    result["facts"].append(_entry("tire.comparison_brief", brief))
+    result["facts"].extend(_entry(f"tire.comparison_{endpoint}", text)
+                           for endpoint, text in details)
+    result["facts"].append(_entry("tire.comparison_limits", TIRE_COMPARISON_LIMITS))
+    result["notices"].append(_entry("TIRE_COMPARISON_CONDITIONAL", TIRE_COMPARISON_LIMITS))
+    result["capabilities"]["tire"] = "CONDITIONAL_PERFORMANCE_COMPARISON"
+
+
 def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     """Project fresh observations and separately admitted fuel-budget estimates.
 
@@ -457,6 +473,7 @@ def build_live_context(snapshot: Mapping[str, object]) -> dict[str, Any]:
     _live_rejoin_facts(result, snapshot)
     _live_pit_observation_facts(result, snapshot)
     _live_stint_facts(result, snapshot)
+    _live_tire_comparison_facts(result, snapshot)
     monitor = _mapping(snapshot.get("monitor"))
     fuel = _mapping(snapshot.get("fuel"))
     direct = current_fuel_observation(snapshot)

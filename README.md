@@ -35,6 +35,9 @@ practice opportunity.
   separating detected events, software playback and unconfirmed human hearing.
 - Conditional live fuel-stop comparisons in source: session-scoped capacity/rate/
   transit assumptions, next-fill and stint budgets, and local PTT; not optimal pit timing.
+- Conditional next-stint tire time comparison: pinned historical model, explicit
+  driver-confirmed counter origin, full age/fuel bounds and extra service time;
+  local questions, not physical wear or a keep/change safety recommendation.
 - An experimental local fuel dashboard with private recording and opt-in local
   practice speech; race speech stays disabled.
 - Fail-closed source, confidence, privacy and advisor-only safety boundaries.
@@ -223,6 +226,7 @@ Useful design documents:
 - [Tire-performance boundary](docs/TIRE_PERFORMANCE_BELIEF.md)
 - [Frozen tire-model holdout validation](docs/TIRE_MODEL_VALIDATION.md)
 - [Native tire-calibration context preflight](docs/LIVE_TIRE_CALIBRATION.md)
+- [Conditional next-stint tire/service comparison](docs/LIVE_TIRE_COMPARISON.md)
 - [Driving diagnosis evidence](docs/OFFLINE_DRIVING_DIAGNOSIS_EVIDENCE.md)
 - [Post-session report](docs/OFFLINE_SESSION_REPORT.md)
 - [Privacy-safe live monitor](docs/LIVE_MONITOR.md)
