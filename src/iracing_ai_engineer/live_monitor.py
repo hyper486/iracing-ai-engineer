@@ -29,6 +29,7 @@ from .sdk_probe import (
     _bind_frame_sim_mode,
     classify_context,
 )
+from .session_flags import unsuitable_lap_flags
 from .telemetry import (
     Presence,
     Provenance,
@@ -52,6 +53,7 @@ LIVE_MONITOR_FIELDS = tuple(
             "PlayerCarDriverIncidentCount",
             "PlayerCarTeamIncidentCount",
             "CarLeftRight",
+            "SessionState",
         )
     )
 )
@@ -260,6 +262,8 @@ class LiveMonitor:
         self._previous_fuel_level: float | None = None
         self._previous_player_slot: int | None = None
         self._latest_car_left_right: int | None = None
+        self._latest_session_type: str | None = None
+        self._latest_session_state: int | None = None
         self._event_count = 0
         self._latest_sample: TelemetrySample | None = None
         self._latest_context: dict[str, Any] | None = None
@@ -360,9 +364,14 @@ class LiveMonitor:
         self._interval_invalid_for_fuel.add("SOURCE_STALE")
 
     def feed(
-        self, frame: RawSdkFrame, *, observed_monotonic_s: float | None = None
+        self, frame: RawSdkFrame, *, observed_monotonic_s: float | None = None,
+        session_type: str | None = None,
     ) -> bool:
-        """Consume one frozen frame; return false for a same-tick duplicate."""
+        """Consume one frozen frame; return false for a same-tick duplicate.
+
+        A supplied session_type must come from exactly update-bound SessionInfo;
+        callers without that evidence leave it unknown and retain strict flags.
+        """
 
         if self._receipt is not None:
             raise RuntimeError("live monitor is already finished")
@@ -417,6 +426,12 @@ class LiveMonitor:
         self._pending_events.extend(emitted)
         self._latest_sample = sample
         self._latest_context = classify_context(frame.sim_mode_raw, frame.values)
+        self._latest_session_type = session_type
+        session_state = frame.values.get("SessionState")
+        self._latest_session_state = (
+            session_state if type(session_state) is int and 0 <= session_state <= 6
+            and "SessionState" not in frame.read_errors else None
+        )
         interval = self._interval_invalid_for_fuel
         if set(frame.read_errors) & {
             "FuelLevel", "LapCompleted", "LapDistPct", "PitstopActive", "OnPitRoad",
@@ -468,10 +483,9 @@ class LiveMonitor:
         flags = _field_value(sample.flags.session_flags)
         # Match live_fuel's unsuitable flags, including checkered. Inspect each
         # tick: event transitions can be suppressed during a dropped-tick gap.
-        if flags is None or flags & (
-            0x0001 | 0x0008 | 0x0010 | 0x0100 | 0x0200 | 0x0400 | 0x4000 | 0x8000
-            | 0x020000 | 0x100000 | 0x200000 | 0x20000000 | 0x40000000
-        ):
+        if flags is None or flags & (1 | unsuitable_lap_flags(
+            session_type, self._latest_session_state,
+        )):
             interval.add("CAUTION_OR_UNKNOWN_FLAGS")
         alongside = frame.values.get("CarLeftRight")
         self._latest_car_left_right = (
@@ -594,6 +608,7 @@ class LiveMonitor:
                 "evidence": list(context["evidence"]),
                 "player_control_state": context["player_control_state"],
                 "sim_source_mode": context["sim_source_mode"],
+                "session_type": self._latest_session_type,
             },
             "contract_version": LIVE_MONITOR_CONTRACT_VERSION,
             "events": [_event_projection(event) for event in self._pending_events],
@@ -643,6 +658,7 @@ class LiveMonitor:
                 "pits_open": _field_value(sample.pit.pits_open),
                 "rpm": _field_value(sample.controls.rpm),
                 "session_flags": _field_value(sample.flags.session_flags),
+                "session_state": self._latest_session_state,
                 "session_num": _field_value(sample.session.session_num),
                 "session_laps_remaining": _field_value(
                     sample.session.session_laps_remaining

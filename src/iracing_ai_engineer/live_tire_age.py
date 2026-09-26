@@ -59,6 +59,7 @@ class LiveTireAgeTracker:
             raise ValueError("TIRE_TICK_RATE_INVALID")
         self.tick_rate, self.revision, self.failed = tick_rate_hz, 0, False
         self.previous = self.identity = self.visit_tick = None
+        self._buffer_tick = None
         self.origin = self.confirmation = None
         self.departed_stall = False
         self.reason = "INSTALLATION_NOT_CONFIRMED"
@@ -68,6 +69,7 @@ class LiveTireAgeTracker:
         if self.previous is not None or self.reason != reason:
             self.revision += 1
         self.previous = self.identity = self.visit_tick = None
+        self._buffer_tick = None
         self.origin = self.confirmation = None
         self.departed_stall = False
         self.reason = reason
@@ -97,7 +99,7 @@ class LiveTireAgeTracker:
         if not (_int(tick) and _int(laps, 1_000_000) and _int(session, 100_000)
                 and _int(player, 255) and _int(compound, 1000) and _int(sets, 100_000)
                 and type(seconds) in (int, float) and 0 <= seconds <= 10_000_000
-                and type(pit) is bool and frame.buffer_tick == tick):
+                and type(pit) is bool and _int(frame.buffer_tick, 2**31 - 1)):
             self.reset("REQUIRED_DATA_UNAVAILABLE")
             return
         speed, stall, active = (_value(sample.lap.speed_mps), _value(sample.pit.in_pit_stall),
@@ -114,12 +116,15 @@ class LiveTireAgeTracker:
         if self.identity != identity or (previous is not None and (
             tick <= previous["tick"] or point["time_us"] <= previous["time_us"]
             or (tick - previous["tick"]) / self.tick_rate > .25
+            or self._buffer_tick is None
+            or not 0 < frame.buffer_tick - self._buffer_tick <= self.tick_rate * .25
             or point["time_us"] - previous["time_us"] > 250_000
             or laps < previous["laps"] or laps > previous["laps"] + 1
         )):
             self.reset("CONTINUITY_CHANGED")
             previous = None
         self.identity = identity
+        self._buffer_tick = frame.buffer_tick
         if previous is not None and (compound, sets) != (
                 previous["compound"], previous["sets_used"]):
             self.origin = self.confirmation = None

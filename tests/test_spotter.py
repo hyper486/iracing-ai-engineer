@@ -61,6 +61,55 @@ def test_starting_on_clear_track_never_claims_a_previously_occupied_side_cleared
     assert kinds(model) == []
 
 
+@pytest.mark.parametrize("offset", [-1000, 1000])
+def test_independent_buffer_and_session_clock_origins_preserve_proximity_transitions(offset):
+    model = ProximitySpotter()
+    for tick in range(2000, 2013):
+        code = 2 if tick < 2003 else 1
+        sample = replace(frame(tick, code), buffer_tick=tick + offset)
+        model.feed(sample, now=sample.captured_monotonic_s)
+    result = model.snapshot(now=sample.captured_monotonic_s)
+    assert result["status"] == "READY"
+    assert result["candidate"]["kind"] == "ALL_CLEAR"
+    assert kinds(model) == ["CAR_LEFT", "ALL_CLEAR"]
+
+
+@pytest.mark.parametrize("buffer_tick", [None, True, False, -1, 1.0, "1", 2**31])
+def test_invalid_publication_clock_cannot_arm(buffer_tick):
+    model = ProximitySpotter()
+    sample = replace(frame(1, 2), buffer_tick=buffer_tick)
+    model.feed(sample, now=sample.captured_monotonic_s)
+    assert model.snapshot(now=sample.captured_monotonic_s)["reason"] == "CORE_FIELD_INVALID"
+    assert not kinds(model)
+
+
+@pytest.mark.parametrize("buffer_tick,session_tick,expected", [
+    (1003, 4, "CONFLICTING_DUPLICATE"),
+    (1004, 3, "CONFLICTING_DUPLICATE"),
+    (1002, 4, "NEED_PROGRESSING_TICKS"),
+    (1100, 4, "NEED_PROGRESSING_TICKS"),
+])
+def test_each_independent_clock_must_remain_fresh_and_progressing(
+    buffer_tick, session_tick, expected,
+):
+    model = ProximitySpotter()
+    for tick in range(1, 4):
+        sample = replace(frame(tick, 2), buffer_tick=tick + 1000)
+        model.feed(sample, now=sample.captured_monotonic_s)
+    assert kinds(model) == ["CAR_LEFT"]
+    sample = replace(frame(4, 1, changes={"SessionTick": session_tick}),
+                     buffer_tick=buffer_tick)
+    model.feed(sample, now=sample.captured_monotonic_s)
+    result = model.snapshot(now=sample.captured_monotonic_s)
+    assert result["reason"] == expected
+    assert result["candidate"] is None
+    assert kinds(model) == ["CAR_LEFT"]
+    if buffer_tick == 1002:
+        assert any(row["reason"] == "TIMELINE_REGRESSION" for row in model.audit())
+    elif buffer_tick == 1100:
+        assert any(row["reason"] == "CONTINUITY_GAP" for row in model.audit())
+
+
 def test_clear_requires_sustained_confirmation_and_new_hazard_withdraws_it_immediately():
     model = ProximitySpotter()
     for tick in range(1, 4):

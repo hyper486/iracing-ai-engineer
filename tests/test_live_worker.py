@@ -101,6 +101,37 @@ def test_queue_age_expires_even_while_processing_owner_is_stuck():
     assert not sink.finished
 
 
+@pytest.mark.parametrize("overflow", [False, True])
+def test_recording_sized_burst_is_bounded_and_overflow_still_forbids_completion(overflow):
+    from iracing_ai_engineer.live_app import RECORDING_QUEUE_MAX_BYTES
+
+    sink = Sink()
+    sink.block = True
+    worker = FrameWorker(lambda: sink, name="synthetic-recording-burst",
+                         max_bytes=RECORDING_QUEUE_MAX_BYTES)
+    size = 2 * 1024**2  # Conservative accounting, no real metadata or SDK data.
+    count = RECORDING_QUEUE_MAX_BYTES // size if overflow else 12
+    try:
+        assert worker.submit(0, size=size, observed_at=time.perf_counter())
+        assert sink.entered.wait(1)
+        for index in range(1, count):
+            assert worker.submit(index, size=size, observed_at=time.perf_counter())
+        assert worker.snapshot()["buffered_bytes"] == count * size
+        assert worker.snapshot()["buffered_bytes"] <= RECORDING_QUEUE_MAX_BYTES
+        if overflow:
+            assert not worker.submit(count, size=size, observed_at=time.perf_counter())
+            assert worker.snapshot()["reason"] == "QUEUE_OVERFLOW"
+        worker.close(complete=True)
+    finally:
+        sink.proceed.set()
+        assert worker.join(3)
+    assert sink.closed
+    assert sink.finished is (not overflow)
+    assert worker.snapshot()["status"] == ("ERROR" if overflow else "COMPLETE")
+    if not overflow:
+        assert sink.rows == list(range(count))
+
+
 @pytest.mark.parametrize("failure,code", [
     ("process", "PROCESSING_FAILED"), ("finish", "FINALIZE_FAILED"), ("close", "CLOSE_FAILED"),
 ])

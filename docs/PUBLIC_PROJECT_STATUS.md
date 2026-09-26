@@ -1,6 +1,66 @@
 # Public project status
 
-Snapshot: 2026-09-24 EDT
+Snapshot: 2026-09-26 EDT
+
+## Live-trial ingestion and pit-timing corrections (local trial build)
+
+Live-path assumptions have been corrected without promoting racing or audio
+acceptance. The Spotter and the stint, pit-observation, motion-profile and
+tire-counter owners now treat the frozen-buffer publication counter and
+`SessionTick` as independently based clocks. Each must still progress, stay fresh
+and reject conflicting duplicates; an absolute counter offset is not a torn read.
+The private recording lane now has its own bounded 128 MiB accounting budget
+(still at most 128 observations), while analysis keeps its 16 MiB / 0.5 s limits.
+This accommodates short write bursts for full-schema/metadata frames; overload
+still fails the lane without evicting rows or writing a successful receipt.
+
+Exactly update-bound `Offline Testing` is now an explicit native session type,
+not an alias for Race. Its persistent one-lap-to-green bit is excluded from
+fuel/corner rejection only with directly observed integer `SessionState=4`.
+Raw flags remain intact; unknown context, yellow/red, repair, start lights,
+incidents, pits, partial laps and existing clean-lap thresholds remain guarded.
+The native optional fuel-fact policy accepts this mode, but no race finish is
+invented. A context change invalidates the offline learning cohort/partial lap.
+
+Pit timing additionally accepts direct approaching-pits samples around the SDK
+pit-road edges without training clean phase profiles on them. Low-speed stall
+settling has a bounded progress high-water tolerance; accumulated reversal,
+missing speed, jumps, incidents and source/clock gaps still discard the visit.
+Raw positions and strict edge brackets remain unchanged. Current-code replay
+of a retained complete pit clip now produces one elapsed-time interval and net
+tank-change observation. Missing clean baseline evidence still withholds net
+loss and the calibration draft; this is not live strategy acceptance.
+
+Targeted synthetic detector, audio-consumer, reader, recorder, worker and
+offline-context tests passed; one relevant regression group passed 516 tests,
+and the independent-clock tracker regression group passed 318 tests. After the
+pit-boundary fixes, 180 pit/clock/capture/reader tests passed. These are
+targeted groups, not a full-suite result. Four orderly sealed private in-car
+clips have matching detector replays and
+exact-byte capture links. All four final-code numerical recomputations completed;
+no learned fuel model or repeated-corner practice fact was admitted. The full
+repository suite passed: 3,667 passed, 46 skipped. Skips remain explicit and
+do not count as data-dependent, private-deployment or audio acceptance.
+The two wheel-build checks skipped for tool discovery also passed separately
+after adding the existing local `uv` directory to that test process's PATH.
+The updated unsigned local EXE passed all 28
+frozen checks under a system-only child PATH; size/hash matched its private
+build manifest. Existing separate installations/settings are not changed.
+In-car diagnostics were collected privately without a GUI or audio stream;
+they do not verify packaged startup, microphone, hearing or end-to-end VR latency.
+One sealed clip also retains a natural pit-entry/refuel/exit sequence:
+live state withheld lap learning and proximity calls in the pits and resumed
+after exit. This is not a calibrated pit-loss, tire-installation or strategy pass;
+the complete numerical recomputation runs only after the simulator exits.
+After the tracker fix, the private diagnostic also reported a source-bound partial
+stint observation from then-current in-car data. It did not infer a tire installation
+or reconstruct a pre-attachment stint origin. Replaying its earlier saved pit
+sequence under the current owners, not collecting another live visit, exposed
+and then checked the additional approach/stall corrections.
+The last raw clip is an unsealed prefix after SDK disconnect; its complete
+diagnostic journal does not repair that missing raw receipt. It remains private
+and is not admitted for complete numerical replay. Previously sealed clips remain
+available; no file has been relabeled or given a fabricated receipt.
 
 ## Product objective
 
@@ -24,7 +84,7 @@ required running dependency. The final goal remains active and unaccepted.
 | Tire reasoning | Offline v2 performance belief with reviewed origin | Fuel-only stops do not imply new tires; explicit source-bound service labels and installation-derived calibration ages are required. Not native live tire advice or physical wear. |
 | Corner diagnosis | Implemented for repeated comparable evidence | Curb/risk claims remain blocked without trusted labels. |
 | Deterministic reports | Implemented | JSON and script-free HTML outputs preserve provenance and limitations. |
-| Privacy-safe live state bridge | Implemented; spectator-only field check | Tick-level normalization feeds bounded JSONL snapshots; spectator guard stayed WAIT_CAR. In-car validation remains pending. |
+| Privacy-safe live state bridge | Implemented; spectator and in-car source diagnostics | Tick-level normalization feeds bounded snapshots; spectator guard stayed WAIT_CAR and current in-car telemetry reaches the native controller. Packaged/audio/VR acceptance remains pending. |
 | Local fuel dashboard | Experimental; offline/synthetic checks | Whole-lap fuel learning, freshness/driver guards and optional bounded private recording are implemented. This is not a multi-stop, traffic, tire or driving-guidance release. |
 | Local practice speech | Opt-in browser prototype | Only local English voices in confirmed Practice; Race speech is disabled. A hidden tab auto-mutes, so game-background playback is not guaranteed. |
 | DeepSeek engineer framework | Implemented; constrained evidence selection | Opt-in asynchronous questions, local grounding/rendering, bounded attempts and safe fallback; validated historical receipt context is separate from live fuel. Real provider/account and in-car acceptance remain unverified. |
@@ -54,8 +114,8 @@ required running dependency. The final goal remains active and unaccepted.
 | Conditional next-stint tire benefit | Native local calculation; invented-data checks | Frozen model plus driver-confirmed origin, whole-stint age/fuel bounds and extra four-tire service yield a net time interval. Not wear, leave-tire safety, mapped rejoin, rule-aware race optimization or actual calibration. |
 | Same-action pit briefing | Native local integration; invented-data checks | Actual mapped dose, separate service traffic states and complete-lap tire gain share one action. Partial-lap benefit and full-stint net gain remain unknown; no ranking, wear claim or live acceptance. |
 | Advisor-only safety | Required and implemented | No vehicle, simulator-launch or pit-box control path is accepted. |
-| Authentic local `SDK_LIVE` acquisition | Proven before acceptance | The running simulator's real shared-memory transport has produced a complete, sealed canary capture. |
-| Authentic local `SDK_LIVE` acceptance | Pending on-track evidence | Out-of-car, stationary pit-stall and spectator captures do not support strategy or driving acceptance. |
+| Authentic local `SDK_LIVE` acquisition | Proven; private in-car diagnostics retained | The running simulator's read-only shared-memory path produced sealed driving clips, including a pit visit; source corrections were checked against them. |
+| Authentic local `SDK_LIVE` acceptance | Product and hardware evidence still pending | In-car acquisition and historical pit recomputation do not establish learned fuel, repeated-corner advice, actual nearby-car speech or headset/VR acceptance. |
 | Final strategy plus driving report | Pending live evidence | Both advice gates must pass on an admitted real capture. |
 
 ## Native first-trial setup and guidance
@@ -832,9 +892,11 @@ remain open. See [the question contract](LIVE_FUEL_QUESTIONS.md).
 
 ## Earlier bounded live-work isolation milestone
 
-The source reader now sends slow analysis and optional private recording to
-separate single-owner lanes, each bounded to 128 observations / 16 MiB of retained
-payload accounting including active work. Sink construction, writes, finalization,
+This earlier milestone sent slow analysis and optional private recording to
+separate single-owner lanes, each then bounded to 128 observations / 16 MiB of retained
+payload accounting including active work. The current recording-only burst budget
+is described at the top of this document; analysis limits are unchanged.
+Sink construction, writes, finalization,
 status access and close all remain on their owner. Overflow stops that lane with
 an explicit incomplete-capture reason; it cannot silently drop old frames and
 then mark the session complete. Original observation timestamps and connection

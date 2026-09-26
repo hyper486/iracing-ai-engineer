@@ -40,7 +40,9 @@ def fixtures(name):
 
 
 class Rig:
-    def __init__(self):
+    def __init__(self, buffer_offset=0, track_length_mm=1_200_000):
+        self.buffer_offset = buffer_offset
+        self.track_length_mm = track_length_mm
         self.base = next(synthetic_frames(8, rate=20))
         self.monitor = LiveMonitor(source_id="synthetic", session_id="synthetic",
                                    sdk_tick_rate_hz=20, expected_car_count=3)
@@ -56,10 +58,11 @@ class Rig:
                   "Lap": math.floor(position) + 1, "LapCompleted": math.floor(position),
                   "LapDistPct": position % 1, "FuelLevel": 30., "Speed": 0.,
                   "PitstopActive": False, "PlayerCarInPitStall": False, **changes}
-        self.frame = replace(self.base, buffer_tick=self.tick, values=values,
+        self.frame = replace(self.base, buffer_tick=self.tick + self.buffer_offset, values=values,
                              read_errors=read_errors, captured_monotonic_s=seconds + 1)
         assert self.monitor.feed(self.frame)
-        self.tracker.feed(self.frame, self.monitor.latest_sample)
+        self.tracker.feed(self.frame, self.monitor.latest_sample,
+                          track_length_mm=self.track_length_mm)
         value = fixtures("live_queries").snapshot()
         value.update(fuel={"status": "BLOCKED"}, traffic=None)
         value["monitor"] = self.monitor.snapshot()
@@ -103,6 +106,132 @@ def test_completed_visit_keeps_elapsed_net_loss_and_fuel_change_distinct(complet
     assert observation["service_contents"] == "UNKNOWN"
     assert observation["entry_fraction"] == pytest.approx(.79825)
     assert observation["exit_fraction"] == pytest.approx(.09875)
+
+
+def test_independent_buffer_origin_preserves_completed_pit_measurement(completed):
+    rig = Rig(buffer_offset=1000)
+    rig.warm()
+    observed = validated_pit_observation(rig.visit())
+    assert observed is not None and observed["status"] == "OBSERVED"
+    assert observed["observation"] == completed["pit_observation"]["observation"]
+    assert observed["calibrated"] is observed["live_acceptance"] is False
+
+
+def observed_stall_visit(rig, *, perturb=None):
+    """Invented approach, stationary settling and departure, never copied live rows."""
+    origin = rig.tracker.previous["progress_laps"]
+    rig.step(origin + .001, PlayerTrackSurface=2)
+    origin += .001
+    for i in range(1, 401):
+        service = 100 <= i <= 300
+        position = origin + .0015 * (min(i, 100) + max(i - 300, 0))
+        changes = {"OnPitRoad": True, "PlayerTrackSurface": 1 if service else 2,
+                   "Speed": .1 if service else 20., "PitstopActive": service,
+                   "PlayerCarInPitStall": service}
+        if service:
+            position += (0., -2e-7, 1e-7)[i % 3]
+        if perturb is not None:
+            position, changes = perturb(i, position, changes)
+        rig.step(position, read_errors=changes.pop("read_errors", ()), **changes)
+    return rig.step(origin + .3025, FuelLevel=50., PlayerTrackSurface=2)
+
+
+def test_approach_edges_and_bounded_stall_settling_preserve_elapsed_and_clean_baseline():
+    rig = Rig(buffer_offset=1000)
+    rig.warm()
+    value = validated_pit_observation(observed_stall_visit(rig))
+    assert value is not None and value["status"] == "OBSERVED"
+    observation = value["observation"]
+    assert observation["pit_road_elapsed_range_s"] == [19.95, 20.05]
+    assert observation["baseline_track_elapsed_range_s"] is not None
+    assert observation["observed_net_tank_change_l"] == 20.
+    assert observation["service_contents"] == "UNKNOWN"
+    assert not value["calibrated"] and not value["live_acceptance"]
+    assert rig.tracker.trace is None  # Pit/approach never train the clean baseline.
+
+
+@pytest.mark.parametrize("case", ["speed", "missing_speed", "invalid_speed", "surface", "creep"])
+def test_stationary_exception_needs_direct_low_speed_stall_and_bounded_total_drift(case):
+    rig = Rig()
+    rig.step()
+    rig.step()
+
+    def change(i, position, changes):
+        if 101 <= i <= 200:
+            if case == "creep":
+                position -= (i - 100) * 2e-6
+            elif case == "speed":
+                changes["Speed"] = .6
+            elif case == "missing_speed":
+                changes["read_errors"] = ("Speed",)
+            elif case == "invalid_speed":
+                changes["Speed"] = True
+            else:
+                changes["PlayerTrackSurface"] = 2
+        return position, changes
+
+    value = observed_stall_visit(rig, perturb=change)
+    assert value["pit_observation"]["status"] == "WAIT"
+    assert value["pit_observation"]["observation"] is None
+
+
+@pytest.mark.parametrize("length", [1_200_000, 25_000_000])
+@pytest.mark.parametrize("retreat_m,accepted", [(.05, True), (.15, False)])
+def test_stall_settling_uses_bound_projected_distance_not_track_dependent_lap_fraction(
+    length, retreat_m, accepted,
+):
+    rig = Rig(track_length_mm=length)
+    rig.step()
+    rig.step()
+
+    def change(i, position, changes):
+        if 110 <= i <= 290:
+            position -= retreat_m * 1000 / length
+        return position, changes
+
+    value = observed_stall_visit(rig, perturb=change)
+    assert (value["pit_observation"]["status"] == "OBSERVED") is accepted
+
+
+@pytest.mark.parametrize("length", [None, True, 1_200_000., 0, 100_000, 100_000_001])
+def test_unknown_or_invalid_bound_length_does_not_allow_stationary_backward_exception(length):
+    rig = Rig(track_length_mm=length)
+    rig.step()
+    rig.step()
+    assert observed_stall_visit(rig)["pit_observation"]["status"] == "WAIT"
+
+
+def test_bound_length_change_withdraws_an_active_visit():
+    rig = Rig()
+    rig.step()
+    rig.step()
+
+    def change(i, position, changes):
+        if i == 150:
+            rig.track_length_mm *= 2
+        return position, changes
+
+    assert observed_stall_visit(rig, perturb=change)["pit_observation"]["status"] == "WAIT"
+
+
+def test_returning_from_approach_without_pit_entry_invalidates_clean_baseline():
+    rig = Rig()
+    rig.warm()
+    rig.step(PlayerTrackSurface=2)
+    rig.step()
+    observed = validated_pit_observation(rig.visit())["observation"]
+    assert observed["pit_road_elapsed_range_s"] == [19.95, 20.05]
+    assert observed["baseline_track_elapsed_range_s"] is None
+
+
+def test_approach_line_crossing_keeps_elapsed_but_does_not_invent_clean_profile():
+    rig = Rig()
+    for _ in range(1600):
+        rig.step()
+    rig.step(PlayerTrackSurface=2)  # Counter crosses while outside clean main-track history.
+    observed = validated_pit_observation(rig.visit())["observation"]
+    assert observed["pit_road_elapsed_range_s"] == [19.95, 20.05]
+    assert observed["baseline_track_elapsed_range_s"] is None
 
 
 @pytest.mark.parametrize("option", [

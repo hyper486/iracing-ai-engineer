@@ -739,8 +739,10 @@ def safe_state():
     }}
 
 
-def test_optional_low_fuel_fact_requires_continuous_safe_progress_and_cooldown():
+@pytest.mark.parametrize("session_type", ["Race", "Practice", "Offline Testing"])
+def test_optional_low_fuel_fact_requires_continuous_safe_progress_and_cooldown(session_type):
     value, policy = safe_state(), FuelVoicePolicy()
+    value["telemetry"]["session_type"] = session_type
     assert safe_fuel_snapshot(value)
     assert policy.candidate(value, 0) is None
     value["telemetry"]["monitor"]["sequence"] = 2

@@ -28,10 +28,10 @@ from .driving import (
     resample_clean_laps,
 )
 from .laps import CLEAN_DRIVING_MAX_GAP_S, CLEAN_DRIVING_MIN_TICK_COVERAGE, segment_laps
-from .live_fuel import _UNSUITABLE_FLAGS
 from .live_worker import FrameWorker
 from .runtime_clock import monotonic_now
 from .sdk_probe import OPPONENT_ARRAY_FIELDS, classify_context
+from .session_flags import UNSUITABLE_LAP_FLAGS, unsuitable_lap_flags
 from .telemetry import Presence, Provenance, QualityStatus, SourceKind
 
 LIVE_DRIVING_CONTRACT = "live-recent-driving-v1"
@@ -117,14 +117,15 @@ class _LapJob:
     track_length_mm: int
     completed_laps: int
     rows: bytes
+    flag_mask: int = UNSUITABLE_LAP_FLAGS | 1 | 0x010000
 
 
-def _conditions(channels, lap):
+def _conditions(channels, lap, flag_mask=UNSUITABLE_LAP_FLAGS | 1 | 0x010000):
     window = {key: value[lap.start_frame:lap.end_frame_exclusive]
               for key, value in channels.items()}
     if np.any(window["Speed"] < 1):
         return None, "STOPPED_OR_REVERSE_LAP"
-    if (np.any(window["SessionFlags"].astype(np.int64) & (_UNSUITABLE_FLAGS | 1 | 0x010000))
+    if (np.any(window["SessionFlags"].astype(np.int64) & flag_mask)
             or np.any(window["PlayerCarInPitStall"]) or np.any(window["PitstopActive"])):
         return None, "FLAGS_OR_PIT_INTERVAL"
     separation = window["SeparationM"]
@@ -202,7 +203,7 @@ class _CornerModel:
         elif len(complete) == 1 and complete[0].max_gap_s > CLEAN_DRIVING_MAX_GAP_S:
             reason = "LAP_SAMPLING_GAP"
         elif len(complete) == 1 and complete[0].clean_for_driving:
-            condition, reason = _conditions(channels, complete[0])
+            condition, reason = _conditions(channels, complete[0], job.flag_mask)
         self.last_completed = job.completed_laps
         if condition is not None:
             observation = replace(complete[0], ordinal=job.completed_laps)
@@ -324,7 +325,7 @@ class LiveDrivingEngineer:
         self._identity = self._previous = self._buffer = self._pending = None
         self._history.clear()
 
-    def feed(self, frame, sample, track_length_mm):
+    def feed(self, frame, sample, track_length_mm, *, session_type=None):
         if self._failed:
             self.reset("COACHING_PROCESSING_ERROR")
             return
@@ -354,7 +355,11 @@ class LiveDrivingEngineer:
         if row[9] or row[10] != 3 or row[23] or row[24]:
             self.reset("PIT_OR_OFF_TRACK_INTERVAL")
             return
-        identity = (session, player, track_length_mm, row[14], row[15])
+        session_state = (frame.values.get("SessionState")
+                         if "SessionState" not in frame.read_errors else None)
+        flag_mask = unsuitable_lap_flags(session_type, session_state) | 1 | 0x010000
+        # A lap cannot carry an offline exception across a type/state change.
+        identity = (session, player, track_length_mm, row[14], row[15], session_type, flag_mask)
         if self._identity != identity:
             self.reset("WAIT_COMPLETE_LAP")
             self._identity = identity
@@ -388,7 +393,7 @@ class LiveDrivingEngineer:
             if row[0] >= end_time + TAIL_SECONDS:
                 self._sequence += 1
                 job = _LapJob(self._epoch, self._sequence, track_length_mm, int(row[3]),
-                              data.tobytes())
+                              data.tobytes(), flag_mask)
                 self._pending = None
                 self._worker.submit(job, size=len(job.rows) + 1024, observed_at=self.clock())
         crossing = previous is not None and previous[4] >= .97 and row[4] <= .03

@@ -6,6 +6,7 @@ import json
 import math
 import threading
 import time
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -188,7 +189,10 @@ class FakeSdk:
         self.closed = True
 
 
-def test_real_reader_pipeline_links_private_raw_capture_and_detector_replay(tmp_path):
+@pytest.mark.parametrize("publication_offset", [0, 1000])
+def test_real_reader_pipeline_links_private_raw_capture_and_detector_replay(
+    tmp_path, publication_offset,
+):
     from iracing_ai_engineer.trial_audit import TrialAudit
     from iracing_ai_engineer.trial_replay import replay_trial
 
@@ -196,8 +200,13 @@ def test_real_reader_pipeline_links_private_raw_capture_and_detector_replay(tmp_
     state = live_app.AppState(clock=clock)
     journal = TrialAudit(tmp_path / "trials", clock=clock)
     state.attach_trial(journal)
-    sdk = FakeSdk(clock, stop, 12, stop_on_last=True,
-                  value_changes={tick: {"CarLeftRight": 2} for tick in range(1, 13)})
+    class OffsetSdk(FakeSdk):
+        def read_frozen(self, fields):
+            sample = super().read_frozen(fields)
+            return replace(sample, buffer_tick=sample.buffer_tick + publication_offset)
+
+    sdk = OffsetSdk(clock, stop, 12, stop_on_last=True,
+                    value_changes={tick: {"CarLeftRight": 2} for tick in range(1, 13)})
     try:
         live_app.run_reader(state, stop, LiveFuelConfig(), transport_factory=lambda: sdk,
                             clock=clock, record_directory=tmp_path / "captures")
@@ -230,6 +239,25 @@ class PacedWorker(FrameWorker):
     def close(self, **kwargs):
         super().close(**kwargs)
         assert self.join(3)
+
+
+def test_recording_has_a_separate_bounded_burst_budget_without_relaxing_analysis(tmp_path):
+    clock, stop = Clock(), Stop()
+    state = live_app.AppState(clock=clock)
+    sdk = FakeSdk(clock, stop, 3, stop_on_last=True)
+    options = {}
+
+    def factory(resource, **kwargs):
+        options[kwargs["name"]] = kwargs.copy()
+        return PacedWorker(resource, **kwargs)
+
+    live_app.run_reader(state, stop, LiveFuelConfig(), transport_factory=lambda: sdk,
+                        clock=clock, record_directory=tmp_path, worker_factory=factory)
+    assert options["private-recording"]["max_bytes"] == 128 * MIB
+    assert options["private-recording"].get("max_age_s") is None
+    assert options["live-analysis"]["max_age_s"] == 0.5
+    assert "max_bytes" not in options["live-analysis"]  # Generic 16 MiB default.
+    assert state.snapshot()["workers"]["recording"]["max_frames"] == 128
 
 
 @pytest.mark.parametrize("malformed", [False, True])

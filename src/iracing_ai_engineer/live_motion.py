@@ -180,6 +180,7 @@ class LiveMotionTracker:
         self.failed = False
         self.reason = "SOURCE_NOT_READY"
         self.identity = self.previous = None
+        self._buffer_tick = None
         self.actors = {}
         self.excluded = 0
 
@@ -188,6 +189,7 @@ class LiveMotionTracker:
         if self.previous is not None or reason != self.reason:
             self.revision += 1
         self.reason, self.previous, self.identity = reason, None, None
+        self._buffer_tick = None
         self.actors.clear()
         self.excluded = 0
 
@@ -231,7 +233,7 @@ class LiveMotionTracker:
             or not _int(player, 255)
             or type(seconds) not in (int, float)
             or not 0 <= seconds <= 10_000_000
-            or frame.buffer_tick != tick
+            or not _int(frame.buffer_tick, 2**31 - 1)
             or progress is None
             or not _int(incidents, 1_000_000)
             or not _int(flags, 2**32 - 1)
@@ -280,12 +282,15 @@ class LiveMotionTracker:
             self.previous is not None
             and (
                 not 0 < tick - self.previous[0] <= self.tick_rate * 0.25
+                or self._buffer_tick is None
+                or not 0 < frame.buffer_tick - self._buffer_tick <= self.tick_rate * .25
                 or not 0 < now - self.previous[1] <= 250_000
                 or incidents != self.previous[2]
             )
         ):
             self.reset("CONTINUITY_CHANGED")
         self.identity = identity
+        self._buffer_tick = frame.buffer_tick
         if set(current) != set(self.actors) or excluded != self.excluded:
             self.revision += 1
         actors = {}

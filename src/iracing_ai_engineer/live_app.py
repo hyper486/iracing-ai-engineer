@@ -76,6 +76,11 @@ from .tire_frame_binding import tire_frame_anchor
 from .trial_audit import detector_reset, frame_projection
 
 FRESHNESS_S = 2.0
+# Full-schema frames also retain bounded SessionInfo and descriptor objects.
+# Their conservative queue accounting can approach 2 MiB per observation, so
+# the generic 16 MiB worker limit permits only a short disk-write burst. Keep
+# the recording lane bounded separately; analysis freshness/limits do not change.
+RECORDING_QUEUE_MAX_BYTES = 128 * 1024**2
 LIMITATIONS = [
     "实验燃油估计；不是完整进站策略，不考虑交通、轮胎、处罚或赛事规则。",
     "语音默认关闭，只支持练习中的本地英文声音；比赛保持静音。",
@@ -119,7 +124,9 @@ def bound_session_type(payload: object, update: object, frame: object) -> str | 
     if len(matches) != 1:
         return None
     value = matches[0].get("SessionType")
-    return value if value in ("Practice", "Race", "Qualify", "Lone Qualify", "Warmup") else None
+    return value if value in (
+        "Practice", "Offline Testing", "Race", "Qualify", "Lone Qualify", "Warmup",
+    ) else None
 
 
 class PracticeFuelSpeech:
@@ -903,11 +910,14 @@ class _LiveAnalysis:
             except Exception:
                 # Optional calibration evidence cannot disable fuel or proximity.
                 self._car_context_failed = True
-        progressed = self._monitor.feed(frame, observed_monotonic_s=observed)
+        progressed = self._monitor.feed(
+            frame, observed_monotonic_s=observed, session_type=session_type,
+        )
         self._monitor.advance_time(observed)
         if progressed and self._pit_observation is not None:
             try:
-                self._pit_observation.feed(frame, self._monitor.latest_sample)
+                self._pit_observation.feed(frame, self._monitor.latest_sample,
+                                           track_length_mm=track_length_mm)
             except Exception:
                 self._pit_observation.fail()
         if progressed and self._motion is not None:
@@ -937,7 +947,8 @@ class _LiveAnalysis:
                     self._state.complete_tire_confirmation(self._generation, receipt, frame)
         if progressed and self._driving is not None:
             try:
-                self._driving.feed(frame, self._monitor.latest_sample, track_length_mm)
+                self._driving.feed(frame, self._monitor.latest_sample, track_length_mm,
+                                   session_type=session_type)
             except Exception:
                 self._driving.fail()
         if observed >= self._next_snapshot and self._monitor.snapshot_pending:
@@ -1177,6 +1188,7 @@ def run_reader(
                                            max_bytes=remaining, audit=state.audit_capture,
                                            generation=generation),
                         name="private-recording", clock=clock,
+                        max_bytes=RECORDING_QUEUE_MAX_BYTES,
                     )
                     recording_worker = active_recording
                     state.attach_worker("recording", active_recording,

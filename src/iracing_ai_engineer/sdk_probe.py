@@ -140,6 +140,7 @@ FIELD_EXPECTED_TYPES: dict[str, frozenset[int]] = {
             "ReplaySessionNum",
             "SessionTick",
             "SessionNum",
+            "SessionState",
             "Lap",
             "PlayerCarIdx",
             "PlayerTrackSurface",
@@ -208,6 +209,12 @@ class VariableDescriptor:
 
 @dataclass(frozen=True)
 class RawSdkFrame:
+    """One frozen publication; buffer_tick need not equal payload SessionTick.
+
+    Their origins can differ. Stateful consumers must independently validate
+    publication and session clock progress instead of comparing absolute ticks.
+    """
+
     buffer_tick: int
     session_info_update: int
     values: dict[str, Any]

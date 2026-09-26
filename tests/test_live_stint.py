@@ -35,11 +35,13 @@ def fixtures(name):
 
 
 class Rig:
-    def __init__(self):
+    def __init__(self, buffer_offset=0):
+        self.buffer_offset = buffer_offset
         self.tracker = LiveStintTracker(60)
         self.monitor = LiveMonitor(source_id="synthetic", session_id="synthetic",
                                    sdk_tick_rate_hz=60, expected_car_count=3)
         self.base = next(synthetic_frames(8))
+        self.base = replace(self.base, buffer_tick=self.base.buffer_tick + buffer_offset)
         self.tick = 0
         # The first SDK sample has no timing predecessor. Prime the normalizer,
         # without promoting that initial unknown-freshness sample to evidence.
@@ -52,7 +54,7 @@ class Rig:
                   "SessionTime": self.tick / 60, **changes}
         if "LapCompleted" in changes and "Lap" not in changes:
             values["Lap"] = values["LapCompleted"] + 1
-        frame = replace(self.base, buffer_tick=self.tick, values=values,
+        frame = replace(self.base, buffer_tick=self.tick + self.buffer_offset, values=values,
                         read_errors=read_errors, captured_monotonic_s=self.tick / 60 + 1)
         assert self.monitor.feed(frame)
         self.tracker.feed(frame, self.monitor.latest_sample)
@@ -62,8 +64,9 @@ class Rig:
         return value
 
 
-def test_partial_attachment_is_an_observation_not_full_stint_or_tire_age():
-    rig = Rig()
+@pytest.mark.parametrize("buffer_offset", [0, 1000])
+def test_partial_attachment_is_an_observation_not_full_stint_or_tire_age(buffer_offset):
+    rig = Rig(buffer_offset)
     first = rig.step(LapCompleted=12)
     value = rig.step(LapCompleted=12)
     observed = validated_stint(value)
@@ -79,8 +82,9 @@ def test_partial_attachment_is_an_observation_not_full_stint_or_tire_age():
     assert "不代表完整 stint" in text["text"] and "不代表已换胎" in text["text"]
 
 
-def test_fuel_only_pit_exit_resets_stint_but_preserves_tire_observation():
-    rig = Rig()
+@pytest.mark.parametrize("buffer_offset", [0, 1000])
+def test_fuel_only_pit_exit_resets_stint_but_preserves_tire_observation(buffer_offset):
+    rig = Rig(buffer_offset)
     first = rig.step()
     rig.step(OnPitRoad=True, FuelLevel=65.)
     value = rig.step(OnPitRoad=False, FuelLevel=70.)

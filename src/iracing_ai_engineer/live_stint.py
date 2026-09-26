@@ -55,6 +55,7 @@ class LiveStintTracker:
         self.revision = 0
         self.reason = "SOURCE_NOT_READY"
         self.previous = self.identity = self.stint = self.tires = None
+        self._buffer_tick = None
         self.failed = False
 
     def reset(self, reason):
@@ -63,6 +64,7 @@ class LiveStintTracker:
         if self.previous is not None or self.reason != reason:
             self.revision += 1
         self.previous = self.identity = self.stint = self.tires = None
+        self._buffer_tick = None
         self.reason = reason
 
     def fail(self):
@@ -89,7 +91,7 @@ class LiveStintTracker:
         if not (_int(tick) and _int(laps, 1_000_000) and _int(session, 100_000)
                 and _int(player, 255)
                 and type(seconds) in (int, float) and 0 <= seconds <= 10_000_000
-                and type(pit) is bool and frame.buffer_tick == tick):
+                and type(pit) is bool and _int(frame.buffer_tick, 2**31 - 1)):
             self.reset("REQUIRED_DATA_UNAVAILABLE")
             return
         point = {"tick": tick, "time_us": round(seconds * 1_000_000),
@@ -99,12 +101,15 @@ class LiveStintTracker:
         if self.identity != identity or (previous is not None and (
             tick <= previous["tick"] or point["time_us"] <= previous["time_us"]
             or (tick - previous["tick"]) / self.tick_rate > .25
+            or self._buffer_tick is None
+            or not 0 < frame.buffer_tick - self._buffer_tick <= self.tick_rate * .25
             or point["time_us"] - previous["time_us"] > 250_000
             or laps < previous["laps"] or laps > previous["laps"] + 1
         )):
             self.reset("CONTINUITY_CHANGED")
             previous = None
         self.identity = identity
+        self._buffer_tick = frame.buffer_tick
         if self.stint is None or (previous is not None and previous["pit"] and not pit):
             self.stint = {"origin_time_us": point["time_us"], "origin_laps": laps,
                           "origin_kind": "OBSERVED_PIT_EXIT" if previous is not None

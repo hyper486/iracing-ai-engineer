@@ -73,7 +73,8 @@ def evidence(**kwargs):
 
 
 class Rig:
-    def __init__(self):
+    def __init__(self, buffer_offset=0):
+        self.buffer_offset = buffer_offset
         self.base = next(synthetic_frames(8, rate=20))
         self.monitor = LiveMonitor(source_id="synthetic", session_id="synthetic",
                                    sdk_tick_rate_hz=20, expected_car_count=3)
@@ -91,7 +92,7 @@ class Rig:
                   "CarIdxLapCompleted": [math.floor(position), math.floor(other), 0],
                   "CarIdxLap": [math.floor(position) + 1, math.floor(other) + 1, 0],
                   "CarIdxLapDistPct": [position % 1, other % 1, -1.], **changes}
-        frame = replace(self.base, buffer_tick=self.tick, values=values,
+        frame = replace(self.base, buffer_tick=self.tick + self.buffer_offset, values=values,
                         read_errors=read_errors, captured_monotonic_s=seconds + 1)
         assert self.monitor.feed(frame)
         self.tracker.feed(frame, self.monitor.latest_sample)
@@ -99,8 +100,9 @@ class Rig:
         return {"monitor": monitor, "motion": self.tracker.snapshot(monitor)}
 
 
-def test_normalized_frames_need_two_complete_laps_and_refresh_without_speech_churn():
-    rig = Rig()
+@pytest.mark.parametrize("buffer_offset", [0, 1000])
+def test_normalized_frames_need_two_complete_laps_and_refresh_without_speech_churn(buffer_offset):
+    rig = Rig(buffer_offset)
     for _ in range(1201):
         value = rig.step()
     assert validated_motion(value) is not None

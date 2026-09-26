@@ -68,6 +68,17 @@ def test_actual_completed_pit_has_one_card_and_frozen_check(tmp_path):
     assert run_synthetic_capture_replay()["status"] == "PASS"
 
 
+def test_sealed_pit_recompute_accepts_independently_based_publication_clock(tmp_path):
+    frames = (replace(row, buffer_tick=row.buffer_tick + 1000)
+              for row in synthetic_pit_visit_frames())
+    report = module.replay_capture(capture(tmp_path, frames))
+    cards = [row for row in report["cards"] if row["group"] == "pit"]
+    assert len(cards) == 1 and cards[0]["segment"] == 1
+    assert "19.9 到 20.1" in cards[0]["facts"][0]["text"]
+    assert report["source_kind"] == "OFFLINE_REPLAY"
+    assert not report["live_acceptance"] and not report["heard"]
+
+
 def test_actual_app_recorder_full_schema_is_supported_not_just_selected_fields(tmp_path):
     from iracing_ai_engineer.collector import CollectorSample
     from iracing_ai_engineer.live_app_recording import AppRecorder

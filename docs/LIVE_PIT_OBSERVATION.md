@@ -48,8 +48,24 @@ The independent tracker uses direct own-car SDK position and `OnPitRoad` edges.
 An entry is bracketed by the last outside/first inside points; exit uses the
 last inside/first outside points. Road elapsed bounds subtract the outer and
 inner time brackets. A visit must cover positive progress below one lap, last
-at most 30 minutes, and have continuous monotone ticks/time/position with gaps
-at most 0.25 seconds. Joining inside cannot supply a missing entry.
+at most 30 minutes, and have continuous monotone publication/session clocks with
+gaps at most 0.25 seconds. The counters can have independent origins. Joining
+inside cannot supply a missing entry.
+
+SDK `approaching_pits` surface samples can precede and follow the `OnPitRoad`
+edges. They support the edge brackets but never train clean phase profiles.
+The preceding clean baseline is held for entry; returning to the main track
+without entering starts a new baseline. An approach crossing the finish line
+without a clean profile withholds the baseline, not the observed road elapsed time.
+
+Progress normally cannot reverse. Only two consecutive directly observed
+pit-stall samples at speed at most 0.5 m/s may settle within 0.1 m of projected
+track progress behind the active visit's high-water mark. Conversion requires
+exact-update-bound track length; absent/invalid length denies this exception,
+and a length change discards the visit. This bounds total backward displacement,
+not just each step. Raw positions are not clamped or rewritten. Moving/non-stall
+reversal, excessive drift, invalid/missing speed for this exception, jumps and
+clock gaps still discard the visit. Entry/exit edge validation remains strict.
 
 The optional baseline uses two complete preceding 64-bin phase-time profiles.
 The shared profile validator requires three bounded crossing windows, lap
@@ -91,6 +107,8 @@ creates an authentic capture nor silently saves calibration/service labels.
 ## Verification boundary
 
 Synthetic tests cover finish-line wrap, exact edge intervals, missing baseline,
+independent publication-clock origins, approach-edge ordering, bounded stationary
+stall settling and rejection of cumulative drift or missing speed,
 drive-through/missing flags, fuel uncertainty, negative loss, malformed data,
 session/source discontinuity, bounded retention, fault isolation, local-query
 TTL, fake PTT withdrawal, native draft/confirmation and no-save/no-restart guards.

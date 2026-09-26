@@ -16,13 +16,11 @@ from dataclasses import dataclass
 from statistics import fmean
 
 from .fuel import FuelLapSample, _nearest_rank
+from .session_flags import UNSUITABLE_LAP_FLAGS, unsuitable_lap_flags
 
 _MAX_SNAPSHOT_GAP_US = 1_500_000
 # SDK yellow/red, waving yellow, pre-green/caution, DQ/repair and start lights.
-_UNSUITABLE_FLAGS = (
-    0x0008 | 0x0010 | 0x0100 | 0x0200 | 0x0400 | 0x4000 | 0x8000
-    | 0x020000 | 0x100000 | 0x200000 | 0x20000000 | 0x40000000
-)
+_UNSUITABLE_FLAGS = UNSUITABLE_LAP_FLAGS
 _RESET_EVENTS = frozenset({"source_reset", "session_reset"})
 _PIT_EVENTS = frozenset({
     "pit_road_entered", "pit_road_exited", "pit_stall_entered", "pit_stall_exited",
@@ -111,7 +109,7 @@ class LiveFuelEngineer:
             raise TypeError("config must be LiveFuelConfig")
         self.config = config
         self._history: deque[FuelLapSample] = deque(maxlen=config.max_history_laps)
-        self._identity: tuple[str, int, int] | None = None
+        self._identity: tuple[str, int, int, bool] | None = None
         self._sequence: int | None = None
         self._time_us: int | None = None
         self._previous: _Point | None = None
@@ -214,7 +212,7 @@ class LiveFuelEngineer:
         ):
             self._clear()
             return self._result("BLOCKED", ["MISSING_STREAM_IDENTITY_OR_CLOCK"])
-        identity = (binding, session_num, car_idx)
+        identity = (binding, session_num, car_idx, session_type == "Offline Testing")
         kinds = [event.get("kind") for event in events]
         if any(type(kind) is not str for kind in kinds):
             return self._interrupt("INVALID_EVENT_EVIDENCE", None)
@@ -306,7 +304,11 @@ class LiveFuelEngineer:
             return self._interrupt("OFF_TRACK_LAP", fuel_l)
         if flags & 1:
             return self._interrupt("CHECKERED_FLAG", fuel_l)
-        if flags & _UNSUITABLE_FLAGS:
+        flag_mask = unsuitable_lap_flags(
+            session_type if context.get("session_type") == session_type else None,
+            telemetry.get("session_state"),
+        )
+        if flags & flag_mask:
             return self._interrupt("FLAGGED_LAP", fuel_l)
         for event in events:
             if event.get("kind") == "flag_changed":
@@ -317,7 +319,7 @@ class LiveFuelEngineer:
                     "previous_flags", "current_flags",
                 )]
                 if any(value is None for value in flag_values) or any(
-                    value is not None and value & (_UNSUITABLE_FLAGS | 1)
+                    value is not None and value & (flag_mask | 1)
                     for value in flag_values
                 ):
                     return self._interrupt("FLAGGED_LAP", fuel_l)

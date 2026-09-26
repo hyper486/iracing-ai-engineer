@@ -25,11 +25,20 @@ sound packs. Opponent lap times, lap-distance arrays, fuel learning and complete
 laps are not prerequisites. It does not infer rear gaps, passing rights, flags
 or safe maneuvers from these lateral occupancy codes.
 
-Admission requires fresh increasing ticks/time, a matching frame/header tick,
+Admission requires fresh increasing session time and independent session/buffer ticks,
 known session/player indices, exact full-simulator provenance and affirmative
 on-track/in-car context without replay, pit road or pit stall. Missing fields,
 invalid types, relevant read errors and code zero produce a fixed reason instead
 of a guessed value. Repeated ticks do not renew freshness.
+
+The SDK publication-buffer counter and the `SessionTick` payload counter need not
+have the same origin. Absolute inequality is not a torn read. The transport still
+verifies one stable frozen buffer before and after copying. The detector separately
+checks both counters for duplicate conflicts, regressions and gaps; neither an
+advancing buffer with frozen session data nor advancing payload data under a
+reused buffer counter can keep an old alert alive. Old trial journals that recorded
+the former equality refusal can disagree with this corrected detector during
+current-code replay; such a mismatch is not converted into a replay or hearing pass.
 
 Default configuration uses a 250 ms freshness limit, 30 ms occupied confirmation,
 150 ms clear confirmation, five-second still-alongside reminders and a 750 ms
@@ -102,8 +111,10 @@ nor a full reader/recorder/audio/VR endurance acceptance test.
 
 `FrameWorker` owns a sink's construction, processing, byte-count access, finish
 and close. The SDK producer queues frozen transport-owned objects and never waits
-for a slow sink inside its sampling loop. Each lane admits at most 128 observations
-and 16 MiB of conservative retained-payload accounting, including in-flight work;
+for a slow sink inside its sampling loop. Each lane admits at most 128 observations.
+Analysis has a 16 MiB conservative retained-payload budget; full-schema recording
+has a separate 128 MiB budget to absorb short write bursts with larger metadata.
+Both budgets include in-flight work and retain the same terminal overflow behavior;
 these are neither serialized-file size nor a total-process RSS guarantee. Queue
 entries may include duplicate SDK ticks. Status contains counts, fixed reason
 codes and the last owner-observed committed bytes, which can lag an active write.

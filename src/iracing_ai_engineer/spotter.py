@@ -161,8 +161,11 @@ class ProximitySpotter:
             value = values.get(name)
             if type(value) is not int or not 0 <= value <= maximum:
                 return "UNAVAILABLE", "CORE_FIELD_INVALID"
-        if type(frame.buffer_tick) is not int or frame.buffer_tick != values["SessionTick"]:
-            return "UNAVAILABLE", "TICK_MISMATCH"
+        # The publication-buffer counter and the payload's session counter
+        # have independent origins. A stable frozen SDK read does not imply
+        # equal absolute values; require each clock to progress below instead.
+        if type(frame.buffer_tick) is not int or not 0 <= frame.buffer_tick <= 2**31 - 1:
+            return "UNAVAILABLE", "CORE_FIELD_INVALID"
         session_time = values.get("SessionTime")
         if not _finite(session_time) or session_time < 0:
             return "UNAVAILABLE", "SESSION_TIME_INVALID"
@@ -191,27 +194,29 @@ class ProximitySpotter:
             return
         values = frame.values
         identity = values["SessionNum"], values["PlayerCarIdx"]
-        current = values["SessionTick"], values["SessionTime"], values["CarLeftRight"]
-        tick, session_time, code = current
+        current = (values["SessionTick"], values["SessionTime"], values["CarLeftRight"],
+                   frame.buffer_tick)
+        tick, session_time, code, buffer_tick = current
         if self._identity is not None and identity != self._identity:
             self._lose("ACQUIRING", "CONTEXT_CHANGED")
         self._identity = identity
         if self._last is not None:
-            old_tick, old_time, _ = self._last
-            if tick == old_tick:
+            old_tick, old_time, _, old_buffer_tick = self._last
+            if tick == old_tick or buffer_tick == old_buffer_tick:
                 self._counts["DUPLICATES"] += 1
                 if current != self._last:
                     self._lose("UNAVAILABLE", "CONFLICTING_DUPLICATE")
                 else:
                     self.advance_time(now)
                 return
-            if tick < old_tick or session_time <= old_time:
+            if tick < old_tick or buffer_tick < old_buffer_tick or session_time <= old_time:
                 self._lose("ACQUIRING", "TIMELINE_REGRESSION")
             elif frame.captured_monotonic_s <= self._progress_at:
                 self._lose("ACQUIRING", "CAPTURE_TIME_NOT_PROGRESSING")
             elif (now - self._progress_at > self.config.max_age_s
                   or session_time - old_time > self.config.max_age_s
-                  or (tick - old_tick) / self.tick_rate_hz > self.config.max_age_s):
+                  or (tick - old_tick) / self.tick_rate_hz > self.config.max_age_s
+                  or (buffer_tick - old_buffer_tick) / self.tick_rate_hz > self.config.max_age_s):
                 self._lose("ACQUIRING", "CONTINUITY_GAP")
         if self._last is None:
             self._last, self._progress_at = current, frame.captured_monotonic_s

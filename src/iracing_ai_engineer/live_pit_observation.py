@@ -23,6 +23,11 @@ _CORE = {"SessionTick", "SessionTime", "SessionNum", "PlayerCarIdx", "LapComplet
          "LapDistPct", "OnPitRoad", "PlayerTrackSurface", "SessionFlags",
          "PlayerCarMyIncidentCount", "IsOnTrack", "IsOnTrackCar", "IsReplayPlaying"}
 _FLAGS = 0x00330000 | 0x0008 | 0x0010 | 0x0100 | 0xC000
+# A nearly stationary car can settle back and forth in the pit stall. Bound
+# that exception against a visit high-water mark, not per-frame drift. Raw
+# progress and the entry/exit brackets remain unchanged.
+_STATIONARY_PIT_PROGRESS_TOLERANCE_MM = 100
+_STATIONARY_PIT_MAX_SPEED_MPS = .5
 
 
 def unavailable_pit_observation(monitor, reason="SOURCE_NOT_READY", *, revision=0):
@@ -141,6 +146,10 @@ class LivePitObservationTracker:
         self.failed = False
         self.reason = "SOURCE_NOT_READY"
         self.identity = self.previous = self.incidents = None
+        self._buffer_tick = None
+        self._last_surface = self._pit_progress_peak = None
+        self._track_length_mm = None
+        self._stationary_pit = False
         self.trace = self.active = self.observation = None
 
     def reset(self, reason):
@@ -149,13 +158,18 @@ class LivePitObservationTracker:
             self.revision += 1
         self.reason = reason
         self.identity = self.previous = self.incidents = None
+        self._buffer_tick = None
+        self._last_surface = self._pit_progress_peak = None
+        self._track_length_mm = None
+        self._stationary_pit = False
         self.trace = self.active = self.observation = None
 
     def fail(self):
         self.failed = True
         self.reset("PIT_OBSERVATION_PROCESSING_ERROR")
 
-    def feed(self, frame, sample):
+    def feed(self, frame, sample, *, track_length_mm=None):
+        """Optional length must be bound to this exact frame's SessionInfo update."""
         if self.failed:
             return
         context = classify_context(frame.sim_mode_raw, frame.values)
@@ -177,11 +191,12 @@ class LivePitObservationTracker:
             _value(sample.incidents.player_car_my_incident_count),
             _value(sample.flags.player_track_surface))
         progress = _progress(_value(sample.lap.laps_completed), _value(sample.lap.lap_distance_pct))
-        if not (_int(tick) and frame.buffer_tick == tick and _number(seconds, high=10_000_000)
+        if not (_int(tick) and _int(frame.buffer_tick, 2**31 - 1)
+                and _number(seconds, high=10_000_000)
                 and _int(session, 100_000) and _int(player, 255) and progress is not None
                 and type(pit) is bool and _int(flags, 2**32 - 1) and not flags & _FLAGS
                 and _int(incidents, 1_000_000) and type(surface) is int
-                and (surface in (1, 2, 3) if pit else surface == 3)):
+                and (surface in (1, 2, 3) if pit else surface in (2, 3))):
             self.reset("PIT_OBSERVATION_REQUIRED_DATA_UNAVAILABLE")
             return
         optional = {}
@@ -196,23 +211,48 @@ class LivePitObservationTracker:
         identity = (_value(sample.source.source_id, direct=False),
                     _value(sample.session.session_id, direct=False), session, player)
         previous = self.previous
-        if self.identity != identity or (previous is not None and (
+        length = (track_length_mm if type(track_length_mm) is int
+                  and 100_000 < track_length_mm <= 100_000_000 else None)
+        was_approaching = (previous is not None and not previous["pit"]
+                           and self._last_surface == 2)
+        stationary_pit = (pit and surface == 1 and "Speed" not in frame.read_errors
+                          and _number(_value(sample.lap.speed_mps),
+                                      high=_STATIONARY_PIT_MAX_SPEED_MPS))
+        minimum_progress = previous["progress_laps"] - 1e-9 if previous is not None else None
+        if (length is not None and self.active is not None and self._pit_progress_peak is not None
+                and stationary_pit and self._stationary_pit):
+            minimum_progress = (
+                self._pit_progress_peak - _STATIONARY_PIT_PROGRESS_TOLERANCE_MM / length)
+        if (self.identity != identity or self._track_length_mm != length
+                or (previous is not None and (
             not 0 < tick - previous["tick"] <= self.tick_rate * .25
+            or self._buffer_tick is None
+            or not 0 < frame.buffer_tick - self._buffer_tick <= self.tick_rate * .25
             or not 0 < point["time_us"] - previous["time_us"] <= 250_000
-            or not -1e-9 <= progress - previous["progress_laps"] <= (
+            or progress < minimum_progress
+            or progress - previous["progress_laps"] > (
                 point["time_us"] - previous["time_us"]) / 5_000_000 + 1e-9
             or incidents != self.incidents
-        )):
+        ))):
             self.reset("PIT_OBSERVATION_CONTINUITY_CHANGED")
             previous = None
+            was_approaching = False
         self.identity, self.incidents = identity, incidents
+        self._buffer_tick = frame.buffer_tick
+        self._track_length_mm = length
+        self._last_surface, self._stationary_pit = surface, stationary_pit
         if previous is not None and not previous["pit"] and pit:
             self.observation = None
-            self.active = {"entry": [previous, point], "reference": _reference(
-                self.trace, previous["time_us"]), "max_gap_us": 0,
+            reference = _reference(self.trace, previous["time_us"])
+            if (reference is not None and reference["last_crossing_lap"]
+                    != math.floor(previous["progress_laps"])):
+                reference = None  # Approach crossed a line without a clean phase profile.
+            self.active = {"entry": [previous, point], "reference": reference, "max_gap_us": 0,
                 "service_flags": "NOT_OBSERVED_ACTIVE", "stall_flags": "NOT_OBSERVED_ACTIVE"}
+            self._pit_progress_peak = max(previous["progress_laps"], point["progress_laps"])
             self.revision += 1
         if self.active is not None:
+            self._pit_progress_peak = max(self._pit_progress_peak, point["progress_laps"])
             self.active["max_gap_us"] = max(self.active["max_gap_us"],
                                              point["time_us"] - previous["time_us"])
             for key in ("service", "stall"):
@@ -223,11 +263,13 @@ class LivePitObservationTracker:
                     self.active[state] = "OBSERVED_ACTIVE"
             if point["time_us"] - self.active["entry"][0]["time_us"] > 1_800_000_000:
                 self.active = None
+                self._pit_progress_peak = None
                 self.reason = "PIT_OBSERVATION_TOO_LONG"
             elif not pit:
                 record = {**self.active, "exit": [previous, point]}
                 self.observation = derive_observation(record)
                 self.active = None
+                self._pit_progress_peak = None
                 self.reason = ("PIT_VISIT_OBSERVED" if self.observation is not None
                                else "PIT_OBSERVATION_INCOMPLETE")
                 self.revision += 1
@@ -237,7 +279,12 @@ class LivePitObservationTracker:
                 self.reason = "PIT_VISIT_IN_PROGRESS"
             elif previous is None:
                 self.reason = "PIT_OBSERVATION_STARTED_INSIDE"
-        elif self.trace is None:
+        elif surface == 2:
+            # Approaching-pits can precede/follow the OnPitRoad edge. Keep the
+            # last clean baseline for entry, but never train a phase profile on
+            # this interval. Returning to the track without entry starts anew.
+            pass
+        elif self.trace is None or was_approaching:
             self.trace = _Trace(progress, point["time_us"])
         else:
             self.trace.advance(progress, point["time_us"])

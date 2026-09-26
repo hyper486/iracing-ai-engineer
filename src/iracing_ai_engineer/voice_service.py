@@ -119,7 +119,7 @@ def safe_fuel_snapshot(snapshot: dict) -> bool:
         and monitor.get("interval_unsafe_for_speech") == []
         and fuel.get("status") == "READY" and fuel.get("advisor_only") is True
         and fuel.get("estimate_only") is True and fuel.get("executable") is False
-        and telemetry.get("session_type") in ("Practice", "Race")
+        and telemetry.get("session_type") in ("Practice", "Offline Testing", "Race")
         and data.get("on_pit_road") is False and data.get("car_left_right") == 1
         and all(_finite(value) for value in (brake, steer, speed))
         and 0 <= brake <= 0.02 and abs(steer) <= 0.05 and speed >= 15

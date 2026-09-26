@@ -167,6 +167,37 @@ def test_fuel_interval_keeps_intermediate_missing_or_unsafe_tick(change, reason)
     assert monitor.snapshot()["interval_invalid_for_fuel"] == []
 
 
+@pytest.mark.parametrize("state,extra,read_error,blocked", [
+    (4, 0, False, False), (3, 0, False, True), (None, 0, False, True),
+    (4.0, 0, False, True), (4, 0, True, True),
+    (4, 0x08, False, True), (4, 0x100000, False, True),
+    (4, 0x20000000, False, True), (4, 1, False, True),
+])
+def test_offline_pre_green_exception_keeps_raw_flags_and_other_hazards(
+    state, extra, read_error, blocked,
+):
+    monitor = LiveMonitor(source_id="unit", session_id="unit", sdk_tick_rate_hz=60)
+    frame = _clean_fuel_frame(100, SessionFlags=0x10000200 | extra, SessionState=state)
+    if read_error:
+        frame = replace(frame, read_errors=("SessionState",))
+    monitor.feed(frame, session_type="Offline Testing")
+    value = monitor.snapshot()
+    assert value["telemetry"]["session_flags"] == frame.values["SessionFlags"]
+    assert value["context"]["session_type"] == "Offline Testing"
+    assert ("CAUTION_OR_UNKNOWN_FLAGS" in value["interval_invalid_for_fuel"]) is blocked
+
+
+def test_offline_safe_final_frame_cannot_hide_an_intermediate_start_or_caution():
+    monitor = LiveMonitor(source_id="unit", session_id="unit", sdk_tick_rate_hz=60)
+    for tick, state, flag in ((100, 4, 0x200), (101, 3, 0x200), (102, 4, 0x200)):
+        monitor.feed(_clean_fuel_frame(tick, SessionState=state, SessionFlags=flag),
+                     session_type="Offline Testing")
+    assert "CAUTION_OR_UNKNOWN_FLAGS" in monitor.snapshot()["interval_invalid_for_fuel"]
+    monitor.feed(_clean_fuel_frame(103, SessionState=4, SessionFlags=0x200),
+                 session_type="Offline Testing")
+    assert monitor.snapshot()["interval_invalid_for_fuel"] == []
+
+
 def test_monitor_flags_projection_keeps_both_transition_endpoints():
     monitor = LiveMonitor(source_id="unit", session_id="unit", sdk_tick_rate_hz=60)
     monitor.feed(_clean_fuel_frame(100, SessionFlags=0x08))

@@ -190,7 +190,8 @@ def frames(matrix):
         yield replace(frame, captured_monotonic_s=values["SessionTime"] + 1)
 
 
-def test_sdk_shaped_frames_reach_native_query_without_provider_or_fuel_dependency():
+@pytest.mark.parametrize("session_type", ["Practice", "Offline Testing"])
+def test_sdk_shaped_frames_reach_native_query_without_provider_or_fuel_dependency(session_type):
     # Genuine production owners; invented 20 Hz SDK frames, no simulator access.
     now = [1.0]
     state = live_app.AppState(clock=lambda: now[0])
@@ -201,10 +202,14 @@ def test_sdk_shaped_frames_reach_native_query_without_provider_or_fuel_dependenc
                                     allowed=lambda: True)
     try:
         data = rows(["baseline"] * 4 + ["long_coast"] * 2 + ["baseline"])
+        if session_type == "Offline Testing":
+            data[:, COLUMNS.index("SessionFlags")] = 0x10000200
         for frame in frames(data):
+            if session_type == "Offline Testing":
+                frame = replace(frame, values={**frame.values, "SessionState": 4})
             now[0] = frame.values["SessionTime"] + 1
             state.feed_spotter(frame)
-            analysis.process((frame, "Practice", now[0], 1_200_000))
+            analysis.process((frame, session_type, now[0], 1_200_000))
             # Fast replay cannot overflow a wall-clock lap worker; this wait is
             # test-only, never inside the SDK producer or production analysis.
             if frame.values["LapDistPct"] < .04:
@@ -213,7 +218,7 @@ def test_sdk_shaped_frames_reach_native_query_without_provider_or_fuel_dependenc
         last = state.snapshot()
         # Publish one final snapshot as the production 2 Hz owner would do.
         monitor = analysis._monitor.snapshot()
-        state.publish(monitor, last["fuel"], None, "Practice",
+        state.publish(monitor, last["fuel"], None, session_type,
                       driving=analysis._driving.snapshot(monitor))
         snapshot = state.snapshot()
         assert snapshot["driving"]["status"] == "READY", snapshot["driving"]
@@ -300,6 +305,38 @@ def test_collector_still_resets_on_gaps_above_existing_driving_limit(clock_gap):
                                     "SessionTick": frame.values["SessionTick"] + 10})
         monitor.feed(frame)
         collector.feed(frame, monitor.latest_sample, 1_200_000)
+        after = collector.snapshot(monitor.snapshot())
+        assert after["epoch"] > before["epoch"]
+        assert after["buffered_rows"] == 0 and after["point"] is None
+    finally:
+        collector.close()
+
+
+@pytest.mark.parametrize("change", ["race", "state", "read_error"])
+def test_offline_lap_context_change_discards_partial_coaching_buffer(change):
+    data = rows(["baseline"] * 3, rate=60)
+    boundary = np.flatnonzero(np.diff(data[:, 4]) < -.9)[0] + 1
+    sequence = list(frames(data[boundary - 8:boundary + 12]))
+    monitor = LiveMonitor(source_id="synthetic", session_id="synthetic", sdk_tick_rate_hz=60)
+    collector = LiveDrivingEngineer(60)
+    try:
+        for frame in sequence[:-1]:
+            frame = replace(frame, values={**frame.values, "SessionState": 4,
+                                            "SessionFlags": 0x200})
+            monitor.feed(frame, session_type="Offline Testing")
+            collector.feed(frame, monitor.latest_sample, 1_200_000,
+                           session_type="Offline Testing")
+        before = collector.snapshot(monitor.snapshot())
+        assert before["buffered_rows"] > 0
+        frame = replace(sequence[-1], values={**sequence[-1].values, "SessionState": 4,
+                                               "SessionFlags": 0x200})
+        session_type = "Race" if change == "race" else "Offline Testing"
+        if change == "state":
+            frame = replace(frame, values={**frame.values, "SessionState": 3})
+        elif change == "read_error":
+            frame = replace(frame, read_errors=("SessionState",))
+        monitor.feed(frame, session_type=session_type)
+        collector.feed(frame, monitor.latest_sample, 1_200_000, session_type=session_type)
         after = collector.snapshot(monitor.snapshot())
         assert after["epoch"] > before["epoch"]
         assert after["buffered_rows"] == 0 and after["point"] is None

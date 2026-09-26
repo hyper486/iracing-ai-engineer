@@ -162,10 +162,11 @@ def test_unsafe_intermediate_tick_restarts_speech_safe_window():
     assert policy.update(snapshot, _fuel(), "Practice", 5.1) is None
 
 
-def test_session_type_requires_exact_update_unique_matching_numeric_session():
+@pytest.mark.parametrize("session_type", ["Race", "Practice", "Offline Testing"])
+def test_session_type_requires_exact_update_unique_matching_numeric_session(session_type):
     frame = SimpleNamespace(session_info_update=3, values={"SessionNum": 2})
-    payload = {"SessionInfo": {"Sessions": [{"SessionNum": 2, "SessionType": "Race"}]}}
-    assert live_app.bound_session_type(payload, 3, frame) == "Race"
+    payload = {"SessionInfo": {"Sessions": [{"SessionNum": 2, "SessionType": session_type}]}}
+    assert live_app.bound_session_type(payload, 3, frame) == session_type
     assert live_app.bound_session_type(payload, 4, frame) is None
     assert live_app.bound_session_type(None, 3, frame) is None
     duplicate = copy.deepcopy(payload)

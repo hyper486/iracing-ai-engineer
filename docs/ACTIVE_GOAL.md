@@ -99,6 +99,22 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
 
 ## Delivery progress and next implementation slice
 
+- Implemented: corrected independent SDK publication/session clock handling and
+  gave full-schema recording a separate bounded burst budget. The clock fix
+  covers Spotter plus the stint, pit, motion and tire-counter owners. Added exact-bound
+  Offline Testing support with a Racing-state-only pre-green-bit exception;
+  preserve raw flags, other hazard gates and the absence of a race horizon.
+  Both clocks still require fresh progress; incomplete recordings stay incomplete.
+  Targeted tests, all four final-code private clip recomputations and all 28
+  rebuilt-EXE frozen checks pass. The full regression suite passed with
+  3,667 passed and 46 skipped; skipped checks are not acceptance evidence.
+  Pit timing also retains SDK approach-edge continuity and tolerates bounded
+  low-speed stall settling only with exact-bound track length. A retained real
+  visit now recomputes elapsed time and tank net change, without a usable clean
+  baseline or a future-service calibration claim.
+  The in-car diagnostic used the native controller without a GUI/audio
+  stream; it is not packaged or hearing acceptance. No game controls are sent.
+
 - First-trial usability: the native startup page now exposes applied voice/PTT
   preferences, independent module state and navigation to setup/testing/replay.
   Fixed unavailable-Spotter reasons include the SDK-off code without calling it

@@ -168,7 +168,7 @@ def test_invalid_fields_preserve_admission_reason(trial, name, value, reason):
 
 
 @pytest.mark.parametrize("change,reason", [
-    ({"buffer_tick": True}, "TICK_MISMATCH"),
+    ({"buffer_tick": True}, "CORE_FIELD_INVALID"),
     ({"captured_monotonic_s": None}, "FRAME_TIMESTAMP"),
     ({"captured_monotonic_s": float("nan")}, "FRAME_TIMESTAMP"),
     ({"sim_mode_raw": {"private": "value"}}, "NOT_LIVE_SOURCE"),

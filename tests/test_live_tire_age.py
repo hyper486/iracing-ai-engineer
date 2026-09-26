@@ -31,11 +31,13 @@ from iracing_ai_engineer.trial_replay import replay_trial
 
 
 class Rig:
-    def __init__(self):
+    def __init__(self, buffer_offset=0):
+        self.buffer_offset = buffer_offset
         self.tracker = LiveTireAgeTracker(60)
         self.monitor = LiveMonitor(source_id="synthetic", session_id="synthetic",
                                    sdk_tick_rate_hz=60, expected_car_count=3)
         self.base = next(synthetic_frames(8))
+        self.base = replace(self.base, buffer_tick=self.base.buffer_tick + buffer_offset)
         self.values = {**self.base.values, "LapCompleted": 3, "Lap": 4,
                        "PlayerCarInPitStall": False, "PitstopActive": False,
                        "PlayerTireCompound": 0, "TireSetsUsed": 0}
@@ -49,7 +51,8 @@ class Rig:
         self.values.update(SessionTick=self.tick, SessionTime=self.tick / 60, **changes)
         if "LapCompleted" in changes:
             self.values["Lap"] = self.values["LapCompleted"] + 1
-        frame = replace(self.base, buffer_tick=self.tick, values=self.values.copy(),
+        frame = replace(self.base, buffer_tick=self.tick + self.buffer_offset,
+                        values=self.values.copy(),
                         read_errors=read_errors, captured_monotonic_s=self.tick / 60 + 1)
         assert self.monitor.feed(frame)
         self.tracker.feed(frame, self.monitor.latest_sample)
@@ -91,8 +94,9 @@ def test_no_automatic_installation_on_attach_counter_change_or_pit_exit():
     assert rig.exit()["tire_age"]["origin"] is None
 
 
-def test_full_confirmation_then_observed_exit_counts_only_crossings_since_exit():
-    rig = Rig()
+@pytest.mark.parametrize("buffer_offset", [0, 1000])
+def test_full_confirmation_then_observed_exit_counts_only_crossings_since_exit(buffer_offset):
+    rig = Rig(buffer_offset)
     rig.park()
     receipt = rig.confirm()
     pending = rig.step()

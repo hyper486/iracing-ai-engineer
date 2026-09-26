@@ -69,6 +69,41 @@ def _assert_no_estimate(result: dict[str, object]) -> None:
     assert result["executable"] is False
 
 
+def test_offline_learning_preserves_flags_and_never_invents_a_race_finish():
+    engineer = _engineer()
+    result = _drive(
+        engineer, session_type="Offline Testing", session_state=4, session_flags=0x10000200,
+        session_laps_remaining=20,
+        alter=lambda s: s["context"].update(session_type="Offline Testing"),
+    )
+    assert result["status"] == "READY" and result["valid_laps"] == 2
+    assert result["estimated_laps_remaining"] is not None
+    assert result["race_laps_to_go"] is result["fuel_to_add_l"] is None
+    assert "RACE_FINISH_UNCONFIRMED" in result["reason_codes"]
+    # The offline cohort cannot leak into a different/unbound session type.
+    result = engineer.feed(_snapshot(61), session_type="Race")
+    assert result["valid_laps"] == 0
+    _assert_no_estimate(result)
+
+
+@pytest.mark.parametrize("session_type,context_type,state,extra", [
+    (None, "Offline Testing", 4, 0), ("Race", "Offline Testing", 4, 0),
+    ("Offline Testing", None, 4, 0), ("Offline Testing", "Offline Testing", 3, 0),
+    ("Offline Testing", "Offline Testing", 4, 0x08),
+    ("Offline Testing", "Offline Testing", 4, 0x100000),
+])
+def test_offline_fuel_exception_requires_matching_context_and_preserves_other_flags(
+    session_type, context_type, state, extra,
+):
+    result = _drive(
+        _engineer(), session_type=session_type, session_state=state,
+        session_flags=0x200 | extra,
+        alter=lambda s: s["context"].update(session_type=context_type),
+    )
+    assert result["valid_laps"] == 0 and result["status"] == "BLOCKED"
+    _assert_no_estimate(result)
+
+
 def test_defaults_are_conservative_and_validate_config() -> None:
     config = LiveFuelConfig()
     assert config.reserve_l == 2
