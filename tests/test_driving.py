@@ -314,6 +314,29 @@ def test_zero_coast_reference_preserves_repeated_long_coast_diagnosis(pickup_m):
     assert comparison.evidence_median == 74.0
 
 
+def test_coast_metric_excludes_lift_before_braking_and_measures_release_to_pickup():
+    channels, observations = _synthetic_session()
+    original = analyze_driving(channels, observations, track_length_m=TRACK_LENGTH_M)
+    # Invent extra pre-braking coasting on the two long-coast laps, without
+    # changing their post-release pedals, speed or time. This is not the window
+    # measured by coast_distance_m and must not be described as such to drivers.
+    for lap in observations[6:8]:
+        channels["Throttle"][lap.start_frame + 90:lap.start_frame + 158] = 0.0
+    changed = analyze_driving(channels, observations, track_length_m=TRACK_LENGTH_M)
+    for report in (original, changed):
+        measured = [row for row in report.corner_metrics
+                    if row.corner_id == "C01" and row.lap_ordinal in (7, 8)]
+        assert len(measured) == 2
+        for row in measured:
+            assert row.brake_onset_m == 158.0
+            assert row.brake_release_m == 218.0
+            assert row.throttle_pickup_m == 292.0
+            assert row.coast_distance_m == 74.0
+        diagnosis = next(row for row in report.diagnoses if row.diagnosis == "LONG_COAST")
+        assert diagnosis.evidence_lap_ordinals == (7, 8)
+    assert changed.corner_metrics == original.corner_metrics
+
+
 @pytest.mark.parametrize("missing_event", ["brake", "throttle"])
 def test_unobserved_coast_endpoint_stays_unavailable(missing_event):
     channels, observations = _synthetic_session()

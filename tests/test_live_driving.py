@@ -154,6 +154,20 @@ def test_one_off_and_latest_improvement_do_not_repeat_an_old_recommendation():
     assert values[-1]["point"] is None
 
 
+def test_long_coast_context_and_local_speech_name_the_measured_post_brake_window():
+    value = projection(model_result("long_coast"))
+    context = build_live_context(value)
+    facts = {item["id"]: item["text"] for item in context["facts"]}
+    assert "松刹后、重新给油前" in facts["driving.pattern"]
+    assert "松刹到重新给油" in facts["driving.practice"]
+    answer = render_live_query(context, "driving")
+    assert "松刹到重新给油" in answer["spoken_text"]
+    assert "松刹后、重新给油前" in answer["text"]
+    assert "不保证提速" in answer["spoken_text"]
+    for text in (json.dumps(context, ensure_ascii=False), answer["text"], answer["spoken_text"]):
+        assert "松油至刹车" not in text and "松油到刹车" not in text
+
+
 @pytest.mark.parametrize("channel,value,reason", [
     ("CarLeftRight", 2, "TRAFFIC_AFFECTED_LAP"),
     ("SeparationM", 40, "TRAFFIC_AFFECTED_LAP"),
@@ -233,6 +247,7 @@ def test_sdk_shaped_frames_reach_native_query_without_provider_or_fuel_dependenc
             answer = service.snapshot()["answer"]
             assert answer["stale"] is False and answer["topic"] == "driving"
             assert "练习假设" in answer["spoken_text"]
+            assert "松刹到重新给油" in answer["spoken_text"]
             assert service.snapshot()["requests_used"] == 0
             assert "SYNTHETIC_PRIVATE" not in json.dumps(build_live_context(snapshot))
         finally:
@@ -637,6 +652,8 @@ def test_delayed_cloud_coaching_binds_question_time_not_completion(change):
 
     class Planner:
         def complete(self, context, question):
+            facts = {item["id"]: item["text"] for item in context["facts"]}
+            assert "松刹后、重新给油前" in facts["driving.pattern"]
             entered.set()
             assert release.wait(3)
             return {"topic": "driving", "fact_ids": ["driving.pattern", "driving.practice"],
@@ -659,6 +676,9 @@ def test_delayed_cloud_coaching_binds_question_time_not_completion(change):
         answer = fixtures("llm_engineer").wait_answer(service)["answer"]
         assert answer["origin"] == "deepseek"
         assert answer["stale"] is (change != "fuel_only")
+        if change == "fuel_only":
+            assert "松刹后、重新给油前" in answer["text"]
+            assert "松油到刹车" not in answer["text"]
     finally:
         release.set()
         service.close(wait=True)

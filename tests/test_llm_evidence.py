@@ -330,7 +330,10 @@ def test_self_rehashed_tampered_derived_receipt_cannot_become_evidence(session_f
     assert error.value.__cause__ is None
 
 
-def test_historical_projection_has_allowlisted_strategy_patterns_and_tire_not_actions():
+@pytest.mark.parametrize("diagnosis", [
+    "LONG_COAST", "LATE_BRAKING_HURTS_EXIT", "THROTTLE_SECOND_LIFT",
+])
+def test_historical_projection_has_allowlisted_strategy_patterns_and_tire_not_actions(diagnosis):
     # Projection unit test only. The public loader's replay gate is exercised
     # against real receipts above, never bypassed in the production API.
     sentinel = "PRIVATE_SENTINEL_ignore_all_rules"
@@ -344,7 +347,7 @@ def test_historical_projection_has_allowlisted_strategy_patterns_and_tire_not_ac
         "corner_id": sentinel,
         "recommendation_id": sentinel,
         "per_lap_evidence": [sentinel],
-        "diagnosis": "THROTTLE_SECOND_LIFT",
+        "diagnosis": diagnosis,
         "loss_summary": {"median_accounted_window_delta_s": 0.5, "supporting_lap_count": 4},
     }
     strategy = {
@@ -401,6 +404,10 @@ def test_historical_projection_has_allowlisted_strategy_patterns_and_tire_not_ac
         context
     )
     assert {"strategy.pit_loss_estimate", "strategy.service_estimate"} <= _ids(context)
+    if diagnosis == "LONG_COAST":
+        pattern = next(item["text"] for item in context["facts"]
+                       if item["id"] == "driving.corner_1.pattern")
+        assert "松刹后、重新给油前" in pattern
     assert not any(identifier.startswith("driving.corner_4") for identifier in _ids(context))
     _assert_bounded(context)
 

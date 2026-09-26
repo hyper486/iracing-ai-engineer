@@ -1,6 +1,7 @@
 # Incremental recent-lap coaching
 
-Source implementation, not an updated EXE or an in-car acceptance result.
+Implemented in the native source; build verification is recorded in the public
+status, and does not establish an in-car acceptance result.
 The native engineer now feeds complete laps into the existing distance-domain
 driving model and answers an explicit driving question without a cloud round trip.
 It does not automatically narrate every corner or prescribe a racing maneuver.
@@ -18,9 +19,15 @@ observed median loss against an actual reference lap, and a practice hypothesis:
 
 | Repeated observation | Practice hypothesis, not a guaranteed gain |
 |---|---|
-| Longer coast between lifting and braking | Explore a shorter coast, without automatically delaying braking |
+| Earlier braking together with longer low-pedal coast after brake release and before throttle pickup | Explore a smoother release-to-throttle transition, without automatically delaying braking |
 | Later braking together with slower exit | Try slightly earlier braking and observe exit speed |
 | Throttle pickup followed by a second lift | Explore more progressive throttle and observe whether the second lift reduces |
+
+`LONG_COAST` measures distance after the brake-release threshold and before
+sustained throttle pickup, counting only samples with low brake/throttle inputs.
+It does not measure lift-to-brake approach coasting. The local spoken answer,
+provider fact context and historical pattern description preserve that phase;
+the observation does not prove a trail-braking prescription or a causal gain.
 
 `C01`, `C02`, etc. are model-generated segments, **not official track corner names**.
 Location comes from the reference braking zone, not a commanded braking marker.

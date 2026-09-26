@@ -155,8 +155,10 @@ def _live_situation_facts(result: dict, snapshot: Mapping) -> None:
 
 
 _LIVE_DRIVING_PATTERNS = {
-    "LONG_COAST": ("重复观察到松油至刹车之间滑行较长。",
-                   "练习假设：缩短松油到刹车的空档，不直接要求推迟刹车。"),
+    # coast_distance_m counts low-pedal distance after brake release and before
+    # throttle pickup; it does not measure the lift-to-brake approach interval.
+    "LONG_COAST": ("重复观察到较早刹车，并在松刹后、重新给油前滑行较长。",
+                   "练习假设：缩短松刹到重新给油的空档，观察出弯是否改善，不直接要求推迟刹车。"),
     "LATE_BRAKING_HURTS_EXIT": ("重复观察到较晚刹车与较慢出弯同时出现。",
                                 "练习假设：尝试稍早刹车，观察出弯速度是否改善。"),
     "THROTTLE_SECOND_LIFT": ("重复观察到开油后再次收油。",
@@ -610,7 +612,7 @@ _STRATEGY_GATES = {
 }
 
 _DRIVING_PATTERNS = {
-    "LONG_COAST": "重复证据显示：较长滑行与该区段的时间损失相关。",
+    "LONG_COAST": "重复证据显示：松刹后、重新给油前的较长滑行与该区段的时间损失相关。",
     "LATE_BRAKING_HURTS_EXIT": ("重复证据显示：较晚刹车与较慢的出弯相关。"),
     "THROTTLE_SECOND_LIFT": ("重复证据显示：开油后再次收油与该区段的时间损失相关。"),
 }

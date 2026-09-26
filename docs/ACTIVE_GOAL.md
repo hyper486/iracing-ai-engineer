@@ -99,6 +99,12 @@ LLM use is opt-in, summary-only, for question interpretation and explanation.
 
 ## Delivery progress and next implementation slice
 
+- Implemented in source: corrected the Chinese long-coast explanation to name
+  the measured brake-release-to-throttle-pickup phase, not the earlier lift-to-brake
+  approach. Numeric diagnosis and acceptance gates are unchanged. All 420 targeted
+  checks and 28 rebuilt-EXE frozen checks passed; the full regression suite passed
+  with 3,673 passed and 44 skipped, without hardware/race acceptance.
+
 - Implemented: corrected independent SDK publication/session clock handling and
   gave full-schema recording a separate bounded burst budget. The clock fix
   covers Spotter plus the stint, pit, motion and tire-counter owners. Added exact-bound

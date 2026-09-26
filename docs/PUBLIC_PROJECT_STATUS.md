@@ -2,6 +2,21 @@
 
 Snapshot: 2026-09-26 EDT
 
+## Coasting explanation phase correction
+
+The Chinese `LONG_COAST` explanation now matches the measured post-brake-release,
+pre-throttle-pickup distance. It previously named the lift-to-brake approach
+interval instead. The native short answer, bounded provider context and historical
+pattern description now keep the correct phase and descriptive/practice-only
+limits. Neither numerical thresholds nor lap admission were relaxed.
+Invented pedal traces distinguish the two intervals; native production-owner
+questions and a fake planner check the resulting text without hardware audio
+or real provider access. The targeted group passed 420 tests. The refreshed
+unsigned local EXE passed all 28 frozen checks under a system-only child PATH;
+its actual bytes match its build manifest. The full repository suite passed:
+3,673 passed, 44 skipped. Skipped/data-dependent checks remain unverified;
+neither the new wording nor the frozen checks establish hardware/race acceptance.
+
 ## Live-trial ingestion and pit-timing corrections (local trial build)
 
 Live-path assumptions have been corrected without promoting racing or audio
